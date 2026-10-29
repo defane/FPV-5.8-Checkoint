@@ -131,6 +131,10 @@ jobs:
           # Checkpoint audio helpers (components/audio_player): pitch table, resampler, gain.
           cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/audio_player/include test_audio_resample.c -lm -o /tmp/test_audio_resample
           /tmp/test_audio_resample | tail -1
+          # Checkpoint pass detector (components/pass_detector) on synthetic C/N traces.
+          cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/pass_detector/include test_pass_detector.c \
+            ../components/pass_detector/pass_detector.c -lm -o /tmp/test_pass_detector
+          /tmp/test_pass_detector | tail -1
       - name: Archived kp helper regressions (not firmware)
         shell: bash
         run: |
