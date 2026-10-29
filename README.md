@@ -1,3 +1,14 @@
+> **FPV 5.8 Checkpoint (derivative).** This repository adapts the C5VRX-5
+> receiver firmware from [C5VRX](https://github.com/Twotoz/C5VRX) by Twotoz and
+> the C5VRX contributors (forked at upstream commit `6bc9e4b`) and adds a
+> "drone just passed" checkpoint: a pass detector on the tuned channel's C/N and
+> an I2S coin sound (`components/pass_detector`, `components/audio_player`,
+> `main/checkpoint.c`; see [docs/CHECKPOINT.md](docs/CHECKPOINT.md)). Visit the
+> [official C5VRX website](https://twotoz.github.io/C5VRX/) for the original
+> project and its Discord invite. See the source and license notices
+> (GPL-3.0-only) for the applicable terms; this derivative is not an official
+> C5VRX release. The rest of this README is upstream's.
+
 <div align="center">
   <img src="assets/C5VRX_logo.gif" alt="C5VRX animated logo" width="760" />
 
