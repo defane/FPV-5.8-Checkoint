@@ -1,6 +1,7 @@
 /* C5VRX-5 by Twotoz and the C5VRX contributors: USB serial console.
  * Polled, never paces the realtime path. */
 #include "receiver.h"
+#include "checkpoint.h"
 #include "sense_lab.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -58,6 +59,7 @@ static void status(void)
     profile_print();
     calibration_print();
     transport_print();
+    checkpoint_print();
 }
 
 /* 8190 contiguous IQ bytes as hex lines (tools/capture_iq_snapshot.py). */
@@ -109,6 +111,7 @@ static void help(void)
            "  Z DAC self-test (bench: test pattern, then one flat level per pin for a multimeter),\n"
            "  ! one bench RX sampling-phase slip (T shows phase status),\n"
            "  S + suite key: bench PHY sensitivity lab with the VTX ON (docs/PHY_SENSITIVITY_LAB.md),\n"
+           "  P checkpoint coin at this channel's pitch, p checkpoint sound off/on, K + key checkpoint detector settings,\n"
            "  ` reboot to USB download (flashing)\n");
 }
 
@@ -145,7 +148,13 @@ static void console_task(void *arg)
     for (;;) {
         uint8_t c;
         static int64_t sense_until;   /* S waits 5 s for the suite key */
+        static int64_t checkpoint_until;   /* K: 5 s per settings key, q closes */
         while (xQueueReceive(s_keys, &c, pdMS_TO_TICKS(100)) == pdTRUE) {
+            if (checkpoint_until && esp_timer_get_time() < checkpoint_until) {
+                if (c == 'q') { checkpoint_until = 0; printf("CHECKPOINT settings closed\n"); continue; }
+                if (checkpoint_key((char)c)) { checkpoint_until = esp_timer_get_time() + 5000000; continue; }
+            }
+            checkpoint_until = 0;
             if (sense_until && esp_timer_get_time() < sense_until && sense_lab_suite_valid((char)c)) {
                 sense_until = 0;
                 sense_lab_request((char)c);
@@ -155,6 +164,9 @@ static void console_task(void *arg)
             sense_until = 0;
             switch (c) {
             case 'S': sense_lab_help(); sense_until = esp_timer_get_time() + 5000000; break;
+            case 'K': checkpoint_help(); checkpoint_until = esp_timer_get_time() + 5000000; break;
+            case 'P': checkpoint_play_test(); break;
+            case 'p': checkpoint_toggle_mute(); break;
             case 'T': status(); break;
             case 'I': snapshot(); break;
             case 'F': filter_request(); break;

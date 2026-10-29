@@ -9,3 +9,9 @@
  * not during the boot memory peak. */
 void checkpoint_start(void);
 void checkpoint_print(void);   /* T: CHECKPOINT line */
+
+/* Console (console.c). */
+void checkpoint_play_test(void);     /* P */
+void checkpoint_toggle_mute(void);   /* p */
+void checkpoint_help(void);          /* K */
+bool checkpoint_key(char key);       /* the key after K; false: not a checkpoint key */
