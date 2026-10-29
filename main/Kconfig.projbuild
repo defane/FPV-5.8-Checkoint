@@ -1,0 +1,13 @@
+menu "C5VRX receiver"
+
+    config C5VRX_VIDEO_OUTPUT
+        bool "Drive the 6-bit video DAC (GPIO 23, 24, 11, 12, 8, 9)"
+        default y
+        help
+            Off: the transport (PARLIO TX, BitScrambler) runs unchanged, at the
+            same timing, but its bits reach no pin. No picture, no menu on
+            screen, no DAC test; the IQ capture (MODEM_DIAG -> PARLIO RX) and
+            everything measured from it (C/N, gain, FIELD_DIAG) are unaffected.
+            The six DAC pins become free (checkpoint audio).
+
+endmenu

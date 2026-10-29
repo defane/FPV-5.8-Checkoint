@@ -4,6 +4,7 @@
  * with interrupts off and cleared suc_eof (espressif/esp-idf#19091), so no
  * DMA boundary is a stream boundary; the CPU never paces samples. */
 #include "receiver.h"
+#include "sdkconfig.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stddef.h>
@@ -56,7 +57,13 @@ static const void *tracker_program(void) { return demod_program(s_demod); }
  * plus 200R). Do not change the tested pin order. D10/GPIO10 and D3/GPIO7
  * are reserved for future seventh/eighth branches; keep them disconnected
  * here until a complete wider-DAC implementation is hardware-validated. */
+#if CONFIG_C5VRX_VIDEO_OUTPUT
 static const int s_dac_gpio[8] = {23, 24, 11, 12, 8, 9, -1, -1};
+#else
+/* Checkpoint build without video (CONFIG_C5VRX_VIDEO_OUTPUT=n): the same TX
+ * pipeline and timing, routed to no pin; the DAC pins are free. */
+static const int s_dac_gpio[8] = {-1, -1, -1, -1, -1, -1, -1, -1};
+#endif
 
 DMA_ATTR __attribute__((aligned(64))) uint8_t s_raw_ring[RAW_RING_BYTES];
 static parlio_rx_unit_handle_t s_rx;

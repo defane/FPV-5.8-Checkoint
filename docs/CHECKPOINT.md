@@ -55,6 +55,18 @@ hauteur du canal, `p` coupe ou rétablit le son, `T` affiche la ligne
 porte, mais au-dessus du C/N du même drone ailleurs sur le parcours. Sinon,
 le canal ne se réarme pas entre deux tours.
 
+## Pas de sortie vidéo
+
+Le projet ne produit que du son : `sdkconfig.defaults` met
+`CONFIG_C5VRX_VIDEO_OUTPUT=n` (menu *C5VRX receiver*). Le transport (PARLIO
+TX + BitScrambler) tourne exactement comme avant, mais ses bits ne sortent
+sur aucune broche (`s_dac_gpio` à -1 dans `main/transport.c`). La capture
+I/Q, le C/N, le gain et `FIELD_DIAG` ne changent pas. On perd l'image, le
+menu à l'écran et le test DAC (`Z`). Les six broches du DAC (8, 9, 11, 12,
+23 et 24) ainsi que 7 et 10 deviennent libres pour l'ampli. Après un
+changement de `sdkconfig.defaults`, supprimez `sdkconfig` avant de
+reconstruire.
+
 ## Audio : désactivé par défaut
 
 `CONFIG_AUDIO_PLAYER_ENABLE=n`. Le câblage actuel de l'ampli (BCLK sur
@@ -66,10 +78,12 @@ l'ampli de ces broches.**
 Pour activer l'audio après recâblage : `idf.py menuconfig` → *Checkpoint
 audio (MAX98357A I2S)*. Activez l'option et saisissez les broches. Le
 firmware refuse de démarrer l'audio sur une broche du récepteur et
-l'indique par une ligne `CHECKPOINT audio=refused`. Seules GPIO6 et GPIO15
-sont libres ; GPIO7 et GPIO10 (branches DAC réservées) demandent
-`AUDIO_PLAYER_ALLOW_RESERVED_DAC_PINS`. Ne mettez jamais SD sur GPIO7, qui
-est une broche de *strapping*. Il faut aussi `coin.pcm` (`assets/README.md`).
+l'indique par une ligne `CHECKPOINT audio=refused`. Sans vidéo, les
+broches utilisables sont 6, 15, 8, 9, 11, 12, 23 et 24, ainsi que 7 et 10.
+Par exemple : BCLK sur 23, LRC sur 24, DIN sur 11, SD sur 12, selon ce qui
+est sorti sur la carte. SD est refusé sur GPIO7 (broche de *strapping*).
+Les GPIO I/Q (0, 1, 2, 3, 4, 5, 25 et 27) restent interdits : le C/N est
+calculé à partir de ces échantillons. Il faut aussi `coin.pcm` (`assets/README.md`).
 
 Le canal I2S, et donc un canal GDMA TX, n'existe que pendant les sons.
 `transport.c:quiet_interrupts()` coupe les interruptions des trois canaux
@@ -97,8 +111,8 @@ python tools/flash.py PORT --check
 - Avec `T` : une ligne `CHECKPOINT source=cn …`. Notez `heap_internal`,
   `heap_min` et `heap_largest`, et comparez avec le firmware amont (même
   carte). `heap_min` ne doit pas baisser : la tâche démarre après le boot.
-- Avec `o` puis `o` : le menu s'ouvre et se ferme normalement, sans ligne
-  `menu unavailable`.
+- Le démarrage affiche `CHECKPOINT video_output=off`. Il n'y a pas
+  d'image : c'est normal.
 
 ### 2. Source du signal
 
@@ -159,8 +173,6 @@ B avec `P` toutes les 2 s, A2 sans son. Il les compare ensuite avec
   `coverage_pct_median`, `cn_est_median_db`, `chain_fault_s` et
   `dropouts`. Un écart de B qui sort de l'écart A1/A2 indique un effet de
   l'audio.
-- Regardez aussi l'image pendant B : pas de lignes, de saccades ni de
-  pertes de synchronisation au moment des sons.
 - Recommencez en limite de portée (atténuateur ou distance), là où une
   dégradation serait la plus visible.
 - Faites une fois la même chose avec la trace `K` `l` active : elle

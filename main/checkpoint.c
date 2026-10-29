@@ -10,7 +10,10 @@
  *
  * Console (console.c): P plays the coin at the tuned channel's pitch, p
  * mutes/unmutes, K then one key per change tunes the detector and volume
- * (checkpoint_help). Settings are kept in NVS "checkpoint". */
+ * (checkpoint_help). Settings are kept in NVS "checkpoint".
+ *
+ * Checkpoint builds turn the video output off (CONFIG_C5VRX_VIDEO_OUTPUT=n,
+ * sdkconfig.defaults): the six DAC pins are then free for the amplifier. */
 #include "checkpoint.h"
 #include "receiver.h"
 #include <stdio.h>
@@ -55,6 +58,11 @@ static uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
 #else
 #define RESERVED_DAC_PINS_ALLOWED 0
 #endif
+#if CONFIG_C5VRX_VIDEO_OUTPUT
+#define VIDEO_OUTPUT 1
+#else
+#define VIDEO_OUTPUT 0   /* the DAC pins are routed to nothing (transport.c) */
+#endif
 
 /* The receiver owns these pins (rf.h, transport.c, board); an amplifier on
  * one of them would corrupt the IQ or the video. */
@@ -63,8 +71,8 @@ static const char *pin_owner(int gpio)
     static const int iq[8] = RF_IQ_GPIO_NUMS;
     static const int dac[6] = {23, 24, 11, 12, 8, 9};   /* transport.c s_dac_gpio */
     for (unsigned k = 0; k < 8u; ++k) if (iq[k] == gpio) return "IQ loopback";
-    for (unsigned k = 0; k < 6u; ++k) if (dac[k] == gpio) return "video DAC";
-    if ((gpio == 7 || gpio == 10) && !RESERVED_DAC_PINS_ALLOWED) return "reserved DAC branch";
+    if (VIDEO_OUTPUT) for (unsigned k = 0; k < 6u; ++k) if (dac[k] == gpio) return "video DAC";
+    if (VIDEO_OUTPUT && (gpio == 7 || gpio == 10) && !RESERVED_DAC_PINS_ALLOWED) return "reserved DAC branch";
     if (gpio == 13 || gpio == 14) return "USB";
     if (gpio >= 16 && gpio <= 22) return "flash";
     if (gpio == 26) return "antenna switch";
@@ -83,6 +91,7 @@ static void audio_start(void)
     static const char *const names[4] = {"BCLK", "LRC", "DIN", "SD"};
     for (unsigned k = 0; k < 4u; ++k) {
         const char *owner = pin_owner(pins[k]);
+        if (!owner && k == 3u && pins[k] == 7) owner = "strapping pin (the amplifier pulls SD low at boot)";
         for (unsigned j = 0; !owner && j < k; ++j) if (pins[j] >= 0 && pins[j] == pins[k]) owner = names[j];
         if (owner) {
             printf("CHECKPOINT audio=refused pin=%s gpio=%d owner=\"%s\" (menuconfig: Checkpoint audio)\n", names[k],
@@ -194,6 +203,9 @@ void checkpoint_start(void)
         return;
     }
     s_cp = cp;
+#if !CONFIG_C5VRX_VIDEO_OUTPUT
+    printf("CHECKPOINT video_output=off (CONFIG_C5VRX_VIDEO_OUTPUT=n): sound only, DAC pins free\n");
+#endif
 }
 
 void checkpoint_print(void)

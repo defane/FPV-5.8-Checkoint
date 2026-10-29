@@ -2,7 +2,9 @@
 
 A C5VRX-5 derivative (upstream: https://github.com/Twotoz/C5VRX, remote
 `upstream`) on a **Waveshare ESP32-C5-Zero** that adds a "drone just passed"
-detector and a coin sound. Read `AGENTS.md` first: it is upstream's agent
+detector and a coin sound. **The only output is the sound**: no video
+(`CONFIG_C5VRX_VIDEO_OUTPUT=n` in `sdkconfig.defaults`; the transport runs
+unchanged but `s_dac_gpio` routes it to no pin). Read `AGENTS.md` first: it is upstream's agent
 policy (attribution, realtime invariants, sources) and applies here too.
 Full feature notes and the bench procedure: `docs/CHECKPOINT.md`.
 
@@ -24,8 +26,9 @@ Full feature notes and the bench procedure: `docs/CHECKPOINT.md`.
 MAX98357A I2S amplifier, 5 V supply, 4 Ω speaker. As wired today:
 GPIO3 → BCLK, GPIO4 → LRC (WS), GPIO5 → DIN, GPIO1 → SD (HIGH = on).
 **This conflicts with the IQ loopback** (`RF_IQ_GPIO_NUMS = {1, 0, 25, 2,
-27, 5, 3, 4}`, `main/rf.h`, driven at 40 MS/s): the amplifier must move
-before audio is enabled. Audio is off by default
+27, 5, 3, 4}`, `main/rf.h`, driven at 40 MS/s, needed for the C/N even
+without video): the amplifier must move, e.g. to the freed DAC pins
+(BCLK 23, LRC 24, DIN 11, SD 12), before audio is enabled. Audio is off by default
 (`CONFIG_AUDIO_PLAYER_ENABLE=n`); pins are set in menuconfig
 ("Checkpoint audio") and checked at boot by `main/checkpoint.c:pin_owner()`.
 
@@ -34,13 +37,13 @@ before audio is enabled. Audio is off by default
 | GPIO | Owner | Notes |
 | --- | --- | --- |
 | 0, 1, 2, 3, 4, 5, 25, 27 | IQ loopback (MODEM_DIAG → PARLIO RX) | forbidden; GPIO-matrix loopback, no wiring |
-| 8, 9, 11, 12, 23, 24 | 6-bit video DAC (PARLIO TX) | forbidden |
-| 7, 10 | reserved 7th/8th DAC branches | forbidden by default; 7 is a strapping pin |
+| 8, 9, 11, 12, 23, 24 | 6-bit video DAC (PARLIO TX) | **free with video off** (default here) |
+| 7, 10 | reserved 7th/8th DAC branches | free with video off; 7 is a strapping pin (never SD) |
 | 13, 14 | USB-Serial-JTAG (console, flashing) | forbidden |
 | 16–22 | SPI flash | forbidden |
 | 26 | antenna switch (C5-Zero) | forbidden |
 | 28 | BOOT button | input, strapping |
-| 6, 15 | free | only two: one short of BCLK + LRC + DIN |
+| 6, 15 | free | |
 
 GDMA: 3 AHB pairs. C5VRX uses 1 RX (PARLIO RX) and 1 TX (PARLIO TX; the TX
 BitScrambler is inline, no channel of its own). I2S gets a free TX channel,
