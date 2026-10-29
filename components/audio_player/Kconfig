@@ -12,6 +12,16 @@ menu "Checkpoint audio (MAX98357A I2S)"
             of them. Needs components/audio_player/sounds/coin.pcm
             (tools/coin_sound.py).
 
+    config AUDIO_PLAYER_ALLOW_RESERVED_DAC_PINS
+        bool "Allow GPIO 7 and 10 (reserved seventh/eighth DAC branches)"
+        depends on AUDIO_PLAYER_ENABLE
+        default n
+        help
+            The six-bit firmware does not drive GPIO 7 and 10; C5VRX keeps them
+            for future DAC branches. Only GPIO 6 and 15 are otherwise free, one
+            pin short of BCLK + LRC + DIN. GPIO 7 is a strapping pin: never put
+            SD (amplifier pull-down) on it.
+
     config AUDIO_PLAYER_BCLK_GPIO
         int "BCLK GPIO"
         depends on AUDIO_PLAYER_ENABLE

@@ -45,7 +45,6 @@ typedef struct { uint8_t sound; uint32_t pitch_q16; } request_t;
 static audio_player_config_t s_cfg;
 static QueueHandle_t s_queue;
 static i2s_chan_handle_t s_tx;
-static int16_t s_chunk[CHUNK];
 static const int16_t s_silence[DMA_DESCS * DMA_FRAMES];   /* pushes the last sound out of the DMA ring */
 
 static void amp_enable(bool on)
@@ -104,10 +103,11 @@ static bool play(const request_t *r)
 {
     const uint8_t *pcm = coin_pcm_start;
     const uint32_t samples = (uint32_t)(coin_pcm_end - coin_pcm_start) / 2u;
+    int16_t chunk[CHUNK];   /* on the task stack: no static RAM in the boot peak */
     audio_voice_t v;
     audio_voice_start(&v, pcm, samples, r->pitch_q16, audio_gain_q15(s_volume));
-    for (size_t n; (n = audio_voice_render(&v, s_chunk, CHUNK)) != 0;)
-        if (!write_all(s_chunk, n * sizeof(s_chunk[0]))) return false;
+    for (size_t n; (n = audio_voice_render(&v, chunk, CHUNK)) != 0;)
+        if (!write_all(chunk, n * sizeof(chunk[0]))) return false;
     return true;
 }
 

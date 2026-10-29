@@ -1,6 +1,7 @@
 /* C5VRX-5 by Twotoz and the C5VRX contributors: ESP32-C5 analog 5.8 GHz FPV
  * receiver. https://github.com/Twotoz/C5VRX - https://twotoz.github.io/C5VRX/ */
 #include "receiver.h"
+#include "checkpoint.h"
 #include <fcntl.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -105,6 +106,7 @@ void app_main(void)
     control_start();
     if (splash) splash_wait_gain(splash_t0, splash_holds, ready_deadline);
     menu_splash_end();
+    checkpoint_start();   /* after the splash: its memory is not part of the boot peak */
     s_boot_stage = "ready";
     s_boot_ready_ms = (esp_timer_get_time() - app_t0) / 1000;
     printf("BOOT_TIMING ready_ms=%lld target_ms=10000\n", s_boot_ready_ms);

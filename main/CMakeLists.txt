@@ -4,10 +4,12 @@ idf_component_register(
         "control.c" "calibration.c" "calibration_sphase.c" "calibration_filter.c" "calibration_dc.c"
         "calibration_bench.c" "menu.c" "menu_ui.c" "menu_raster.c" "analog_video_detect.c"
         "experimental.c" "experimental_phy.c" "settings.c" "console.c" "profile.c" "diag.c" "flightlog.c" "sense_lab.c"
+        "checkpoint.c"
     INCLUDE_DIRS "."
     REQUIRES esp_wifi esp_phy nvs_flash esp_event esp_netif esp_driver_parlio
              esp_driver_gpio esp_driver_bitscrambler esp_driver_usb_serial_jtag
-             esp_driver_tsens esp_timer esp_mm hal heap esp_hw_support esp_app_format esp_partition)
+             esp_driver_tsens esp_timer esp_mm hal heap esp_hw_support esp_app_format esp_partition
+             pass_detector audio_player)
 
 target_bitscrambler_add_src("p64.bsasm")
 target_bitscrambler_add_src("u85q.bsasm")

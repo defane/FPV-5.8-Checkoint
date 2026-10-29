@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'main/**'
+      - 'components/**'
       - 'test/**'
       - 'research/**'
       - 'tools/**'
@@ -19,6 +20,7 @@ on:
     types: [opened, synchronize, reopened]
     paths:
       - 'main/**'
+      - 'components/**'
       - 'test/**'
       - 'research/**'
       - 'tools/**'
