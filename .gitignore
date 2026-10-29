@@ -40,3 +40,6 @@ research/data/p64_lowcn*/*.bs
 .opencode/
 node_modules/
 .DS_Store
+
+# Checkpoint sound source (Pixabay, see assets/README.md): only the PCM is versioned.
+assets/coin_source.mp3
