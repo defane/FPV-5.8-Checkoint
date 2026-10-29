@@ -5,6 +5,8 @@ menu "Checkpoint audio (MAX98357A I2S)"
         default n
         help
             Off by default: the amplifier pins must not be receiver pins.
+            Default pins (checkpoint wiring, video output off): BCLK GPIO9,
+            LRC GPIO8, DIN GPIO7, SD GPIO10.
             GPIO 0, 1, 2, 3, 4, 5, 25 and 27 carry the MODEM_DIAG -> PARLIO IQ
             loopback, 8, 9, 11, 12, 23 and 24 the video DAC, 7 and 10 are
             reserved DAC branches, 13/14 USB, 16-22 flash, 26 the antenna
@@ -26,24 +28,24 @@ menu "Checkpoint audio (MAX98357A I2S)"
         int "BCLK GPIO"
         depends on AUDIO_PLAYER_ENABLE
         range -1 28
-        default -1
+        default 9
 
     config AUDIO_PLAYER_WS_GPIO
         int "LRC (WS) GPIO"
         depends on AUDIO_PLAYER_ENABLE
         range -1 28
-        default -1
+        default 8
 
     config AUDIO_PLAYER_DOUT_GPIO
         int "DIN (data out) GPIO"
         depends on AUDIO_PLAYER_ENABLE
         range -1 28
-        default -1
+        default 7
 
     config AUDIO_PLAYER_SD_GPIO
         int "SD (amplifier enable) GPIO, -1 if SD is wired high"
         depends on AUDIO_PLAYER_ENABLE
         range -1 28
-        default -1
+        default 10
 
 endmenu

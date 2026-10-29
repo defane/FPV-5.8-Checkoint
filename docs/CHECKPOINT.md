@@ -80,8 +80,8 @@ audio (MAX98357A I2S)*. Activez l'option et saisissez les broches. Le
 firmware refuse de démarrer l'audio sur une broche du récepteur et
 l'indique par une ligne `CHECKPOINT audio=refused`. Sans vidéo, les
 broches utilisables sont 6, 15, 8, 9, 11, 12, 23 et 24, ainsi que 7 et 10.
-Par exemple : BCLK sur 23, LRC sur 24, DIN sur 11, SD sur 12, selon ce qui
-est sorti sur la carte. SD est refusé sur GPIO7 (broche de *strapping*).
+Câblage retenu (valeurs par défaut du Kconfig) : **BCLK sur GPIO9, LRC sur
+GPIO8, DIN sur GPIO7, SD sur GPIO10**. SD est refusé sur GPIO7 (broche de *strapping*).
 Les GPIO I/Q (0, 1, 2, 3, 4, 5, 25 et 27) restent interdits : le C/N est
 calculé à partir de ces échantillons. Il faut aussi `coin.pcm` (`assets/README.md`).
 

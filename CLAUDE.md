@@ -23,14 +23,21 @@ Full feature notes and the bench procedure: `docs/CHECKPOINT.md`.
 
 ## Wiring
 
-MAX98357A I2S amplifier, 5 V supply, 4 Ω speaker. As wired today:
-GPIO3 → BCLK, GPIO4 → LRC (WS), GPIO5 → DIN, GPIO1 → SD (HIGH = on).
-**This conflicts with the IQ loopback** (`RF_IQ_GPIO_NUMS = {1, 0, 25, 2,
-27, 5, 3, 4}`, `main/rf.h`, driven at 40 MS/s, needed for the C/N even
-without video): the amplifier must move, e.g. to the freed DAC pins
-(BCLK 23, LRC 24, DIN 11, SD 12), before audio is enabled. Audio is off by default
-(`CONFIG_AUDIO_PLAYER_ENABLE=n`); pins are set in menuconfig
-("Checkpoint audio") and checked at boot by `main/checkpoint.c:pin_owner()`.
+MAX98357A I2S amplifier, 5 V supply, 4 Ω speaker, on the pins freed by
+the video output (Kconfig defaults):
+
+| Amplifier | GPIO |
+| --- | --- |
+| BCLK | 9 |
+| LRC (WS) | 8 |
+| DIN | 7 (strapping pin: only a high-impedance input on it, never SD) |
+| SD (HIGH = on, LOW between sounds) | 10 |
+
+The first wiring (GPIO3 BCLK, 4 LRC, 5 DIN, 1 SD) sat on the IQ loopback
+(`RF_IQ_GPIO_NUMS = {1, 0, 25, 2, 27, 5, 3, 4}`, `main/rf.h`, driven at
+40 MS/s and needed for the C/N even without video) and was abandoned.
+Audio is off until `coin.pcm` exists (`CONFIG_AUDIO_PLAYER_ENABLE=n`);
+pins are checked at boot by `main/checkpoint.c:pin_owner()`.
 
 ## GPIO map
 
