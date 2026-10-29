@@ -34,3 +34,9 @@ research/data/board_*
 # Low-C/N research keeps its compressed trace and reproducible assembly.
 research/data/p64_lowcn*/trials.jsonl
 research/data/p64_lowcn*/*.bs
+
+# Agent local state
+.claude/settings.local.json
+.opencode/
+node_modules/
+.DS_Store

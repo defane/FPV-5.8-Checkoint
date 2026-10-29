@@ -1,0 +1,14 @@
+{
+  "name": "${localWorkspaceFolderBasename}",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:22-bookworm",
+  "features": {
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+  "postCreateCommand": "npm install -g @anthropic-ai/claude-code opencode-ai",
+  "remoteUser": "node",
+  "customizations": {
+    "vscode": {
+      "extensions": []
+    }
+  }
+}
