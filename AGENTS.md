@@ -86,8 +86,12 @@ permitted GPL reuse. Credit external sources used by C5VRX with the same care.
   upstream (RF/transport/gain/AGC/control/calibration/console).
 - `components/checkpoint/`, `components/pass_detector/`,
   `components/audio_player/`, `components/link_proto/` — the platform's own
-  code (pass detection, coin sound, the C5<->C3 UART protocol).
-- `firmware/c5/` and `firmware/c3/` — the two ESP32 applications.
+  code (pass detection, coin sound, the C5<->bridge UART protocol).
+- `components/fleet_proto/`, `components/race_timing/`, `components/espnow_link/`
+  — the race-timing fleet: the C6<->C3 ESP-NOW protocol, the lap/sector engine,
+  and the ESP-NOW transport.
+- `firmware/c5/`, `firmware/c3/` (node bridge) and `firmware/c6/` (ESP32-C6
+  race-timing master) — the ESP32 applications.
 - `test/` host tests, `tools/` console/log/build helpers, `docs/` the
   platform's feature notes (`docs/CHECKPOINT.md`) and wiring.
 

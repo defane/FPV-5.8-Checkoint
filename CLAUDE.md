@@ -11,6 +11,14 @@ https://github.com/Twotoz/C5VRX, remote `upstream`):
 - **ESP32-C3** (`firmware/c3`): a Wi-Fi SoftAP + web UI that tunes the
   detector and shows its live C/N, stats and pass events, over a UART link.
 
+It also scales to a **race-timing fleet** (`docs/CHECKPOINT.md`): an **ESP32-C6
+master** (`firmware/c6`, UART to its own C5 + the speaker + a Wi-Fi AP admin
+web) aggregates passes from remote **C3 nodes** over **ESP-NOW**, each node a
+gate wired to a C5. The C6 orders gates, pairs nodes, assigns channels (retune
+via `SET_CHANNEL`), times laps/sectors per channel, and plays the central sound.
+A C3 that cannot reach the C6 at boot falls back to a degraded local AP+web
+(band selection + results).
+
 C5VRX is consumed as a **component**, never edited in place to add a feature:
 `components/c5vrx_rx` is the upstream receive engine (RF/transport/gain/agc/
 control/calibration/console), re-packaged unchanged. Read `AGENTS.md` first:
@@ -25,10 +33,14 @@ components/
   c5vrx_rx/      upstream C5VRX receive engine (consumable; INCLUDE_DIRS ".")
   checkpoint/    our glue: detector + audio + NVS + the C5<->C3 UART link
   pass_detector/ pure-C pass detector (host-tested)
-  audio_player/  I2S coin-sound player
-  link_proto/    pure-C C5<->C3 UART protocol (host-tested)
-firmware/c5/     ESP32-C5 app (main.c = app_main consuming the components)
-firmware/c3/     ESP32-C3 config/telemetry bridge (UART + Wi-Fi + web)
+  audio_player/  I2S coin-sound player (the C6 speaker in a fleet)
+  link_proto/    pure-C C5<->bridge UART protocol (host-tested; incl. SET_CHANNEL)
+  fleet_proto/   pure-C C6<->C3 ESP-NOW protocol (host-tested)
+  race_timing/   pure-C lap/sector timing engine (host-tested)
+  espnow_link/   ESP-NOW transport (C6 + C3) carrying fleet_proto
+firmware/c5/     ESP32-C5 app (RF + detection; sound local, or report-only in a fleet)
+firmware/c3/     ESP32-C3 node bridge (UART + ESP-NOW relay, degraded Wi-Fi web)
+firmware/c6/     ESP32-C6 master (UART + ESP-NOW hub + speaker + admin web + timing)
 ```
 
 The console/boot calls into checkpoint are kept without a circular dependency
@@ -124,16 +136,21 @@ change).
 ```sh
 . ~/esp/esp-idf-v6.0.2/export.sh
 ( cd firmware/c5 && idf.py build )    # C5, must stay at 0 warnings
-( cd firmware/c3 && idf.py build )    # C3 bridge
+( cd firmware/c3 && idf.py build )    # C3 node bridge
+( cd firmware/c6 && idf.py build )    # C6 master (esp32c6)
 cd test     # host tests (engine headers now at ../components/c5vrx_rx)
 cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/pass_detector/include \
   test_pass_detector.c ../components/pass_detector/pass_detector.c -lm -o /tmp/t && /tmp/t
 cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/audio_player/include test_audio_resample.c -lm -o /tmp/t && /tmp/t
 cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/link_proto/include \
   test_link_proto.c ../components/link_proto/link_proto.c -o /tmp/t && /tmp/t
+cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/fleet_proto/include -I../components/link_proto/include \
+  test_fleet_proto.c ../components/fleet_proto/fleet_proto.c ../components/link_proto/link_proto.c -o /tmp/t && /tmp/t
+cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/race_timing/include \
+  test_race_timing.c ../components/race_timing/race_timing.c -o /tmp/t && /tmp/t
 ```
 
-CI (`.github/workflows/c5vrx5.yml`) builds both firmwares and runs the host
+CI (`.github/workflows/c5vrx5.yml`) builds all three firmwares and runs the host
 tests (the upstream engine tests compile against `components/c5vrx_rx`). Sound:
 `python3 tools/coin_sound.py` (needs `assets/coin_source.mp3`, not versioned).
 `test/test_manual_calibration_runtime.py` already fails upstream with recent

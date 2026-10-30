@@ -123,6 +123,15 @@ jobs:
           cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/link_proto/include test_link_proto.c \
             ../components/link_proto/link_proto.c -o /tmp/test_link_proto
           /tmp/test_link_proto | tail -1
+          # C6<->C3 ESP-NOW protocol (components/fleet_proto).
+          cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/fleet_proto/include \
+            -I../components/link_proto/include test_fleet_proto.c \
+            ../components/fleet_proto/fleet_proto.c ../components/link_proto/link_proto.c -o /tmp/test_fleet_proto
+          /tmp/test_fleet_proto | tail -1
+          # Race timing engine (components/race_timing): laps/sectors per channel.
+          cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/race_timing/include test_race_timing.c \
+            ../components/race_timing/race_timing.c -o /tmp/test_race_timing
+          /tmp/test_race_timing | tail -1
       - name: Diagnostic log semantics
         run: |
           python3 test/test_field_diag_compare.py
@@ -160,6 +169,12 @@ jobs:
         run: |
           . "$IDF_PATH/export.sh"
           cd firmware/c3
+          idf.py build
+      - name: Build Checkpoint C6 master
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh"
+          cd firmware/c6
           idf.py build
       - name: Package firmware for web flashing
         shell: bash
