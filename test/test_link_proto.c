@@ -106,6 +106,14 @@ int main(void) {
         CHECK(ok, "stats roundtrip (negative cn preserved)");
     }
 
+    /* SET_CHANNEL roundtrip. */
+    {
+        size_t n = lp_encode_set_channel(buf, sizeof buf, 27);
+        int g = run(buf, n, got, 4);
+        CHECK(g == 1 && got[0].type == LP_MSG_SET_CHANNEL && got[0].channel_index == 27,
+              "set_channel roundtrip");
+    }
+
     /* Encoding into a buffer one byte too small fails cleanly. */
     {
         lp_config_t c = sample_config();

@@ -30,6 +30,7 @@ typedef enum {
     LP_MSG_CONFIG_STATE = 4, /* C5 -> C3: current configuration (answer/echo) */
     LP_MSG_EVENT_PASS = 5,   /* C5 -> C3: a drone passed on a channel */
     LP_MSG_STATS = 6,        /* C5 -> C3: periodic counters + live C/N */
+    LP_MSG_SET_CHANNEL = 7,  /* C3/C6 -> C5: retune to this RF channel index */
 } lp_type_t;
 
 typedef enum { LP_ROLE_C5 = 1, LP_ROLE_C3 = 2 } lp_role_t;
@@ -70,6 +71,7 @@ typedef struct {
         lp_event_t  event;      /* EVENT_PASS */
         lp_stats_t  stats;      /* STATS */
         uint8_t     role;       /* HELLO */
+        uint8_t     channel_index; /* SET_CHANNEL: RF channel index for rf_set_channel */
     };
 } lp_msg_t;
 
@@ -80,6 +82,7 @@ size_t lp_encode_config(uint8_t *buf, size_t cap, lp_type_t type, const lp_confi
 size_t lp_encode_config_req(uint8_t *buf, size_t cap);
 size_t lp_encode_event(uint8_t *buf, size_t cap, const lp_event_t *e);
 size_t lp_encode_stats(uint8_t *buf, size_t cap, const lp_stats_t *s);
+size_t lp_encode_set_channel(uint8_t *buf, size_t cap, uint8_t rf_index);
 
 /* Streaming decoder: feed one received byte at a time. Returns true and fills
  * *out when a complete, CRC-valid frame ends on this byte. It buffers at most

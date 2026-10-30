@@ -41,6 +41,7 @@ uint16_t lp_crc16(const uint8_t *data, size_t len) {
 #define LP_LEN_CONFIG  30u
 #define LP_LEN_EVENT   9u
 #define LP_LEN_STATS   22u
+#define LP_LEN_SETCH   1u
 
 static void put_config(uint8_t *p, const lp_config_t *c) {
     put_i32(p + 0,  c->alpha_milli);
@@ -120,6 +121,10 @@ size_t lp_encode_stats(uint8_t *buf, size_t cap, const lp_stats_t *s) {
     return frame(buf, cap, LP_MSG_STATS, pl, LP_LEN_STATS);
 }
 
+size_t lp_encode_set_channel(uint8_t *buf, size_t cap, uint8_t rf_index) {
+    return frame(buf, cap, LP_MSG_SET_CHANNEL, &rf_index, LP_LEN_SETCH);
+}
+
 /* ---- streaming decoder ----
  *
  * Bytes accumulate in d->buf; after each byte we try to parse a frame anchored
@@ -170,6 +175,11 @@ static bool decode_payload(uint8_t type, uint8_t len, const uint8_t *p,
         out->stats.cn_x10  = get_i32(p + 16);
         out->stats.channel = p[20];
         out->stats.state   = p[21];
+        return true;
+    case LP_MSG_SET_CHANNEL:
+        if (len != LP_LEN_SETCH) return false;
+        out->type = LP_MSG_SET_CHANNEL;
+        out->channel_index = p[0];
         return true;
     default:
         return false; /* unknown type: drop */

@@ -16,6 +16,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
+#include "rf.h"   /* rf_set_channel: operator-approved retune on a link command */
 
 #define LINK_UART       ((uart_port_t)CONFIG_CHECKPOINT_LINK_UART_NUM)
 #define LINK_PRIORITY   1u      /* below every receiver task, like the detector */
@@ -55,6 +56,9 @@ static void handle_msg(const lp_msg_t *m) {
     case LP_MSG_CONFIG_REQ:
     case LP_MSG_HELLO:          /* the C3 just connected: sync it */
         send_config_state();
+        break;
+    case LP_MSG_SET_CHANNEL:    /* the master assigns this gate's channel: retune */
+        (void)rf_set_channel(m->channel_index);
         break;
     default:
         break;                  /* C5 does not consume STATE/EVENT/STATS */
