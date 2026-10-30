@@ -1,8 +1,9 @@
 # FPV 5.8 Checkpoint
 
-A two-ESP **"a drone just passed"** platform: it detects a drone pass on the
-tuned 5.8 GHz FPV channel and plays a coin sound, with a phone-friendly web UI
-to tune it and watch events.
+A **"a drone just passed"** platform: it detects a drone pass on the tuned
+5.8 GHz FPV channel and plays a coin sound, with a phone-friendly web UI to tune
+it and watch events. It runs as a two-ESP checkpoint (C5 + C3) and scales to a
+C6-mastered, multi-gate race-timing fleet.
 
 > **Derivative.** This project adapts the receive engine of
 > [C5VRX](https://github.com/Twotoz/C5VRX) — **C5VRX-5, by Twotoz and the C5VRX

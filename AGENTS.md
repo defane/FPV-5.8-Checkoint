@@ -354,8 +354,8 @@ When proposing a new CPU, source, DMA, DSP or DAC route:
 ### Workflows
 
 - `.github/workflows/c5vrx5.yml` ("C5VRX-5 Build") is the firmware workflow.
-  It runs the host tests, builds firmware/c5 and
-  firmware/c3 with ESP-IDF v6.0.2 and publishes:
+  It runs the host tests, builds firmware/c5, firmware/c3 and
+  firmware/c6 with ESP-IDF v6.0.2 and publishes (the C5 is the released image):
   - `c5vrx5-v5.0.<run number>` for a firmware change on `main` (immutable;
     never replace published version assets), marked as the repository's
     Latest release (an unchanged-input main run re-marks the newest one);

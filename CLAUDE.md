@@ -1,15 +1,18 @@
 # FPV 5.8 Checkpoint
 
-A two-ESP "drone just passed" platform built on C5VRX-5 (upstream:
-https://github.com/Twotoz/C5VRX, remote `upstream`):
+A "drone just passed" platform built on C5VRX-5 (upstream:
+https://github.com/Twotoz/C5VRX, remote `upstream`): a two-ESP checkpoint
+(C5 + C3) that scales to a C6-mastered race-timing fleet (see Fleet below).
 
 - **ESP32-C5** (Waveshare ESP32-C5-Zero, `firmware/c5`): the full C5VRX RF
   receive chain → pass detection on the tuned channel's C/N → a coin sound.
   **The only local output is the sound**: no video
   (`CONFIG_C5VRX_VIDEO_OUTPUT=n` in `firmware/c5/sdkconfig.defaults`; the
   transport runs unchanged but `s_dac_gpio` routes it to no pin).
-- **ESP32-C3** (`firmware/c3`): a Wi-Fi SoftAP + web UI that tunes the
-  detector and shows its live C/N, stats and pass events, over a UART link.
+- **ESP32-C3** (`firmware/c3`): the bridge. UART to the C5; when a C6 master is
+  reachable it relays over ESP-NOW (headless), otherwise it falls back to a
+  local Wi-Fi SoftAP + web UI that tunes the detector and shows its live C/N,
+  stats and passes.
 
 It also scales to a **race-timing fleet** (`docs/CHECKPOINT.md`): an **ESP32-C6
 master** (`firmware/c6`, UART to its own C5 + the speaker + a Wi-Fi AP admin
@@ -130,6 +133,39 @@ settings are editable from the C3 web UI, which pushes them over the link
 (`CONFIG_SET`) and the C5 echoes the validated result (`CONFIG_STATE`). Saved
 in NVS `checkpoint` (`checkpoint_prefs_t`, bump `PREFS_VERSION` on layout
 change).
+
+## Fleet (C6 master + C3 nodes)
+
+Race timing across ordered gates (each gate = a C5). The **C6** (`firmware/c6`,
+esp32c6) is UART-wired to its own C5 (gate 0) and aggregates remote gates over
+**ESP-NOW**; a remote gate is a C5 UART-wired to a **C3** (`firmware/c3`). Global
+schema: `docs/fleet.svg`.
+
+- **Protocols**: UART `components/link_proto` (C5↔bridge: passes, config, and
+  `LP_MSG_SET_CHANNEL` which makes the C5 call `rf_set_channel()` — the only
+  place checkpoint commands a retune rather than reading); ESP-NOW
+  `components/fleet_proto` (pairing, time beacons, `CONFIG`, `GATE_PASS`,
+  `NODE_STATUS`) over `components/espnow_link`; `components/race_timing`
+  (lap/sector per channel, host-tested).
+- **Pinout** (Kconfig defaults; crossed UART, common ground):
+
+  | Board | UART TX / RX | Amplifier (BCLK/LRC/DIN/SD) |
+  | --- | --- | --- |
+  | C5 (gate) | 6 / 15 → bridge | 9/8/7/10 (local sound only; off in a fleet) |
+  | C3 (node) | 5 / 4 → C5 | — |
+  | C6 (master) | 4 / 5 → local C5 | 18/19/20/21 → 4 Ω speaker |
+
+  C6 amp/UART pins are placeholders — check against the C6 board's strapping
+  pins. The C6 AP, the C3 APs and ESP-NOW share one Wi-Fi channel
+  (`CONFIG_C6_AP_CHANNEL` / `CONFIG_C3_AP_CHANNEL`).
+- **Sound** is centralized on the C6 (remote C5s report only).
+- **Web roles** (C6 admin web and the C3 degraded web): a **spectator** reads
+  standings/status with no login; **admin** actions need a login
+  (`CONFIG_*_ADMIN_USER`/`_PASSWORD`, HTTP Basic, checked server-side on every
+  mutation endpoint; empty password disables auth).
+- **Degraded C3**: if the C6 is not reached within `CONFIG_C3_FLEET_TIMEOUT_MS`
+  at boot, the C3 serves its own AP + web (band selection → `SET_CHANNEL`,
+  results) instead of relaying.
 
 ## Build and tests
 
