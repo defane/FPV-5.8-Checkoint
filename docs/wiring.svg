@@ -1,0 +1,106 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 680" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif">
+  <defs>
+    <marker id="aBlue" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#2563eb"/></marker>
+    <marker id="aTeal" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#0d9488"/></marker>
+    <marker id="aGreen" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#16a34a"/></marker>
+    <marker id="aRed" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#dc2626"/></marker>
+    <marker id="aViolet" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#7c3aed"/></marker>
+  </defs>
+
+  <rect x="0" y="0" width="1240" height="680" fill="#ffffff"/>
+  <text x="40" y="44" font-size="26" font-weight="700" fill="#0f172a">FPV 5.8 Checkpoint — wiring</text>
+  <text x="40" y="70" font-size="14" fill="#64748b">ESP32-C3 (config/telemetry) — UART — ESP32-C5 (RX + detection) — I2S — MAX98357A — speaker</text>
+
+  <!-- ===================== MODULE BOXES ===================== -->
+  <!-- ESP32-C3 -->
+  <rect x="60" y="200" width="210" height="250" rx="12" fill="#f8fafc" stroke="#334155" stroke-width="2"/>
+  <text x="165" y="232" font-size="17" font-weight="700" fill="#0f172a" text-anchor="middle">ESP32-C3</text>
+  <text x="165" y="252" font-size="12" fill="#64748b" text-anchor="middle">Wi-Fi AP + web</text>
+  <text x="165" y="268" font-size="12" fill="#64748b" text-anchor="middle">config / telemetry</text>
+
+  <!-- ESP32-C5 -->
+  <rect x="450" y="130" width="280" height="420" rx="12" fill="#f8fafc" stroke="#334155" stroke-width="2"/>
+  <text x="590" y="162" font-size="17" font-weight="700" fill="#0f172a" text-anchor="middle">ESP32-C5 (Zero)</text>
+  <text x="590" y="182" font-size="12" fill="#64748b" text-anchor="middle">RF receive + pass detect</text>
+  <text x="590" y="198" font-size="12" fill="#64748b" text-anchor="middle">+ coin sound</text>
+
+  <!-- MAX98357A -->
+  <rect x="860" y="190" width="200" height="320" rx="12" fill="#f8fafc" stroke="#334155" stroke-width="2"/>
+  <text x="960" y="222" font-size="16" font-weight="700" fill="#0f172a" text-anchor="middle">MAX98357A</text>
+  <text x="960" y="240" font-size="12" fill="#64748b" text-anchor="middle">I2S class-D amp</text>
+
+  <!-- Speaker -->
+  <path d="M1120,300 h22 l26,-22 v104 l-26,-22 h-22 Z" fill="#ede9fe" stroke="#7c3aed" stroke-width="2"/>
+  <text x="1150" y="400" font-size="13" font-weight="600" fill="#7c3aed" text-anchor="middle">4 Ω</text>
+  <text x="1150" y="416" font-size="12" fill="#64748b" text-anchor="middle">speaker</text>
+
+  <!-- ===================== UART LINK (C3 <-> C5) ===================== -->
+  <!-- C3 TX GPIO5 -> C5 RX GPIO15 -->
+  <line x1="270" y1="300" x2="450" y2="300" stroke="#16a34a" stroke-width="2.5" marker-end="url(#aGreen)"/>
+  <!-- C5 TX GPIO6 -> C3 RX GPIO4 -->
+  <line x1="450" y1="350" x2="270" y2="350" stroke="#16a34a" stroke-width="2.5" marker-end="url(#aGreen)"/>
+  <!-- common GND C3<->C5 -->
+  <line x1="270" y1="410" x2="450" y2="410" stroke="#475569" stroke-width="2.5" stroke-dasharray="6 4"/>
+
+  <text x="360" y="292" font-size="12" fill="#16a34a" text-anchor="middle" font-weight="600">UART 115200 8N1</text>
+  <text x="360" y="402" font-size="11" fill="#475569" text-anchor="middle">GND (common)</text>
+
+  <!-- C3 pin labels (inside, right edge x=270) -->
+  <circle cx="270" cy="300" r="4" fill="#16a34a"/><text x="262" y="296" font-size="12" font-family="ui-monospace, monospace" fill="#0f172a" text-anchor="end">GPIO5 TX</text>
+  <circle cx="270" cy="350" r="4" fill="#16a34a"/><text x="262" y="346" font-size="12" font-family="ui-monospace, monospace" fill="#0f172a" text-anchor="end">GPIO4 RX</text>
+  <circle cx="270" cy="410" r="4" fill="#475569"/><text x="262" y="406" font-size="12" font-family="ui-monospace, monospace" fill="#0f172a" text-anchor="end">GND</text>
+
+  <!-- C5 left pin labels (inside, left edge x=450) -->
+  <circle cx="450" cy="300" r="4" fill="#16a34a"/><text x="458" y="296" font-size="12" font-family="ui-monospace, monospace" fill="#0f172a" text-anchor="start">GPIO15 RX</text>
+  <circle cx="450" cy="350" r="4" fill="#16a34a"/><text x="458" y="346" font-size="12" font-family="ui-monospace, monospace" fill="#0f172a" text-anchor="start">GPIO6 TX</text>
+  <circle cx="450" cy="410" r="4" fill="#475569"/><text x="458" y="406" font-size="12" font-family="ui-monospace, monospace" fill="#0f172a" text-anchor="start">GND</text>
+
+  <!-- ===================== I2S (C5 -> MAX98357A) ===================== -->
+  <line x1="730" y1="230" x2="860" y2="230" stroke="#2563eb" stroke-width="2.5" marker-end="url(#aBlue)"/>
+  <line x1="730" y1="275" x2="860" y2="275" stroke="#2563eb" stroke-width="2.5" marker-end="url(#aBlue)"/>
+  <line x1="730" y1="320" x2="860" y2="320" stroke="#2563eb" stroke-width="2.5" marker-end="url(#aBlue)"/>
+  <line x1="730" y1="365" x2="860" y2="365" stroke="#0d9488" stroke-width="2.5" marker-end="url(#aTeal)"/>
+  <text x="795" y="222" font-size="11" fill="#2563eb" text-anchor="middle" font-weight="600">I2S</text>
+
+  <!-- power C5 -> MAX -->
+  <line x1="730" y1="465" x2="860" y2="465" stroke="#dc2626" stroke-width="2.5" marker-end="url(#aRed)"/>
+  <line x1="730" y1="505" x2="860" y2="505" stroke="#475569" stroke-width="2.5" stroke-dasharray="6 4"/>
+
+  <!-- C5 right pin labels (inside, right edge x=730) -->
+  <circle cx="730" cy="230" r="4" fill="#2563eb"/><text x="722" y="226" font-size="12" font-family="ui-monospace, monospace" fill="#0f172a" text-anchor="end">GPIO9 BCLK</text>
+  <circle cx="730" cy="275" r="4" fill="#2563eb"/><text x="722" y="271" font-size="12" font-family="ui-monospace, monospace" fill="#0f172a" text-anchor="end">GPIO8 LRC</text>
+  <circle cx="730" cy="320" r="4" fill="#2563eb"/><text x="722" y="316" font-size="12" font-family="ui-monospace, monospace" fill="#0f172a" text-anchor="end">GPIO7 DIN</text>
+  <circle cx="730" cy="365" r="4" fill="#0d9488"/><text x="722" y="361" font-size="12" font-family="ui-monospace, monospace" fill="#0f172a" text-anchor="end">GPIO10 SD</text>
+  <circle cx="730" cy="465" r="4" fill="#dc2626"/><text x="722" y="461" font-size="12" font-family="ui-monospace, monospace" fill="#0f172a" text-anchor="end">5V</text>
+  <circle cx="730" cy="505" r="4" fill="#475569"/><text x="722" y="501" font-size="12" font-family="ui-monospace, monospace" fill="#0f172a" text-anchor="end">GND</text>
+
+  <!-- MAX left pin labels (inside, left edge x=860) -->
+  <circle cx="860" cy="230" r="4" fill="#2563eb"/><text x="868" y="226" font-size="12" font-family="ui-monospace, monospace" fill="#0f172a" text-anchor="start">BCLK</text>
+  <circle cx="860" cy="275" r="4" fill="#2563eb"/><text x="868" y="271" font-size="12" font-family="ui-monospace, monospace" fill="#0f172a" text-anchor="start">LRC</text>
+  <circle cx="860" cy="320" r="4" fill="#2563eb"/><text x="868" y="316" font-size="12" font-family="ui-monospace, monospace" fill="#0f172a" text-anchor="start">DIN</text>
+  <circle cx="860" cy="365" r="4" fill="#0d9488"/><text x="868" y="361" font-size="12" font-family="ui-monospace, monospace" fill="#0f172a" text-anchor="start">SD</text>
+  <circle cx="860" cy="465" r="4" fill="#dc2626"/><text x="868" y="461" font-size="12" font-family="ui-monospace, monospace" fill="#0f172a" text-anchor="start">VIN 5V</text>
+  <circle cx="860" cy="505" r="4" fill="#475569"/><text x="868" y="501" font-size="12" font-family="ui-monospace, monospace" fill="#0f172a" text-anchor="start">GND</text>
+
+  <!-- ===================== SPEAKER (MAX -> speaker) ===================== -->
+  <line x1="1060" y1="310" x2="1120" y2="310" stroke="#7c3aed" stroke-width="2.5" marker-end="url(#aViolet)"/>
+  <line x1="1060" y1="360" x2="1120" y2="360" stroke="#7c3aed" stroke-width="2.5" marker-end="url(#aViolet)"/>
+  <circle cx="1060" cy="310" r="4" fill="#7c3aed"/><text x="1052" y="306" font-size="12" font-family="ui-monospace, monospace" fill="#0f172a" text-anchor="end">OUT+</text>
+  <circle cx="1060" cy="360" r="4" fill="#7c3aed"/><text x="1052" y="356" font-size="12" font-family="ui-monospace, monospace" fill="#0f172a" text-anchor="end">OUT−</text>
+
+  <!-- ===================== NOTES ===================== -->
+  <text x="450" y="590" font-size="12" fill="#64748b">GPIO7 (DIN) is a strapping pin — the amp only reads it; SD (enable) stays on GPIO10. 6/15 are the only receiver-free pins.</text>
+  <text x="450" y="608" font-size="12" fill="#64748b">All grounds common. 5 V supply shared across both ESP boards and the amp. The amp is wired to the C5 only.</text>
+
+  <!-- ===================== LEGEND ===================== -->
+  <g font-size="12" fill="#0f172a">
+    <rect x="40" y="560" width="380" height="96" rx="8" fill="#f8fafc" stroke="#cbd5e1"/>
+    <text x="56" y="580" font-weight="700">Legend</text>
+    <line x1="56" y1="598" x2="86" y2="598" stroke="#2563eb" stroke-width="3"/><text x="94" y="602">I2S clock/data (BCLK, LRC, DIN)</text>
+    <line x1="56" y1="618" x2="86" y2="618" stroke="#0d9488" stroke-width="3"/><text x="94" y="622">SD amp enable</text>
+    <line x1="56" y1="638" x2="86" y2="638" stroke="#16a34a" stroke-width="3"/><text x="94" y="642">UART link (crossed TX/RX)</text>
+    <line x1="246" y1="598" x2="276" y2="598" stroke="#dc2626" stroke-width="3"/><text x="284" y="602">5 V power</text>
+    <line x1="246" y1="618" x2="276" y2="618" stroke="#475569" stroke-width="3" stroke-dasharray="6 4"/><text x="284" y="622">GND (common)</text>
+    <line x1="246" y1="638" x2="276" y2="638" stroke="#7c3aed" stroke-width="3"/><text x="284" y="642">speaker</text>
+  </g>
+</svg>

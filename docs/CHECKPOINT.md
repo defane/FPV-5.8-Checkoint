@@ -25,6 +25,9 @@ config : il la garde en NVS, l'adopte du C5 au premier démarrage s'il n'en a
 pas, et la repousse à chaque `HELLO` du C5 (donc après un reboot du C5). Le C5
 émet un `EVENT_PASS` par passage et des `STATS` périodiques.
 
+Schéma de câblage : [`wiring.svg`](wiring.svg). Source Graphviz régénérable :
+[`wiring.dot`](wiring.dot) (`dot -Tpng docs/wiring.dot -o docs/wiring.png`).
+
 ## Fonctionnement
 
 - **Signal :** `receiver_obs_cn_x10()`, le rapport porteuse/bruit (C/N) du

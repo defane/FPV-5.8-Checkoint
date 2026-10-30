@@ -1,0 +1,64 @@
+// FPV 5.8 Checkpoint wiring: ESP32-C3 <-UART-> ESP32-C5 <-I2S-> MAX98357A -> speaker.
+// Render:  dot -Tpng docs/wiring.dot -o docs/wiring.png   (or -Tsvg)
+// Pin defaults: firmware/c3/main/Kconfig.projbuild, components/checkpoint/Kconfig,
+//               components/audio_player/Kconfig (see CLAUDE.md "Wiring").
+digraph wiring {
+  rankdir=LR;
+  bgcolor="white";
+  labelloc="t";
+  label=<<b>FPV 5.8 Checkpoint — wiring</b>>;
+  fontname="Helvetica"; fontsize=18;
+  node [shape=plaintext, fontname="Helvetica"];
+  edge [fontname="Helvetica", fontsize=10, penwidth=2];
+
+  c3 [label=<
+    <table border="1" cellborder="0" cellspacing="6" bgcolor="#f8fafc">
+      <tr><td colspan="2"><b>ESP32-C3</b><br/><font point-size="9">Wi-Fi AP + web &#183; config/telemetry</font></td></tr>
+      <tr><td align="left" port="tx"><font color="#16a34a">GPIO5 TX</font></td><td></td></tr>
+      <tr><td align="left" port="rx"><font color="#16a34a">GPIO4 RX</font></td><td></td></tr>
+      <tr><td align="left" port="gnd"><font color="#475569">GND</font></td><td></td></tr>
+    </table>>];
+
+  c5 [label=<
+    <table border="1" cellborder="0" cellspacing="6" bgcolor="#f8fafc">
+      <tr><td colspan="2"><b>ESP32-C5 (Zero)</b><br/><font point-size="9">RF receive + pass detect + coin sound</font></td></tr>
+      <tr><td align="left" port="rx"><font color="#16a34a">GPIO15 RX</font></td><td align="right" port="bclk"><font color="#2563eb">BCLK GPIO9</font></td></tr>
+      <tr><td align="left" port="tx"><font color="#16a34a">GPIO6 TX</font></td><td align="right" port="lrc"><font color="#2563eb">LRC GPIO8</font></td></tr>
+      <tr><td align="left" port="gnd"><font color="#475569">GND</font></td><td align="right" port="din"><font color="#2563eb">DIN GPIO7</font></td></tr>
+      <tr><td></td><td align="right" port="sd"><font color="#0d9488">SD GPIO10</font></td></tr>
+      <tr><td></td><td align="right" port="v5"><font color="#dc2626">5V</font></td></tr>
+      <tr><td></td><td align="right" port="gnd2"><font color="#475569">GND</font></td></tr>
+    </table>>];
+
+  max [label=<
+    <table border="1" cellborder="0" cellspacing="6" bgcolor="#f8fafc">
+      <tr><td colspan="2"><b>MAX98357A</b><br/><font point-size="9">I2S class-D amp</font></td></tr>
+      <tr><td align="left" port="bclk"><font color="#2563eb">BCLK</font></td><td align="right" port="outp"><font color="#7c3aed">OUT+</font></td></tr>
+      <tr><td align="left" port="lrc"><font color="#2563eb">LRC</font></td><td align="right" port="outn"><font color="#7c3aed">OUT-</font></td></tr>
+      <tr><td align="left" port="din"><font color="#2563eb">DIN</font></td><td></td></tr>
+      <tr><td align="left" port="sd"><font color="#0d9488">SD</font></td><td></td></tr>
+      <tr><td align="left" port="vin"><font color="#dc2626">VIN 5V</font></td><td></td></tr>
+      <tr><td align="left" port="gnd"><font color="#475569">GND</font></td><td></td></tr>
+    </table>>];
+
+  spk [shape=box, style="filled,rounded", fillcolor="#ede9fe", color="#7c3aed", label="speaker\n4 Ohm"];
+
+  // UART link (crossed TX/RX), common ground
+  c3:tx -> c5:rx   [color="#16a34a", label="UART TX->RX"];
+  c5:tx -> c3:rx   [color="#16a34a", label="115200 8N1"];
+  c3:gnd -> c5:gnd [color="#475569", dir=none, style=dashed, label="GND"];
+
+  // I2S bus (C5 -> amp)
+  c5:bclk -> max:bclk [color="#2563eb"];
+  c5:lrc  -> max:lrc  [color="#2563eb", label="I2S"];
+  c5:din  -> max:din  [color="#2563eb"];
+  c5:sd   -> max:sd   [color="#0d9488", label="enable"];
+
+  // Power
+  c5:v5   -> max:vin  [color="#dc2626", label="5V"];
+  c5:gnd2 -> max:gnd  [color="#475569", dir=none, style=dashed];
+
+  // Speaker
+  max:outp -> spk [color="#7c3aed"];
+  max:outn -> spk [color="#7c3aed"];
+}
