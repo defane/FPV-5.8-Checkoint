@@ -11,9 +11,11 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-INPUT_DIRS = ('main/',)
-INPUT_FILES = ('CMakeLists.txt', 'partitions.csv', 'sdkconfig.defaults', 'sdkconfig.psram.defaults', 'dependencies.lock',
-               '.github/workflows/c5vrx5.yml', 'tools/firmware_input_hash.py')
+# The C5 firmware is firmware/c5 plus the shared components (c5vrx_rx engine,
+# checkpoint, pass_detector, audio_player, link_proto). Its build root files
+# (CMakeLists.txt, partitions.csv, sdkconfig*.defaults) live under firmware/c5/.
+INPUT_DIRS = ('components/', 'firmware/c5/')
+INPUT_FILES = ('.github/workflows/c5vrx5.yml', 'tools/firmware_input_hash.py')
 
 
 def firmware_input(path):

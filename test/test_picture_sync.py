@@ -81,7 +81,7 @@ class PictureSyncTest(unittest.TestCase):
             d = Path(d)
             (d / 'h.c').write_text(HARNESS)
             subprocess.run([os.environ.get('CC', 'cc'), '-O2', '-std=c11', '-Wall', '-Wextra', '-Werror',
-                            '-I', str(ROOT / 'main'), str(d / 'h.c'), '-o', str(d / 'h')], check=True)
+                            '-I', str(ROOT / 'components/c5vrx_rx'), str(d / 'h.c'), '-o', str(d / 'h')], check=True)
             (d / 'in.bin').write_bytes(np.asarray(table, np.uint16).tobytes() + b''.join(w.tobytes() for w in wins))
             out = subprocess.run([str(d / 'h'), str(d / 'in.bin'), str(bits)], check=True,
                                  capture_output=True, text=True).stdout.split('\n')

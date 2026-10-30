@@ -169,7 +169,7 @@ def usable_share(rows, cnrs, table, after_ms=15000):
 def study(rates_path, out):
     r = json.loads(Path(rates_path).read_text())
     exe = Path(tempfile.mkdtemp()) / 'ladder_gate_trace'
-    subprocess.run(['cc', '-O2', '-std=c11', '-Wall', '-Wextra', '-Werror', f'-I{HERE.parent / "main"}',
+    subprocess.run(['cc', '-O2', '-std=c11', '-Wall', '-Wextra', '-Werror', f'-I{HERE.parent / "components/c5vrx_rx"}',
                     str(HERE / 'ladder_gate_trace.c'), '-lm', '-o', str(exe)], check=True)
     result = {}
     for name, (fmhz, dev, data, narrow) in CASES.items():
@@ -212,7 +212,7 @@ def check(rates_path):
     SEEDS = range(8)
     r = json.loads(Path(rates_path).read_text())
     exe = Path(tempfile.mkdtemp()) / 'ladder_gate_trace'
-    subprocess.run(['cc', '-O2', '-std=c11', '-Wall', '-Wextra', '-Werror', f'-I{HERE.parent / "main"}',
+    subprocess.run(['cc', '-O2', '-std=c11', '-Wall', '-Wextra', '-Werror', f'-I{HERE.parent / "components/c5vrx_rx"}',
                     str(HERE / 'ladder_gate_trace.c'), '-lm', '-o', str(exe)], check=True)
     failures = 0
     for name in ('12MHz dev1.0', '10MHz dev0.69 (MATCHED)'):

@@ -35,7 +35,7 @@ def main():
             specs.append(dict(name='capture', synthetic=False, source='local board VTX-off snapshot'))
         (work / 'names.txt').write_bytes(('\n'.join(s['name'] for s in specs) + '\n').encode('ascii'))
         command = ('set -e; gcc -O2 -std=c11 -Wall -Wextra -Werror -ffunction-sections -fdata-sections -I/project/main '
-                   '/project/research/output_probe.c /project/main/gain.c '
+                   '/project/research/output_probe.c /project/components/c5vrx_rx/gain.c '
                    '-Wl,--gc-sections -lm -o /tmp/probe; while IFS= read -r name; do '
                    '/tmp/probe /data/"$name".bin 12 > /data/"$name".jsonl; done < /data/names.txt')
         subprocess.run(['docker','run','--rm','-v',str(ROOT.as_posix())+':/project',

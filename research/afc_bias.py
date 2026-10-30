@@ -38,7 +38,7 @@ KHZ_PER_CODE = 156.25
 
 
 def phase8_lut():
-    text = (HERE.parent / 'main' / 'phase8_gain_lut.h').read_text()
+    text = (HERE.parent / 'components/c5vrx_rx' / 'phase8_gain_lut.h').read_text()
     body = text[text.index('{') + 1:text.index('}')]
     return np.array([int(v) for v in re.findall(r'\d+', body)], dtype=np.int32)
 

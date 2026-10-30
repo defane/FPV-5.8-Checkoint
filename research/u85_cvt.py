@@ -19,7 +19,7 @@ from kp_morph import build_lut as fixed_lut
 from u85q_lp import lp_codes, emulate, assemble
 
 HERE = Path(__file__).resolve().parent
-MAIN = HERE.parent/'main'
+MAIN = HERE.parent/'components/c5vrx_rx'
 VARIANTS = [(a, law) for a in (28,24) for law in
             ('soft_lock','bounded','origin_hold','soft_lock_low','soft_lock_med','origin_adapt')]
 VARIANTS += [(32, law) for law in ('origin_adapt','soft_lock_med','bounded','sync_bias','soft_lock_high')]

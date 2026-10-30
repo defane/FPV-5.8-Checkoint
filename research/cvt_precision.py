@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 import sim
 from u85q_lp import assemble,emulate
-HERE=Path(__file__).resolve().parent;MAIN=HERE.parent/'main'
+HERE=Path(__file__).resolve().parent;MAIN=HERE.parent/'components/c5vrx_rx'
 VARIANTS=((16,'fixed85'),(16,'fixed60'),(16,'soft'),(16,'wrap'),(14,'origin'))
 
 def lut(angles,law):

@@ -76,14 +76,14 @@ int main(void) {
 
 class Patches(unittest.TestCase):
     def test_production(self):
-        source = (ROOT/'main/experimental_phy.c').read_text()
+        source = (ROOT/'components/c5vrx_rx/experimental_phy.c').read_text()
         source = re.sub(r'^#include[^\n]*\n', '', source, flags=re.M)
         source = source.replace('#define REG(a) (*(volatile uint32_t *)(uintptr_t)(a))', '#define REG(a) (*reg_ptr(a))')
         source = re.sub(r'^extern [^\n]+;\n', '', source, flags=re.M)
         for pinned in [False, True]:
             with self.subTest(pinned=pinned), tempfile.TemporaryDirectory() as tmp:
                 p=Path(tmp);(p/'t.c').write_text(PREFIX+source+HARNESS)
-                cmd=['cc','-O2','-std=c11','-Wall','-Wextra','-Werror','-I',str(ROOT/'main')]
+                cmd=['cc','-O2','-std=c11','-Wall','-Wextra','-Werror','-I',str(ROOT/'components/c5vrx_rx')]
                 if pinned:cmd+=['-DC5VRX_PHY_PINNED=1']
                 subprocess.run(cmd+[str(p/'t.c'),'-o',str(p/'t')],check=True)
                 subprocess.run([str(p/'t')],check=True)

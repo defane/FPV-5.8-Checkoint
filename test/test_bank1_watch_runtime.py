@@ -129,9 +129,9 @@ int main(void) {
 
 
 def main():
-    phy = (ROOT / "main/phy.c").read_text().split("#ifdef C5VRX_PHY_PINNED", 1)[0]
+    phy = (ROOT / "components/c5vrx_rx/phy.c").read_text().split("#ifdef C5VRX_PHY_PINNED", 1)[0]
     phy = re.sub(r"^#include[^\n]*\n", "", phy, flags=re.MULTILINE)
-    rf = (ROOT / "main/rf.c").read_text()
+    rf = (ROOT / "components/c5vrx_rx/rf.c").read_text()
     watcher = rf[rf.index("static uint32_t s_vbank1_hash"):rf.index("static void capture_table(void)")]
     with tempfile.TemporaryDirectory() as directory:
         base = Path(directory)
@@ -139,8 +139,8 @@ def main():
         binary = base / ("watch.exe" if os.name == "nt" else "watch")
         source.write_text(SDK + phy + MOCKS + watcher + HARNESS)
         subprocess.run(shlex.split(os.environ.get("CC", "cc")) + [
-            "-O2", "-std=c11", "-Wall", "-Wextra", "-Werror", "-I" + str(ROOT / "main"),
-            str(source), str(ROOT / "main/arc_phy.c"), "-o", str(binary)], check=True)
+            "-O2", "-std=c11", "-Wall", "-Wextra", "-Werror", "-I" + str(ROOT / "components/c5vrx_rx"),
+            str(source), str(ROOT / "components/c5vrx_rx/arc_phy.c"), "-o", str(binary)], check=True)
         subprocess.run([str(binary)], check=True)
 
 

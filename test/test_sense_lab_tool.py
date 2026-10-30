@@ -131,7 +131,7 @@ def main():
             pass
 
     # The firmware's record format carries every field the tool scores.
-    source = (Path(__file__).resolve().parent.parent / 'main' / 'sense_lab.c').read_text()
+    source = (Path(__file__).resolve().parent.parent / 'components/c5vrx_rx' / 'sense_lab.c').read_text()
     cap_format = source[source.index('"SENSLAB_CAP '):source.index('t_ms=')]
     for field in ('id', 'step', 'stage', *(m for m in lab.METRICS if m != 'video_cov'), *lab.EXTRA):
         check(f' {field}=' in cap_format or f'"SENSLAB_CAP {field}=' in cap_format, f'firmware prints {field}')

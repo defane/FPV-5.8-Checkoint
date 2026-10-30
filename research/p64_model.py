@@ -153,7 +153,7 @@ def repaired_table():
 
 
 def checked_in_table():
-    text = (ROOT / 'main/p64_tables.h').read_text()
+    text = (ROOT / 'components/c5vrx_rx/p64_tables.h').read_text()
     values = text.split('p64_table[1024] = {', 1)[1].split('}', 1)[0]
     return np.array([int(value, 16) for value in re.findall(r'0x[0-9a-fA-F]+', values)], dtype=np.uint16)
 

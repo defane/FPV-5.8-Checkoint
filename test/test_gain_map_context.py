@@ -158,8 +158,8 @@ int main(void) {
 
 class GainMapContextTest(unittest.TestCase):
     def test_production_paths(self):
-        runtime = (ROOT / "main/receiver.c").read_text(encoding="utf8")
-        calibration = (ROOT / "main/calibration.c").read_text(encoding="utf8")
+        runtime = (ROOT / "components/c5vrx_rx/receiver.c").read_text(encoding="utf8")
+        calibration = (ROOT / "components/c5vrx_rx/calibration.c").read_text(encoding="utf8")
         snippets = "".join(function(runtime, name) for name in
                            ["static dg_map_context_t map_context(void)",
                             "unsigned receiver_export_gain_map(dg_map_blob_t *blob)",
@@ -173,8 +173,8 @@ class GainMapContextTest(unittest.TestCase):
             source.write_text(PREFIX + snippets + SUFFIX, encoding="utf8")
             binary = Path(folder) / "test"
             subprocess.run([os.environ.get("CC", "cc"), "-O2", "-std=c11", "-Wall", "-Wextra", "-Werror",
-                            "-I", str(ROOT / "main"), str(source), str(ROOT / "main/gain.c"),
-                            str(ROOT / "main/arc_phy.c"), "-o", str(binary), "-lm"], check=True)
+                            "-I", str(ROOT / "components/c5vrx_rx"), str(source), str(ROOT / "components/c5vrx_rx/gain.c"),
+                            str(ROOT / "components/c5vrx_rx/arc_phy.c"), "-o", str(binary), "-lm"], check=True)
             subprocess.run([str(binary)], check=True)
 
 

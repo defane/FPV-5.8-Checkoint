@@ -34,13 +34,13 @@ def reference(raw, table):
 
 
 def check_u85q():
-    """main/u85q.bsasm is the archived U85Q the host models score, its LUT is
+    """components/c5vrx_rx/u85q.bsasm is the archived U85Q the host models score, its LUT is
     main/u85q_table.h, the loader accepts its image and the assembled program
     decodes as the reference (5-bit tokens)."""
-    program = ROOT / "main/u85q.bsasm"
+    program = ROOT / "components/c5vrx_rx/u85q.bsasm"
     assert program.read_bytes() == (ROOT / "research/legacy_demod/u85q.bsasm").read_bytes()
     instructions, meta, lut = u85q_lp.assemble(program)
-    header = (ROOT / "main/u85q_table.h").read_text()
+    header = (ROOT / "components/c5vrx_rx/u85q_table.h").read_text()
     table = np.array([int(v) for v in header.split("u85q_table[1024] = {", 1)[1].split("};", 1)[0].replace(",", " ").split()],
                      dtype=np.uint16)
     assert len(table) == 1024 and np.array_equal(lut, table) and np.array_equal(table, sim.u85q_lut())
@@ -52,27 +52,27 @@ def check_u85q():
     expected = sim._pair_codes(raw, table, sim.PAIR_BITS, 5)[:len(got)]
     assert np.array_equal(got & 63, expected), "assembled U85Q differs from the pair/state reference"
     for name in ("transport.c", "control.c", "receiver.h"):
-        source = (ROOT / "main" / name).read_text()
+        source = (ROOT / "components/c5vrx_rx" / name).read_text()
         assert "kp_tables" not in source and "u85q_lp" not in source, name
 
 
 def main():
     # Two fixed decoders (operator decision 2026-10-28): P64 and the untrained
     # U85Q, no kp ladder or LP; the retired policies stay research.
-    build = (ROOT / "main/CMakeLists.txt").read_text()
+    build = (ROOT / "components/c5vrx_rx/CMakeLists.txt").read_text()
     assert build.count('target_bitscrambler_add_src(') == 2
     assert 'target_bitscrambler_add_src("p64.bsasm")' in build
     assert 'target_bitscrambler_add_src("u85q.bsasm")' in build
     check_u85q()
     for name in ("transport.c", "control.c", "receiver.h"):
-        source = (ROOT / "main" / name).read_text()
+        source = (ROOT / "components/c5vrx_rx" / name).read_text()
         for retired in ("transport_set_p64", "transport_kp_set", "kp_tables.h", "kp_ladder.h", 'blob_load("kp_auto"', 'blob_load("lp_cn"'):
             assert retired not in source, (name, retired)
     table = p64_model.checked_in_table()
     assert len(table) == 1024
     assert np.array_equal(table, p64_model.repaired_table())
     table_digest = hashlib.sha256(struct.pack("<1024H", *table)).hexdigest()
-    assert table_digest in (ROOT / "main/p64_tables.h").read_text(), "diagnostic LUT identity is stale"
+    assert table_digest in (ROOT / "components/c5vrx_rx/p64_tables.h").read_text(), "diagnostic LUT identity is stale"
     repair = json.loads((ROOT / "research/data/p64_repair.json").read_text())
     params = repair["params"]
     # Preserve the original model as a reproducible negative reference.
@@ -125,7 +125,7 @@ def main():
             assert np.max(np.abs(mean - 21)) < 0.5
             assert np.convolve((porch < 19).astype(int), np.ones(80, dtype=int), mode="valid").max() < 80
 
-    program = ROOT / "main/p64.bsasm"
+    program = ROOT / "components/c5vrx_rx/p64.bsasm"
     instructions, meta, lut = u85q_lp.assemble(program)
     assert len(instructions) == 8 and np.array_equal(lut, table)
     binary = u85q_lp._bsasm().insts_to_binary(instructions, meta, lut)

@@ -62,9 +62,9 @@ int main(void){
 
 class Ordering(unittest.TestCase):
     def test_production_ownership_and_gain(self):
-        phy = (ROOT / "main/phy.c").read_text().split("#ifdef C5VRX_PHY_PINNED", 1)[0]
+        phy = (ROOT / "components/c5vrx_rx/phy.c").read_text().split("#ifdef C5VRX_PHY_PINNED", 1)[0]
         phy = re.sub(r"^#include[^\n]*\n", "", phy, flags=re.MULTILINE)
-        rf = (ROOT / "main/rf.c").read_text()
+        rf = (ROOT / "components/c5vrx_rx/rf.c").read_text()
         gain = rf[rf.index("bool rf_set_gain("):rf.index("void rf_force_gain(")]
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)

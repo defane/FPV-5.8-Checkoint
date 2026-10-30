@@ -174,7 +174,7 @@ int main(void) {
 
 class SpurSuiteTest(unittest.TestCase):
     def test_production_suite_and_runner(self):
-        source = (ROOT / 'main/sense_lab.c').read_text()
+        source = (ROOT / 'components/c5vrx_rx/sense_lab.c').read_text()
         extracted = ''.join(function(source, signature) for signature in (
             'static bool patches_ok(', 'static bool candidate_failure(',
             'static void run_patch(', 'static void suite_spurs('))
@@ -183,7 +183,7 @@ class SpurSuiteTest(unittest.TestCase):
             c, executable = base / 'spur.c', base / 'spur'
             c.write_text(HARNESS + extracted + MAIN)
             subprocess.run([os.environ.get('CC', 'cc'), '-std=c11', '-O2',
-                            '-Wall', '-Wextra', '-Werror', '-I', str(ROOT / 'main'),
+                            '-Wall', '-Wextra', '-Werror', '-I', str(ROOT / 'components/c5vrx_rx'),
                             str(c), '-lm', '-o', str(executable)], check=True)
             run = subprocess.run([str(executable)], capture_output=True, text=True, timeout=10)
             self.assertEqual(run.returncode, 0, (run.stdout + run.stderr)[-12000:])

@@ -17,13 +17,13 @@ def run_c(source):
         (path / 'test.c').write_text(source)
         (path / 'esp_err.h').write_text('typedef int esp_err_t;\n#define ESP_OK 0\n#define ESP_ERR_NOT_SUPPORTED 1\n#define ESP_ERR_INVALID_ARG 2\n#define ESP_ERR_INVALID_RESPONSE 3\n')
         subprocess.run([os.environ.get('CC', 'cc'), '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror',
-                        '-I', str(path), '-I', str(ROOT / 'main'), str(path / 'test.c'), '-lm', '-o', str(path / 'run')], check=True)
+                        '-I', str(path), '-I', str(ROOT / 'components/c5vrx_rx'), str(path / 'test.c'), '-lm', '-o', str(path / 'run')], check=True)
         subprocess.run([str(path / 'run')], check=True)
 
 
 class CalibrationSearchTest(unittest.TestCase):
     def test_actual_dc_searches(self):
-        phy = (ROOT / 'main/phy.c').read_text()
+        phy = (ROOT / 'components/c5vrx_rx/phy.c').read_text()
         helpers = phy[phy.index('#define DCO_PROBE'):phy.index('/* phy_pbus_workmode()')]
         # The hold-only globals are outside the search under test.
         helpers = helpers.replace('static int s_dco_codes[2];', '').replace('static bool s_dco_held;', '')
@@ -98,7 +98,7 @@ int main(void) {
 ''')
 
     def test_actual_filter_measurement(self):
-        source = ''.join(p.read_text() for p in sorted((ROOT/'main').glob('calibration*.c')))
+        source = ''.join(p.read_text() for p in sorted((ROOT/'components/c5vrx_rx').glob('calibration*.c')))
         body = source[source.index('static bool measure_setting('):source.index('/* A channel is quiet')]
         run_c(r'''
 #include <assert.h>
@@ -155,7 +155,7 @@ int main(void) {
 ''')
 
     def test_actual_sampling_scan(self):
-        source = ''.join(p.read_text() for p in sorted((ROOT/'main').glob('calibration*.c')))
+        source = ''.join(p.read_text() for p in sorted((ROOT/'components/c5vrx_rx').glob('calibration*.c')))
         body = source[source.index('sphase_verdict_t sphase_scan_n('):source.index('static sphase_live_t s_sphase_live')]
         run_c(r'''
 #include <assert.h>
@@ -202,7 +202,7 @@ int main(void) {
 ''')
 
     def test_actual_noise_cache(self):
-        source = ''.join(p.read_text() for p in sorted((ROOT/'main').glob('calibration*.c')))
+        source = ''.join(p.read_text() for p in sorted((ROOT/'components/c5vrx_rx').glob('calibration*.c')))
         body = source[source.index('void noise_map_startup('):source.index('/* One-sided clipping', source.index('void noise_map_startup('))]
         run_c(r'''
 #include <assert.h>
@@ -257,7 +257,7 @@ int main(void) {
 ''')
 
     def test_actual_deviation_wait(self):
-        source = ''.join(p.read_text() for p in sorted((ROOT/'main').glob('calibration*.c')))
+        source = ''.join(p.read_text() for p in sorted((ROOT/'components/c5vrx_rx').glob('calibration*.c')))
         body = source[source.index('#define DEVIATION_WAIT_US'):source.index('static void calib_record(bool manual, int64_t t0);')]
         run_c(r'''
 #include <assert.h>

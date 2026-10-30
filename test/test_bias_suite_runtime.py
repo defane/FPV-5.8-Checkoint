@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class BiasSuiteTest(unittest.TestCase):
     def test_witnessed_states_and_stop(self):
-        source = (ROOT / 'main/sense_lab.c').read_text()
+        source = (ROOT / 'components/c5vrx_rx/sense_lab.c').read_text()
         start = source.index('static void suite_bias(void)')
         end = source.index('\n}', start) + 2
         prefix = r'''
@@ -56,7 +56,7 @@ int main(void) {
             p = Path(temp)
             (p / 'test.c').write_text(prefix + source[start:end] + suffix)
             subprocess.run([os.environ.get('CC', 'cc'), '-std=c11', '-O2', '-Wall', '-Wextra',
-                            '-Werror', '-I', str(ROOT / 'main'), str(p / 'test.c'), '-lm',
+                            '-Werror', '-I', str(ROOT / 'components/c5vrx_rx'), str(p / 'test.c'), '-lm',
                             '-o', str(p / 'test')], check=True)
             subprocess.run([str(p / 'test')], check=True)
 

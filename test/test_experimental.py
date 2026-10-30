@@ -98,12 +98,12 @@ int main(void) {
 
 class Experimental(unittest.TestCase):
     def test_production_state(self):
-        source = (ROOT / 'main/experimental.c').read_text()
+        source = (ROOT / 'components/c5vrx_rx/experimental.c').read_text()
         source = '\n'.join(line for line in source.splitlines() if not line.startswith('#include'))
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp)
             (path / 'test.c').write_text(BOUNDARY + source + HARNESS)
-            subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-I', str(ROOT / 'main'),
+            subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-I', str(ROOT / 'components/c5vrx_rx'),
                             str(path / 'test.c'), '-o', str(path / 'test')], check=True)
             subprocess.run([str(path / 'test')], check=True, stdout=subprocess.DEVNULL)
 

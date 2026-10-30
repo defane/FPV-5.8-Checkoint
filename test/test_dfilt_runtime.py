@@ -204,25 +204,25 @@ int main(void) {
 
 class DigitalFilter(unittest.TestCase):
     def test_noise_derived_gain_migration(self):
-        receiver = (ROOT / "main/receiver.c").read_text()
+        receiver = (ROOT / "components/c5vrx_rx/receiver.c").read_text()
         production = receiver[receiver.index("#define GTAB_VERSION"):receiver.index("static void cna_probe(")]
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)
             source, exe = base / "gain_migration.c", base / "gain_migration"
             source.write_text(GAIN_PREFIX + production + GAIN_HARNESS)
             subprocess.run(["cc", "-O2", "-std=c11", "-Wall", "-Wextra", "-Werror",
-                            "-I", str(ROOT / "main"), str(source), str(ROOT / "main/gain.c"),
-                            str(ROOT / "main/arc_phy.c"), "-lm", "-o", str(exe)], check=True)
+                            "-I", str(ROOT / "components/c5vrx_rx"), str(source), str(ROOT / "components/c5vrx_rx/gain.c"),
+                            str(ROOT / "components/c5vrx_rx/arc_phy.c"), "-lm", "-o", str(exe)], check=True)
             subprocess.run([str(exe)], check=True)
 
     def test_production(self):
-        phy = (ROOT / "main/phy.c").read_text()
+        phy = (ROOT / "components/c5vrx_rx/phy.c").read_text()
         ownership = phy.split("#ifdef C5VRX_PHY_PINNED", 1)[0]
         ownership = re.sub(r"^#include[^\n]*\n", "", ownership, flags=re.MULTILINE)
         digital = phy[phy.index("/* ---- Digital RX filter"):phy.index("/* ---- 11p receive baseline")]
-        header = (ROOT / "main/phy.h").read_text()
+        header = (ROOT / "components/c5vrx_rx/phy.h").read_text()
         default = re.search(r"^#define PHY_DFILT_MODE_DEFAULT .+$", header, re.MULTILINE)[0]
-        rf = (ROOT / "main/rf.c").read_text()
+        rf = (ROOT / "components/c5vrx_rx/rf.c").read_text()
         for pinned in (True, False):
             with self.subTest(pinned=pinned), tempfile.TemporaryDirectory() as directory:
                 base = Path(directory)

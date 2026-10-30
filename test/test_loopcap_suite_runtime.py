@@ -261,7 +261,7 @@ int main(void) {
 
 class LoopcapSuiteTest(unittest.TestCase):
     def test_production_loopcap(self):
-        source = (ROOT / 'main/sense_lab.c').read_text()
+        source = (ROOT / 'components/c5vrx_rx/sense_lab.c').read_text()
         production = ''.join(function(source, signature) for signature in (
             'static uint32_t patch_read(', 'static void patch_write(',
             'static bool patches_ok(', 'static bool hw_gain_ok(',
@@ -272,7 +272,7 @@ class LoopcapSuiteTest(unittest.TestCase):
             c_file, executable = base / 'loopcap.c', base / 'loopcap'
             c_file.write_text(HARNESS + production + MAIN)
             subprocess.run([os.environ.get('CC', 'cc'), '-std=c11', '-O2',
-                            '-Wall', '-Wextra', '-Werror', '-I', str(ROOT / 'main'),
+                            '-Wall', '-Wextra', '-Werror', '-I', str(ROOT / 'components/c5vrx_rx'),
                             str(c_file), '-lm', '-o', str(executable)], check=True)
             result = subprocess.run([str(executable)], capture_output=True, text=True, timeout=10)
             self.assertEqual(result.returncode, 0, (result.stdout + result.stderr)[-12000:])

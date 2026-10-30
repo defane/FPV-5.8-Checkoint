@@ -65,7 +65,7 @@ int main(void) {
 
 class AfcTelemetryTest(unittest.TestCase):
     def test_actual_print(self):
-        source = (ROOT / "main/control.c").read_text(encoding="utf8")
+        source = (ROOT / "components/c5vrx_rx/control.c").read_text(encoding="utf8")
         start = source.index("typedef struct {", source.index("static unsigned s_afc_corrections"))
         end = source.index("/* Learned offset sign", start)
         declarations = source[start:end]
@@ -77,7 +77,7 @@ class AfcTelemetryTest(unittest.TestCase):
             path.write_text(PREFIX + declarations + actual + SUFFIX, encoding="utf8")
             binary = Path(directory) / "afc"
             subprocess.run([os.environ.get("CC", "cc"), "-O2", "-std=c11", "-Wall", "-Wextra", "-Werror",
-                            "-I", str(ROOT / "main"), str(path), "-o", str(binary)], check=True)
+                            "-I", str(ROOT / "components/c5vrx_rx"), str(path), "-o", str(binary)], check=True)
             subprocess.run([str(binary)], check=True)
 
 

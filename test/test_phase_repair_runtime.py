@@ -72,7 +72,7 @@ int main(void) {
 
 class PhaseRepairTest(unittest.TestCase):
     def test_production_repair(self):
-        source = ''.join(p.read_text() for p in sorted((ROOT/'main').glob('calibration*.c')))
+        source = ''.join(p.read_text() for p in sorted((ROOT/'components/c5vrx_rx').glob('calibration*.c')))
         begin = source.index('#define PHASE_REPAIR_EXCESS')
         end = source.index('uint8_t sphase_code(void)', begin)
         with tempfile.TemporaryDirectory() as directory:
@@ -80,7 +80,7 @@ class PhaseRepairTest(unittest.TestCase):
             binary = Path(directory) / 'repair'
             c.write_text(PREFIX + source[begin:end] + SUFFIX)
             subprocess.run([os.environ.get('CC', 'cc'), '-std=c11', '-Wall',
-                            '-Wextra', '-Werror', '-I', str(ROOT / 'main'),
+                            '-Wextra', '-Werror', '-I', str(ROOT / 'components/c5vrx_rx'),
                             str(c), '-o', str(binary)], check=True)
             subprocess.run([str(binary)], check=True)
 

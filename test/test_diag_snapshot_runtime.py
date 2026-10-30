@@ -96,7 +96,7 @@ int main(void){
 '''
 
 def main():
-    source=(ROOT/'main/diag.c').read_text()
+    source=(ROOT/'components/c5vrx_rx/diag.c').read_text()
     a=source.index('typedef struct {\n    uint32_t t_s, duration_s;')
     event=source[a:source.index('} diag_event_t;',a)+len('} diag_event_t;')]
     a=source.index('    static diag_event_t ev[DIAG_EVENTS];',source.index('void diag_report(void)'))
@@ -106,7 +106,7 @@ def main():
         path=Path(directory);unit=path/'run.c';binary=path/'run'
         unit.write_text(PREFIX+event+HARNESS+'static void report_history(void){\n'+tail+'}\n'+SUFFIX)
         subprocess.run([os.environ.get('CC','cc'),'-O2','-std=c11','-Wall','-Wextra','-Werror',
-            '-I',str(ROOT/'main'),str(unit),'-o',str(binary)],check=True)
+            '-I',str(ROOT/'components/c5vrx_rx'),str(unit),'-o',str(binary)],check=True)
         subprocess.run([str(binary)],check=True)
 
 if __name__=='__main__':main()

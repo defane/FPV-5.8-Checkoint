@@ -52,7 +52,7 @@ def run(source,modern):
  with tempfile.TemporaryDirectory() as d:
   p=Path(d);(p/'b.c').write_text(harness)
   (p/'esp_err.h').write_text('typedef int esp_err_t;\n#define ESP_OK 0\n#define ESP_ERR_NOT_SUPPORTED 1\n#define ESP_ERR_INVALID_ARG 2\n#define ESP_ERR_INVALID_RESPONSE 3\n')
-  subprocess.run(['cc','-O2','-std=c11','-Wall','-Wextra','-Werror','-I',str(p),'-I',str(ROOT/'main'),str(p/'b.c'),'-lm','-o',str(p/'b')],check=True)
+  subprocess.run(['cc','-O2','-std=c11','-Wall','-Wextra','-Werror','-I',str(p),'-I',str(ROOT/'components/c5vrx_rx'),str(p/'b.c'),'-lm','-o',str(p/'b')],check=True)
   lines=subprocess.check_output([str(p/'b')],text=True).splitlines()
  result=[]
  for line in lines:
@@ -64,7 +64,7 @@ def main():
  parser.add_argument('--base',default='origin/main');parser.add_argument('--output',type=Path)
  args=parser.parse_args()
  old=subprocess.check_output(['git','show',f'{args.base}:main/phy.c'],cwd=ROOT,text=True)
- new=(ROOT/'main/phy.c').read_text()
+ new=(ROOT/'components/c5vrx_rx/phy.c').read_text()
  base=run(old,False);pr=run(new,True)
  names=['centred_neighbour','coupled_correction','flat_local_bracket']
  result={'evidence':'deterministic mock PHY; scheduled waits only; not hardware timing or RF quality',

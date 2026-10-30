@@ -323,7 +323,7 @@ class CurrentSuiteTest(unittest.TestCase):
             source, executable = base / 'current.c', base / 'current'
             source.write_text(content)
             subprocess.run([os.environ.get('CC', 'cc'), '-std=c11', '-O2',
-                            '-Wall', '-Wextra', '-Werror', '-I', str(ROOT / 'main'),
+                            '-Wall', '-Wextra', '-Werror', '-I', str(ROOT / 'components/c5vrx_rx'),
                             str(source), '-lm', '-o', str(executable)], check=True)
             # Production prints every stage; retain output for failures without
             # flooding CI with the exhaustive stock/cancellation matrix.
@@ -332,13 +332,13 @@ class CurrentSuiteTest(unittest.TestCase):
             print(run.stdout.splitlines()[-1])
 
     def test_current_accessors(self):
-        source = (ROOT / 'main/sense_lab.c').read_text()
+        source = (ROOT / 'components/c5vrx_rx/sense_lab.c').read_text()
         accessors = ''.join(function(source, signature) for signature in (
             'static uint32_t patch_read(', 'static void patch_write('))
         self.compile_and_run(BOUNDARIES + accessors + ACCESSORS)
 
     def test_current_suite_runtime(self):
-        source = (ROOT / 'main/sense_lab.c').read_text()
+        source = (ROOT / 'components/c5vrx_rx/sense_lab.c').read_text()
         accessors = ''.join(function(source, signature) for signature in (
             'static uint32_t patch_read(', 'static void patch_write('))
         verifier = function(source, 'static bool patches_ok(')
@@ -351,7 +351,7 @@ class CurrentSuiteTest(unittest.TestCase):
                              + function(source, 'static void suite_current(') + SUITE)
 
     def test_pbus_param_command_restore(self):
-        source = (ROOT / 'main/sense_lab.c').read_text()
+        source = (ROOT / 'components/c5vrx_rx/sense_lab.c').read_text()
         accessors = ''.join(function(source, signature) for signature in (
             'static uint32_t patch_read(', 'static void patch_write('))
         self.compile_and_run(BOUNDARIES + accessors + PBUS_RUNTIME

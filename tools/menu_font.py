@@ -16,7 +16,7 @@ import pathlib
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-OUT = ROOT / "main" / "menu_font.h"
+OUT = ROOT / "components/c5vrx_rx" / "menu_font.h"
 
 # Text font: 5 rows, '#' ink, '.' paper. Every row of a glyph has the
 # glyph's width. Lower case renders as upper case.
@@ -216,7 +216,7 @@ def main():
     text = generate()
     if a.check:
         if OUT.read_text(encoding="utf-8") != text:
-            print("main/menu_font.h is stale: run python3 tools/menu_font.py", file=sys.stderr)
+            print("components/c5vrx_rx/menu_font.h is stale: run python3 tools/menu_font.py", file=sys.stderr)
             return 1
         print("menu_font.h current")
         return 0

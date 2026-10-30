@@ -24,7 +24,7 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 GRID = ROOT / 'research/data/level_quality_grid.json'
-HEADER = ROOT / 'main/level_quality.h'
+HEADER = ROOT / 'components/c5vrx_rx/level_quality.h'
 SYNC_SHARE = 0.6
 SINAD_FULL = 12.0
 
@@ -82,7 +82,7 @@ def main():
     text = render(*build())
     if ap.parse_args().check:
         if HEADER.read_text() != text:
-            raise SystemExit('main/level_quality.h is stale: run python research/level_quality.py')
+            raise SystemExit('components/c5vrx_rx/level_quality.h is stale: run python research/level_quality.py')
         print('level_quality.h current')
         return
     HEADER.write_text(text, newline='\n')

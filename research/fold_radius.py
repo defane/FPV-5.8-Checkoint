@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import iq_lane_fusion as F  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
-HEADER = ROOT / 'main/fold_radius_table.h'
+HEADER = ROOT / 'components/c5vrx_rx/fold_radius_table.h'
 R_STEP = 0.25                      # cells
 R_GRID = np.arange(1.0, 30.0 + 1e-9, R_STEP)
 SIGMAS = (0.35, 0.7, 1.4)          # per-axis noise classes in cells (table per class)

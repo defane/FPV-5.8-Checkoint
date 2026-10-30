@@ -117,11 +117,11 @@ int main(void){
 '''
 class SamplingRuntimeTest(unittest.TestCase):
  def test_actual_shared_monitor(self):
-  source=''.join(p.read_text() for p in sorted((ROOT/'main').glob('calibration*.c')))
+  source=''.join(p.read_text() for p in sorted((ROOT/'components/c5vrx_rx').glob('calibration*.c')))
   begin=source.index('void drift_service(void)')
   end=source.index('/* C/N-AUTO noise map',begin)
   with tempfile.TemporaryDirectory() as d:
    folder=Path(d);(folder/'monitor.c').write_text(PREFIX+source[begin:end]+SUFFIX)
-   subprocess.run([os.environ.get('CC','cc'),'-O2','-std=c11','-Wall','-Wextra','-Werror','-I',str(ROOT/'main'),str(folder/'monitor.c'),'-o',str(folder/'run')],check=True)
+   subprocess.run([os.environ.get('CC','cc'),'-O2','-std=c11','-Wall','-Wextra','-Werror','-I',str(ROOT/'components/c5vrx_rx'),str(folder/'monitor.c'),'-o',str(folder/'run')],check=True)
    subprocess.run([str(folder/'run')],check=True)
 if __name__=='__main__':unittest.main()

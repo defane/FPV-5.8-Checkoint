@@ -18,7 +18,7 @@ from PIL import Image
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SRC = ROOT / "assets" / "c5vrx-white-logo.png"
-OUT = ROOT / "main" / "menu_logo.h"
+OUT = ROOT / "components/c5vrx_rx" / "menu_logo.h"
 
 LOGO_WIDTH = 352            # logical pixels
 PIXEL_ASPECT = 6.2          # logical pixel height / width on a 4:3 picture

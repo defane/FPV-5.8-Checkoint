@@ -176,8 +176,8 @@ class SettingsTest(unittest.TestCase):
     def test_actual_production_source(self):
         with tempfile.TemporaryDirectory() as name:
             folder = Path(name)
-            shutil.copyfile(ROOT / "main/settings.c", folder / "settings.c")
-            shutil.copyfile(ROOT / "main/output_level.h", folder / "output_level.h")
+            shutil.copyfile(ROOT / "components/c5vrx_rx/settings.c", folder / "settings.c")
+            shutil.copyfile(ROOT / "components/c5vrx_rx/output_level.h", folder / "output_level.h")
             for file, text in (("receiver.h", RECEIVER), ("nvs.h", NVS), ("rf.h", RF), ("harness.c", HARNESS)):
                 (folder / file).write_text(text, encoding="utf-8")
             binary = folder / "test_settings"

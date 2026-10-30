@@ -156,17 +156,17 @@ int main(void) {
 
 class ElevenP(unittest.TestCase):
     def test_production(self):
-        phy = (ROOT/'main/phy.c').read_text()
+        phy = (ROOT/'components/c5vrx_rx/phy.c').read_text()
         ownership = re.sub(r'^#include[^\n]*\n','',phy.split('#ifdef C5VRX_PHY_PINNED',1)[0],flags=re.M)
         analog = phy[phy.index('#ifdef C5VRX_PHY_PINNED'):phy.index('/* ---- Digital RX filter')]
         p11 = phy[phy.index('/* ---- 11p receive baseline'):phy.index('/* ---- RX DC DACs')]
-        rf = (ROOT/'main/rf.c').read_text()
+        rf = (ROOT/'components/c5vrx_rx/rf.c').read_text()
         for pinned in (True,False):
             with self.subTest(pinned=pinned), tempfile.TemporaryDirectory() as directory:
                 base=Path(directory)
                 content=SDK+ownership
                 if pinned:
-                    content+=HARDWARE+function((ROOT/'main/dsp.h').read_text(),'static inline uint8_t dsp_filter_code(')
+                    content+=HARDWARE+function((ROOT/'components/c5vrx_rx/dsp.h').read_text(),'static inline uint8_t dsp_filter_code(')
                     content+=analog+p11+VENDOR+function(rf,'static void apply_filter(')+function(rf,'static void restore_lock(')+HARNESS
                 else:
                     content+=p11+UNSUPPORTED
