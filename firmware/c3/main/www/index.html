@@ -23,11 +23,25 @@
   #events li { padding: 6px 0; border-top: 1px solid #2a313a; font-size: .9rem; }
   .muted { color: #8b97a7; }
   .pill { font-size: .8rem; padding: 2px 8px; border-radius: 999px; background: #2a313a; }
+  .pill.admin { background: #14532d; color: #86efac; }
+  .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  input[type=text], input[type=password] { background: #0f1216; color: #e7ebf0; border: 1px solid #2a313a; border-radius: 6px; padding: 6px; }
+  .admin-only { display: none; }
+  body.is-admin .admin-only { display: revert; }
 </style>
 </head>
 <body>
-<header>Checkpoint C3 <span id="link" class="pill">…</span></header>
+<header style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+  <span>Checkpoint C3 <span id="link" class="pill">…</span></span>
+  <span class="bar"><span id="role" class="pill">spectator</span><button id="login_btn" style="margin:0">Admin login</button></span>
+</header>
 <main>
+  <div id="login" class="card" style="display:none;margin-bottom:8px"><div class="bar">
+    <input id="u" type="text" placeholder="user" value="admin" style="width:110px">
+    <input id="p" type="password" placeholder="password" style="width:140px">
+    <button id="unlock" style="margin:0">Unlock</button><span id="login_msg" class="muted"></span>
+  </div></div>
+
   <h2>Live</h2>
   <div class="card row">
     <div class="stat"><b id="s_cn">—</b><span>C/N dB</span></div>
@@ -37,7 +51,8 @@
     <div class="stat"><b id="s_played">—</b><span>played</span></div>
   </div>
 
-  <h2>Detector</h2>
+  <div class="admin-only">
+  <h2>Detector &amp; band (admin)</h2>
   <div class="card">
     <label>Smoothing alpha <input id="alpha" type="number" step="0.05" min="0.05" max="1"></label>
     <label>Activity threshold (dB) <input id="active" type="number" step="0.5"></label>
@@ -52,6 +67,7 @@
     <button id="save">Apply &amp; save</button>
     <span id="msg" class="muted"></span>
   </div>
+  </div>
 
   <h2>Recent passes</h2>
   <ul id="events" class="card"></ul>
@@ -60,9 +76,22 @@
 const $ = id => document.getElementById(id);
 const CH = n => "R" + (n + 1);
 const STATES = ["IDLE", "RISING", "PEAK_PASSED", "COOLDOWN"];
-let dirty = false;
+let dirty = false, auth = null, admin = false;
 ["alpha","active","hyst","drop","minpeak","refr","stale","vol","muted"].forEach(
   id => $(id).addEventListener("input", () => { dirty = true; }));
+
+$("login_btn").addEventListener("click", () => {
+  const e = $("login"); e.style.display = e.style.display === "none" ? "block" : "none";
+});
+$("unlock").addEventListener("click", async () => {
+  auth = "Basic " + btoa($("u").value + ":" + $("p").value);
+  const r = await fetch("/api/auth", { headers: { "Authorization": auth } });
+  if (r.ok) {
+    admin = true; document.body.classList.add("is-admin");
+    $("role").textContent = "admin"; $("role").className = "pill admin";
+    $("login").style.display = "none"; $("login_msg").textContent = "";
+  } else { auth = null; $("login_msg").textContent = "wrong credentials"; }
+});
 
 function fillConfig(c) {
   if (dirty) return;                 // don't stomp on edits in progress
@@ -109,7 +138,15 @@ $("save").addEventListener("click", async () => {
   };
   $("msg").textContent = "saving…";
   try {
-    await fetch("/api/config", { method: "POST", body: JSON.stringify(body) });
+    const h = { "Content-Type": "application/json" };
+    if (auth) h["Authorization"] = auth;
+    const r = await fetch("/api/config", { method: "POST", headers: h, body: JSON.stringify(body) });
+    if (r.status === 401) {
+      admin = false; document.body.classList.remove("is-admin");
+      $("role").textContent = "spectator"; $("role").className = "pill";
+      $("msg").textContent = "login required";
+      return;
+    }
     dirty = false;
     $("msg").textContent = "saved";
     setTimeout(() => $("msg").textContent = "", 1500);

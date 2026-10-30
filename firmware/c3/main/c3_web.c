@@ -3,6 +3,8 @@
 #include "c3_store.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
+#include "mbedtls/base64.h"
+#include "sdkconfig.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -71,8 +73,43 @@ static int32_t json_i(const char *body, const char *key, int32_t def)
     return end == p ? def : (int32_t)v;
 }
 
+/* ---- admin auth (spectators read results; changing config needs a login) ---- */
+static char s_auth[160];
+
+static void build_auth(void)
+{
+    if (CONFIG_C3_ADMIN_PASSWORD[0] == '\0') { s_auth[0] = '\0'; return; }
+    char up[96];
+    int n = snprintf(up, sizeof up, "%s:%s", CONFIG_C3_ADMIN_USER, CONFIG_C3_ADMIN_PASSWORD);
+    unsigned char b64[128];
+    size_t olen = 0;
+    if (n <= 0 || mbedtls_base64_encode(b64, sizeof b64, &olen, (const unsigned char *)up,
+                                        (size_t)n) != 0) { s_auth[0] = '\0'; return; }
+    snprintf(s_auth, sizeof s_auth, "Basic %.*s", (int)olen, (const char *)b64);
+}
+
+static bool require_admin(httpd_req_t *req)
+{
+    if (s_auth[0] == '\0') return true;
+    char hdr[192];
+    if (httpd_req_get_hdr_value_str(req, "Authorization", hdr, sizeof hdr) == ESP_OK &&
+        strcmp(hdr, s_auth) == 0)
+        return true;
+    httpd_resp_set_status(req, "401 Unauthorized");
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, "{\"ok\":false,\"auth\":true}"), false;
+}
+
+static esp_err_t get_auth(httpd_req_t *req)
+{
+    if (!require_admin(req)) return ESP_OK;
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, "{\"admin\":true}");
+}
+
 static esp_err_t post_config(httpd_req_t *req)
 {
+    if (!require_admin(req)) return ESP_OK;
     char buf[512];
     int total = req->content_len;
     if (total <= 0 || total >= (int)sizeof buf) {
@@ -114,16 +151,20 @@ static esp_err_t post_config(httpd_req_t *req)
 
 void c3_web_start(void)
 {
+    build_auth();
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.lru_purge_enable = true;
+    cfg.max_uri_handlers = 10;
     httpd_handle_t srv = NULL;
     if (httpd_start(&srv, &cfg) != ESP_OK) { ESP_LOGE(TAG, "httpd start failed"); return; }
 
     const httpd_uri_t root = { .uri = "/", .method = HTTP_GET, .handler = get_root };
     const httpd_uri_t state = { .uri = "/api/state", .method = HTTP_GET, .handler = get_state };
+    const httpd_uri_t authu = { .uri = "/api/auth", .method = HTTP_GET, .handler = get_auth };
     const httpd_uri_t conf = { .uri = "/api/config", .method = HTTP_POST, .handler = post_config };
     httpd_register_uri_handler(srv, &root);
     httpd_register_uri_handler(srv, &state);
+    httpd_register_uri_handler(srv, &authu);
     httpd_register_uri_handler(srv, &conf);
     ESP_LOGI(TAG, "web UI on http://192.168.4.1/");
 }

@@ -53,6 +53,11 @@ Schéma global des éléments et de leurs interactions :
 - **Mode dégradé C3** : si le C6 est injoignable `CONFIG_C3_FLEET_TIMEOUT_MS` au
   boot, le C3 sert son AP+web local (sélection de bande → `SET_CHANNEL`,
   affichage des passages).
+- **Rôles web** : deux niveaux. Un **spectateur** voit les chronos/état en
+  lecture seule (sans login) ; les actions **admin** (appairage, ordre des
+  portes, canal, reset ; sélection de bande sur un C3 dégradé) exigent un login
+  (`CONFIG_*_ADMIN_USER`/`_PASSWORD`, en-tête HTTP Basic vérifié côté ESP). Un
+  mot de passe vide désactive l'auth admin.
 - **Contrainte** : l'AP du C6 et des C3 **et** ESP-NOW partagent le **même canal
   WiFi** (`CONFIG_*_AP_CHANNEL` / `CONFIG_C6_AP_CHANNEL`).
 - **Limite** : la base de temps (balises ESP-NOW) vise ~10 ms ; pas un

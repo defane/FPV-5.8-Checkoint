@@ -25,9 +25,13 @@ to tune it and watch events.
   the C6 master; if no master is reachable at boot it falls back to a local
   Wi-Fi SoftAP + web (band selection, results).
 - **ESP32-C6** (`firmware/c6`) — the optional **race-timing master**: UART to its
-  own C5, the centralized speaker, a Wi-Fi AP admin web (pairing, gate order,
-  channel assignment, live lap/sector standings), and an ESP-NOW hub that
+  own C5, the centralized speaker, a Wi-Fi AP web, and an ESP-NOW hub that
   aggregates the C3 nodes. Each gate is a C5; the C6 times laps per channel.
+
+The web has **two roles**: **spectators** watch the live standings and status
+read-only (no login), while **admin** actions — pairing, gate order, channel
+assignment, reset, and (on a degraded C3) band selection — require a login
+(`CONFIG_*_ADMIN_USER` / `_PASSWORD`, sent as HTTP Basic and checked server-side).
 
 ## Layout
 

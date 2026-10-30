@@ -3,6 +3,8 @@
 #include "c6_store.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
+#include "mbedtls/base64.h"
+#include "sdkconfig.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -98,7 +100,39 @@ static esp_err_t ok_json(httpd_req_t *req, bool ok) {
     return httpd_resp_sendstr(req, ok ? "{\"ok\":true}" : "{\"ok\":false}");
 }
 
+/* ---- admin auth (spectators are read-only; admin actions need a login) ---- */
+static char s_auth[160];   /* expected "Basic <base64(user:pass)>", empty = open */
+
+static void build_auth(void) {
+    if (CONFIG_C6_ADMIN_PASSWORD[0] == '\0') { s_auth[0] = '\0'; return; }  /* auth disabled */
+    char up[96];
+    int n = snprintf(up, sizeof up, "%s:%s", CONFIG_C6_ADMIN_USER, CONFIG_C6_ADMIN_PASSWORD);
+    unsigned char b64[128];
+    size_t olen = 0;
+    if (n <= 0 || mbedtls_base64_encode(b64, sizeof b64, &olen, (const unsigned char *)up,
+                                        (size_t)n) != 0) { s_auth[0] = '\0'; return; }
+    snprintf(s_auth, sizeof s_auth, "Basic %.*s", (int)olen, (const char *)b64);
+}
+
+static bool require_admin(httpd_req_t *req) {
+    if (s_auth[0] == '\0') return true;   /* admin auth disabled */
+    char hdr[192];
+    if (httpd_req_get_hdr_value_str(req, "Authorization", hdr, sizeof hdr) == ESP_OK &&
+        strcmp(hdr, s_auth) == 0)
+        return true;
+    httpd_resp_set_status(req, "401 Unauthorized");
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, "{\"ok\":false,\"auth\":true}"), false;
+}
+
+static esp_err_t get_auth(httpd_req_t *req) {
+    if (!require_admin(req)) return ESP_OK;   /* 401 already sent */
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, "{\"admin\":true}");
+}
+
 static esp_err_t post_pairing(httpd_req_t *req) {
+    if (!require_admin(req)) return ESP_OK;
     char buf[128];
     if (!read_body(req, buf, sizeof buf)) { httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "body"); return ESP_FAIL; }
     c6_hub_set_pairing(json_i(buf, "open", 0) != 0);
@@ -106,6 +140,7 @@ static esp_err_t post_pairing(httpd_req_t *req) {
 }
 
 static esp_err_t post_node(httpd_req_t *req) {
+    if (!require_admin(req)) return ESP_OK;
     char buf[128];
     if (!read_body(req, buf, sizeof buf)) { httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "body"); return ESP_FAIL; }
     bool ok = c6_hub_set_node((uint8_t)json_i(buf, "node_id", -1),
@@ -115,17 +150,20 @@ static esp_err_t post_node(httpd_req_t *req) {
 }
 
 static esp_err_t post_node_remove(httpd_req_t *req) {
+    if (!require_admin(req)) return ESP_OK;
     char buf[128];
     if (!read_body(req, buf, sizeof buf)) { httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "body"); return ESP_FAIL; }
     return ok_json(req, c6_hub_remove_node((uint8_t)json_i(buf, "node_id", -1)));
 }
 
 static esp_err_t post_reset(httpd_req_t *req) {
+    if (!require_admin(req)) return ESP_OK;
     c6_hub_reset_race();
     return ok_json(req, true);
 }
 
 void c6_web_start(void) {
+    build_auth();
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.lru_purge_enable = true;
     cfg.max_uri_handlers = 10;
@@ -134,6 +172,7 @@ void c6_web_start(void) {
     const httpd_uri_t uris[] = {
         { .uri = "/",             .method = HTTP_GET,  .handler = get_root },
         { .uri = "/api/state",    .method = HTTP_GET,  .handler = get_state },
+        { .uri = "/api/auth",     .method = HTTP_GET,  .handler = get_auth },
         { .uri = "/api/pairing",  .method = HTTP_POST, .handler = post_pairing },
         { .uri = "/api/node",     .method = HTTP_POST, .handler = post_node },
         { .uri = "/api/node_remove", .method = HTTP_POST, .handler = post_node_remove },
