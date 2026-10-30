@@ -35,6 +35,10 @@ remplace le rôle de cerveau du C3 et porte le haut-parleur. Chaque **porte** es
 un C5 ; le C5 du maître est câblé en UART au C6 (porte 0), les autres sont
 reliés à un **C3 nœud** qui relaie en **ESP-NOW** vers le C6.
 
+Schéma global des éléments et de leurs interactions :
+[`fleet.svg`](fleet.svg). Brochage consolidé des trois cartes : voir le
+[README](../README.md#pinout).
+
 - **Protocoles** : `components/link_proto` (UART C5↔pont, dont `SET_CHANNEL` qui
   déclenche un retune `rf_set_channel` sur le C5) ; `components/fleet_proto`
   (ESP-NOW C6↔C3 : appairage, balises temps, `CONFIG`, `GATE_PASS`,

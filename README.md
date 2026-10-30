@@ -73,12 +73,47 @@ cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/race_timing/include \
    test_race_timing.c ../components/race_timing/race_timing.c -o /tmp/t && /tmp/t
 ```
 
-## Wiring (summary)
+## Architecture
 
-C5↔C3 UART link (crossed, common ground): C5 **GPIO6 TX → C3 GPIO4 RX**, C5
-**GPIO15 RX ← C3 GPIO5 TX**. Amplifier on the C5: **BCLK 9, LRC 8, DIN 7, SD 10**,
-`VIN` 5 V, `OUT±` to a 4 Ω speaker. Full diagram and pin ownership:
-[docs/wiring.svg](docs/wiring.svg) and [CLAUDE.md](CLAUDE.md).
+Global schema of the elements and their interactions:
+**[docs/fleet.svg](docs/fleet.svg)**. Pin-level single-set wiring (C5, bridge,
+amplifier): **[docs/wiring.svg](docs/wiring.svg)**.
+
+## Pinout
+
+Each UART link is crossed (one side's TX to the other's RX) with a common
+ground. Pins are Kconfig defaults (`menuconfig`); the C6 defaults should be
+checked against your board's strapping pins. USB-Serial-JTAG (flashing/console)
+is reserved on every board.
+
+**ESP32-C5** (`firmware/c5`, detector — one per gate)
+
+| Function | GPIO | Notes |
+| --- | --- | --- |
+| Link UART TX → bridge RX | 6 | to a C3 (node) or the C6 (master) |
+| Link UART RX ← bridge TX | 15 | |
+| Amplifier BCLK / LRC / DIN / SD | 9 / 8 / 7 / 10 | only when the C5 sounds locally (standalone); off in a fleet |
+| forbidden | 0-5, 25, 27 (IQ) · 13,14 (USB) · 16-22 (flash) · 26 (antenna) | receiver-owned |
+
+**ESP32-C3** (`firmware/c3`, node bridge)
+
+| Function | GPIO | Notes |
+| --- | --- | --- |
+| UART TX → C5 RX (15) | 5 | |
+| UART RX ← C5 TX (6) | 4 | |
+| Wi-Fi / ESP-NOW | — | no GPIO; ESP-NOW to the C6 on the shared AP channel |
+
+**ESP32-C6** (`firmware/c6`, master)
+
+| Function | GPIO | Notes |
+| --- | --- | --- |
+| UART TX → local C5 RX (15) | 4 | |
+| UART RX ← local C5 TX (6) | 5 | |
+| Amplifier BCLK / LRC / DIN / SD | 18 / 19 / 20 / 21 | the centralized speaker; `VIN` 5 V, `OUT±` to a 4 Ω speaker |
+| Wi-Fi AP + ESP-NOW | — | admin web + fleet hub; same channel as the nodes |
+
+The C6 AP, the C3 APs and ESP-NOW must share the **same Wi-Fi channel**
+(`CONFIG_C6_AP_CHANNEL` / `CONFIG_C3_AP_CHANNEL`).
 
 ## Safety
 
