@@ -1,2 +1,0 @@
-#pragma once
-#define CONFIG_C5VRX_DIRECT_GAIN_V3_EXPERIMENT 1

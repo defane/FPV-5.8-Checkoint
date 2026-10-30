@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Fingerprint tracked C5VRX-5 firmware inputs, excluding website and docs.
+"""Fingerprint the tracked C5 firmware inputs (components/ + firmware/c5/).
 
 Identical inputs keep an existing release (c5vrx5.yml publish step), so a
-docs- or website-only change never mints new firmware. legacy/ is archived
-and never built.
+docs-only change never mints new firmware.
 """
 import hashlib
 import subprocess

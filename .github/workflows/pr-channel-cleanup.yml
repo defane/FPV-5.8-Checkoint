@@ -1,9 +1,9 @@
 name: PR Channel Cleanup
 
-# Removes c5vrx5-pr-N prereleases whose PR is no longer open, then refreshes
-# the web flasher mirror. A sweep rather than a per-PR delete: pull_request
-# close events are not delivered for PRs with merge conflicts or outside the
-# build's path filter, so channels of closed PRs stayed in the flasher.
+# Removes c5vrx5-pr-N prereleases whose PR is no longer open. A sweep rather
+# than a per-PR delete: pull_request close events are not delivered for PRs
+# with merge conflicts or outside the build's path filter, so channels of
+# closed PRs would otherwise linger.
 on:
   pull_request_target:   # base-repo context: runs on close even with conflicts; never checks out PR code
     types: [closed]
@@ -13,7 +13,6 @@ on:
 
 permissions:
   contents: write   # delete releases and their tags
-  actions: write    # dispatch the web flasher deployment
 
 concurrency:
   group: pr-channel-cleanup
@@ -43,6 +42,3 @@ jobs:
             fi
           done
           echo "Removed ${removed} PR channel(s)."
-          if (( removed > 0 )); then
-            gh workflow run deploy-web.yml --repo "$repo" --ref main
-          fi

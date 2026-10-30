@@ -372,18 +372,13 @@ DMA, DSP or DAC route.
    update the ledger and its linked evidence. Credit Twotoz
    and the relevant C5VRX contributors for the prior research being extended.
 
-## Releases, CI and web flasher deployment
-
-The web flasher has one production host: **GitHub Pages** at
-`https://twotoz.github.io/C5VRX/`. Do not add or document a VPS, proxy
-application server, second production host, or per-PR website deployment unless
-the project explicitly changes hosting architecture.
+## Releases and CI
 
 ### Workflows
 
-- `.github/workflows/c5vrx5.yml` ("C5VRX-5 Build") is the only firmware
-  workflow. It runs the host tests and research checks, builds the root
-  firmware with ESP-IDF v6.0.2 and publishes:
+- `.github/workflows/c5vrx5.yml` ("C5VRX-5 Build") is the firmware workflow.
+  It runs the host tests and research checks, builds firmware/c5 and
+  firmware/c3 with ESP-IDF v6.0.2 and publishes:
   - `c5vrx5-v5.0.<run number>` for a firmware change on `main` (immutable;
     never replace published version assets), marked as the repository's
     Latest release (an unchanged-input main run re-marks the newest one);
@@ -391,50 +386,17 @@ the project explicitly changes hosting architecture.
     (`opened`/`synchronize`/`reopened`); publish skips a PR that closed
     during the build. Fork PRs never get write-capable publication.
   - Unchanged `tools/firmware_input_hash.py` inputs keep the existing release,
-    so website/docs changes do not mint firmware.
+    so docs changes do not mint firmware.
 - Keep its concurrency group separated by event type and PR identity
   (`c5vrx5-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}`):
   a `github.ref`-only group let a merged PR's cleanup cancel the main build.
 - `.github/workflows/pr-channel-cleanup.yml` deletes every `c5vrx5-pr-<number>`
-  release whose PR is no longer open, then dispatches Deploy Web Flasher. It
-  sweeps on `pull_request_target` close (no path filter, runs despite merge
-  conflicts, never checks out PR code), hourly and manually. A per-PR cleanup
-  on the build's `pull_request` close event is not reliable: GitHub does not
-  deliver it for PRs with merge conflicts or outside the path filter, which
-  left channels of closed PRs in the flasher.
-- `.github/workflows/deploy-web.yml` is the only production web deployment.
-  It always checks out trusted `main`, runs `tools/prepare_pages_site.sh` and
-  publishes `web/` plus a same-origin `firmware/` mirror. It runs for web
-  changes on `main`, manually (also dispatched by the PR channel cleanup), and
-  after a successful C5VRX-5 Build, so new or removed PR builds and new
-  releases reach the flasher without deploying unmerged web code.
-- `.github/workflows/web-checks.yml` checks the flasher scripts and tests.
+  release whose PR is no longer open. It sweeps on `pull_request_target` close
+  (no path filter, runs despite merge conflicts, never checks out PR code),
+  hourly and manually. A per-PR cleanup on the build's `pull_request` close
+  event is not reliable: GitHub does not deliver it for PRs with merge conflicts
+  or outside the path filter, which would leave closed-PR channels lingering.
 
 The former C5VRX-3 Production CI (semantic `v3.x` releases, `pr-N`), the
 C5VRX-4 alpha workflow and the PlatformIO workflow were retired with their
 generations (2026-10-12). Their published releases stay as they are.
-
-### Flasher tabs and the Pages mirror
-
-- **C5VRX-5**: `c5vrx5-v5.*` releases newest first, then `c5vrx5-pr-*`
-  prereleases (explicit confirmation before flashing an unmerged build).
-- **Local File**: a user-supplied `.bin`.
-- **Legacy builds**: the newest 20 archived C5VRX-3 semantic releases
-  (`v3.*`), frozen; no new legacy builds are produced.
-
-`tools/prepare_pages_site.sh` runs in GitHub Actions (no CORS), downloads the
-selected release assets into `firmware/<tag>/` and writes
-`firmware/releases.json` with a `local_url` per asset. `web/app.js` must prefer
-`asset.local_url`; GitHub asset/API URLs are only a development fallback.
-Never add a third-party CORS proxy or make production flashing depend on
-cross-origin GitHub binary fetches.
-
-### Debugging a build missing from the flasher
-
-Verify in order: a successful C5VRX-5 Build on the exact head; its publish
-job really published (not skipped) a `c5vrx5-pr-<number>` or `c5vrx5-v5.*`
-release with the application, merged image, bootloader, partition table,
-`flasher_args.json`, `FIRMWARE_INPUT_SHA` and checksums; the completion
-triggered Deploy Web Flasher; its mirror log lists the tag and the Pages
-artifact contains `firmware/<tag>/`. If the release is missing, fix
-publication; refreshing Pages cannot invent a release.
