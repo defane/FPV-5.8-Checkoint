@@ -3,7 +3,11 @@
 > the C5VRX contributors (forked at upstream commit `6bc9e4b`) and adds a
 > "drone just passed" checkpoint: a pass detector on the tuned channel's C/N and
 > an I2S coin sound (`components/pass_detector`, `components/audio_player`,
-> `main/checkpoint.c`; see [docs/CHECKPOINT.md](docs/CHECKPOINT.md)). Visit the
+> `components/checkpoint`; see [docs/CHECKPOINT.md](docs/CHECKPOINT.md)). The
+> C5VRX receive engine is consumed unchanged as the `components/c5vrx_rx`
+> component by a two-ESP platform: the ESP32-C5 (`firmware/c5`) detects and
+> sounds, an ESP32-C3 (`firmware/c3`) propagates config and telemetry over a
+> UART link with a Wi-Fi web UI. Visit the
 > [official C5VRX website](https://twotoz.github.io/C5VRX/) for the original
 > project and its Discord invite. See the source and license notices
 > (GPL-3.0-only) for the applicable terms; this derivative is not an official
