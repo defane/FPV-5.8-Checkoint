@@ -82,85 +82,71 @@ permitted GPL reuse. Credit external sources used by C5VRX with the same care.
 
 ## Repository sources
 
-- Current implementation (the only firmware that is built): C5VRX-5 at the
-  repository root: `main/` (firmware), `test/` (host tests), `research/`
-  (simulations, generators, data), `docs/` (findings, field-test protocol,
-  task plan, DAC schematic), `tools/` (console/log tools, CI/Pages helpers).
-- Archived generations, never built: `legacy/c5vrx1`, `legacy/c5vrx2`,
-  `legacy/c5vrx3` (the former root firmware, its docs and tools, retired
-  2026-10-12) and `legacy/c5vrx4` (the former `experiments/c5vrx-4`).
-- Hardware-proven findings of the earlier generations:
-  `legacy/c5vrx3/docs` (continuous IQ, EOF issue, gain, range research).
-- Preserved archive discussions: `legacy/legacy-issues`.
-- Research provenance ledger of every generation (data sources, pipelines,
-  negative results, C5VRX-5 decision history): `docs/RESEARCH_LEDGER.md`.
+- `components/c5vrx_rx/` — the C5VRX-5 receive engine, reused unchanged from
+  upstream (RF/transport/gain/AGC/control/calibration/console).
+- `components/checkpoint/`, `components/pass_detector/`,
+  `components/audio_player/`, `components/link_proto/` — the platform's own
+  code (pass detection, coin sound, the C5<->C3 UART protocol).
+- `firmware/c5/` and `firmware/c3/` — the two ESP32 applications.
+- `test/` host tests, `tools/` console/log/build helpers, `docs/` the
+  platform's feature notes (`docs/CHECKPOINT.md`) and wiring.
 
-The legacy trees are reference material, not production code. Always search
-them when investigating ESP32-C5 RF/PHY, MODEM_DIAG, IQ capture, analog video,
-WBFM, PARLIO, DAC hardware, receiver-console behavior, or an architecture that
-may already have been attempted. Their build files and tool paths are kept as
-they were; they are not maintained.
-
-When historical assumptions conflict with newer physical C5VRX evidence, the
-current C5VRX-5 findings (`docs/FINDINGS.md`) and then the hardware findings
-in `legacy/c5vrx3/docs` take precedence. Do not reintroduce a rejected
-architecture before reading the findings that explain its failure.
+The receive engine is upstream material reused unchanged; do not modify it
+without the operator's approval (the realtime invariants below still govern
+any change to it).
 
 ## C5VRX-5 at a glance
 
-The current receiver (repository root). Its decision history, retired
-features and their evidence are in `docs/RESEARCH_LEDGER.md` ("C5VRX-5: the
-distilled receiver") and `docs/FINDINGS.md`; the rules below are current.
+The receive engine (`components/c5vrx_rx`); the rules below are the current
+receiver invariants.
 
 - Datapath: MODEM_DIAG Q4/I4 (fixed ultrafine lane) -> PARLIO RX40 -> raw
-  32 KiB ring -> TX BitScrambler U80P64-R1 (`main/p64.bsasm`, or U85Q, two lookups,
-  unique CVBS20 as [D,D] at TX40) -> six-bit resistor DAC (`main/transport.c`,
-  `main/rf.c`).
-- Gain: GAIN model LEVEL by default (`main/agc.c`), KEEL-1 and RSSI
-  selectable, Direct Gain core in `main/gain.c`.
-- Calibration (`main/calibration*.c`, shared state in
-  `main/calibration_internal.h`): task, boot and manual startup phase in
+  32 KiB ring -> TX BitScrambler U80P64-R1 (`components/c5vrx_rx/p64.bsasm`, or U85Q, two lookups,
+  unique CVBS20 as [D,D] at TX40) -> six-bit resistor DAC (`components/c5vrx_rx/transport.c`,
+  `components/c5vrx_rx/rf.c`).
+- Gain: GAIN model LEVEL by default (`components/c5vrx_rx/agc.c`), KEEL-1 and RSSI
+  selectable, Direct Gain core in `components/c5vrx_rx/gain.c`.
+- Calibration (`components/c5vrx_rx/calibration*.c`, shared state in
+  `components/c5vrx_rx/calibration_internal.h`): task, boot and manual startup phase in
   `calibration.c`; sampling phase `calibration_sphase.c`; analog filter
   `calibration_filter.c`; DC tables, health and live DC servo
   `calibration_dc.c`; bench-only console L / self-noise `calibration_bench.c`.
-- Control loop, AFC and observers: `main/control.c`, `main/receiver.c`;
-  profiles `main/profile.c`; FIELD_DIAG `main/diag.c`; flight log
-  `main/flightlog.c` (docs/FLIGHT_LOG.md); PHY access `main/phy.c`.
+- Control loop, AFC and observers: `components/c5vrx_rx/control.c`, `components/c5vrx_rx/receiver.c`;
+  profiles `components/c5vrx_rx/profile.c`; FIELD_DIAG `components/c5vrx_rx/diag.c`; flight log
+  `components/c5vrx_rx/flightlog.c`; PHY access `components/c5vrx_rx/phy.c`.
 - Pure logic lives in headers (`*_logic.h`, `dc_servo.h`, `dco_slots.h`, ...)
   with host tests in `test/`; CI runs them before the firmware build.
 - Board status: runs and holds video; range is not yet measured.
 
 ## Current realtime invariants (C5VRX-5)
 
-- Operator IQ pin experiment (2026-10-25): `RF_IQ_GPIO_NUMS` in `main/rf.h`
+- Operator IQ pin experiment (2026-10-25): `RF_IQ_GPIO_NUMS` in `components/c5vrx_rx/rf.h`
   supplies both MODEM_DIAG routing and PARLIO RX: Q = 1/0/25/2,
   I = 27/5/3/4. GPIO27 replaces GPIO10; GPIO2 replaces GPIO7. Reserve
   D10/GPIO10 (15 kOhm) and D3/GPIO7 (33 kOhm) for future seventh/eighth
   DAC branches, DNP until wider firmware and hardware validation. These are
   new low bits: 7-bit D10=bit0; 8-bit D10=bit1, D3=bit0. GPIO2 is IQ-owned,
   incompatible with PR #257's optional clock. GPIO27 is never a status LED. The XIAO LED/resistor
-  remains attached and high-speed loopback validation is pending; see
-  docs/FINDINGS.md "GPIO27 IQ loopback experiment". Keep the existing DAC
+  remains attached and high-speed loopback validation is pending. Keep the existing DAC
   wiring and RX40/raw32K/two-lookup/DAC20-at-TX40 cadence.
 
 - This GPIO-only comparison is directly on main and must remain free of
   TBC. The operator reported trouble with the GPIO27 LED route; preserve
   that result as a finding, without asserting a proven electrical cause.
 
-- Operator decision (2026-10-28): U85Q (`main/u85q.bsasm`, the archived untrained
-  program with its own LUT `main/u85q_table.h`; no kp ladder, no LP) is selectable
+- Operator decision (2026-10-28): U85Q (`components/c5vrx_rx/u85q.bsasm`, the archived untrained
+  program with its own LUT `components/c5vrx_rx/u85q_table.h`; no kp ladder, no LP) is selectable
   again next to U80P64-R1, the default: menu DEMOD, console `m`, NVS `demod`, a
   verified restart with rollback to the last verified decoder. Board walk 296:
   no gain over P64 for an NTSC VTX at deviation 0.66 (host model: equal there;
   P64 holds sync 1-2 dB longer at deviation 1.0-1.4). This amends the decision
   below for U85Q only; the kp/LP policies and their keys stay retired.
 - Operator cleanup decision (2026-10-23, confirmed single-model scope):
-  active firmware builds and boots U80P64-R1 only (`main/p64.bsasm`). U85Q,
+  active firmware builds and boots U80P64-R1 only (`components/c5vrx_rx/p64.bsasm`). U85Q,
   the kp ladder/tables, LP policy/state, demod selection and console m/K/k/j/P/O/H
   are retired. Saved kp_auto/lp_cn are ignored. Profiles select only analog
   filter classes; historical profile ID 2 is reserved, never selected.
-  `research/legacy_demod/` preserves historical programs, policies and replay
-  inputs, never firmware dependencies. OUTPUT settings and verified
+  OUTPUT settings and verified
   bounded restart/rollback stay active, with one shared five-second guard for
   live OUTPUT/profile changes. Existing flight-log wire slots and
   decoder identities remain backward-compatible.
@@ -169,14 +155,13 @@ distilled receiver") and `docs/FINDINGS.md`; the rules below are current.
   menu FLYWHEEL, console `U`, NVS `flywheel`) is removed completely. On the
   board it gave extreme desyncs and poor range. The live path again only
   recovers the transmitted composite waveform. A saved `flywheel` key is
-  ignored; flight-log flywheel slots stay for old logs and read 0. See
-  `docs/FINDINGS.md`, "Sync flywheel removed". Do not restore it from git
+  ignored; flight-log flywheel slots stay for old logs and read 0. Do not restore it from git
   history without a new board comparison that beats flywheel OFF.
 - The P64 default is an explicit operator choice, not a host-score promotion.
   Its fixed table is unchanged from the positive VTX-on NTSC check at d894bef;
   PAL, weak-signal/range and the final cleanup still require board checks.
-  The 7.2-degree grid is not measured input accuracy. Record evidence limits
-  in docs/P64.md. Preserve the raw32K/RX40/two-lookup/DAC20-at-TX40 cadence.
+  The 7.2-degree grid is not measured input accuracy. Record evidence limits.
+  Preserve the raw32K/RX40/two-lookup/DAC20-at-TX40 cadence.
   The operator controls VTX power; use short announced measurement windows.
 
 - Operator request (2026-10-24): integrate PR #254's pinned 11p helper (1,0)
@@ -184,7 +169,7 @@ distilled receiver") and `docs/FINDINGS.md`; the rules below are current.
   verify full entry and exact saved-state rollback, stop on supported-PHY
   failure. Default analog bytes are 60; explicit profiles still use factory
   references so calibration can measure wider settings. Invalidate all old
-  RF calibration/noise/gain maps. See docs/FINDINGS.md "11p receive baseline".
+  RF calibration/noise/gain maps.
   This is an operator-selected integration, not measured range acceptance.
 
 - Digital RX filter mode 12 (`PHY_DFILT_MODE_DEFAULT`) is reapplied after
@@ -196,14 +181,13 @@ distilled receiver") and `docs/FINDINGS.md`; the rules below are current.
   gain model.
   Preserve the vendor ADC-rate choice; other mode values and ADC-rate
   overrides are lab research. Readback and calibration migration are
-  required when changing the receive transfer function. See
-  `docs/FINDINGS.md`, "Digital RX filter mode 0" and "VTX-on PHY lab, AFC
-  window and digital mode 12"; measured at 5865 MHz only, not a range gain.
+  required when changing the receive transfer function; measured at 5865 MHz
+  only, not a range gain.
 
 - **Direct Gain V5 is the only gain owner.** There is no native hardware AGC
   in C5VRX-5 (removed with C5VRX-3, 2026-10-12): on a continuous carrier the
   C5 packet AGC re-acquires every ~21 us on a different gain, which caused
-  line noise and grain (`legacy/c5vrx3/docs/native-agc-v2.md`). Do not add it
+  line noise and grain. Do not add it
   back without a new hardware comparison that beats Direct Gain V5.
 - The live source is MODEM_DIAG Q4/I4 (fixed ultrafine lane) captured by
   PARLIO RX into the raw 32 KiB ring; the TX BitScrambler (U80P64-R1)
@@ -222,25 +206,22 @@ distilled receiver") and `docs/FINDINGS.md`; the rules below are current.
 
 ## Current receiver settings (PR #212 and later)
 
-This section supersedes older C5VRX-5 default/feature notes in
-`docs/RESEARCH_LEDGER.md`.
 Direct Gain V6 extends V5 with same-context carrier memory: hold 10 ms,
 then climb eight indices per 3 ms; overload above the remembered healthy gain
 returns to it in one write. Learned maps still require exact provenance.
-GAIN (console `G`): LEVEL (`main/agc.c`, the default since 2026-10-27, operator decision after the hand-on-antenna board test), KEEL (KEEL-1, `GAIN_MODE_AUTO` = 0, kept as a fallback), RSSI (a baseline). LEVEL scores rows with the measured demod quality `main/level_quality.h` (generated by `research/level_quality.py` from `research/data/level_quality_grid.json`; never edit it by hand), MAX or fixed G78..G24. The automatic models are kept across reboots (NVS `prefs`, 2026-10-27); MAX and fixed gains are never stored: such a boot starts LEVEL (operator decision 2026-10-20, default model 2026-10-27). See docs/FINDINGS.md "AGC research".
+GAIN (console `G`): LEVEL (`components/c5vrx_rx/agc.c`, the default since 2026-10-27, operator decision after the hand-on-antenna board test), KEEL (KEEL-1, `GAIN_MODE_AUTO` = 0, kept as a fallback), RSSI (a baseline). LEVEL scores rows with the measured demod quality `components/c5vrx_rx/level_quality.h` (measured on the board; never edit it by hand), MAX or fixed G78..G24. The automatic models are kept across reboots (NVS `prefs`, 2026-10-27); MAX and fixed gains are never stored: such a boot starts LEVEL (operator decision 2026-10-20, default model 2026-10-27).
 FLYWHEEL (console `U`) was removed on 2026-10-25 (operator: extreme
 desyncs and poor range); see the realtime invariants above.
 Menu entry allocates internal DMA descriptors in 384-byte chunks before
 touching live video. Interlaced
 NTSC/PAL needs about 18/22 KiB; progressive fallback about 9/11 KiB.
 Keep the 6144-byte control stack reserved before RF/driver allocations.
-See [PR212](docs/PR212.md) for current behavior, evidence and board checks.
 Historical kp/LP policy (retired by the 2026-10-23 single-model decision):
 PR #230 used predicted picture benefit and noise-referenced C/N to select
 U85Q-LP, with console `O` selecting the earlier gain-driven policy. Those
 controls, policies and `lp_cn` settings are no longer active firmware.
-The frozen implementations and replay evidence remain research under
-`research/legacy_demod/`; do not restore them as current receiver behavior.
+Those implementations are not part of the firmware; do not restore them as
+current receiver behavior.
 Current C/N decisions still require C/N-AUTO's noise-referenced power source;
 uncalibrated envelope/M2M4 estimates are telemetry only (issue #222). Without
 an exact-context noise reference, AFC/profile decisions see UNKNOWN and hold
@@ -248,7 +229,7 @@ or refuse the action. Preserve that boundary independently of retired kp/LP.
 
 ## Control-work principles (from the archived IQ Fusion contract)
 
-The C5VRX-3 `FUSION EXP` contract (`docs/RESEARCH_LEDGER.md`) still applies
+The C5VRX-3 `FUSION EXP` contract still applies
 to any C5VRX-5 control work: never insert CPU processing into the 40 MS/s
 realtime path; at the range edge, loss of sync/video is never by itself
 evidence to reduce sensitivity, and NO_CARRIER returns to the known
@@ -266,32 +247,30 @@ Passive multi-block evidence may recommend calibration; missing tables and
 unknown evidence alone never warn. Menu/F calibrates one normal filter; B is
 explicit full RF optimization. C/web download is read-only and framed/checksummed.
 Keep the report schema/provenance, all final verification/fallbacks and the
-10-second boot target/instrumentation. See docs/FASTER_CALIBRATION.md.
+10-second boot target/instrumentation.
 DC base map + live servo (operator decision 2026-10-26): with the baseline
-filter, rows without own codes are filled from `main/dco_preset.h` (generated
+filter, rows without own codes are filled from `components/c5vrx_rx/dco_preset.h` (generated
 by `tools/dco_preset.py` from board reports; one board so far; never edit by
 hand) as template rows. Live, the per-row DC servo of main (`servo_service`,
 `dc_servo.h`) trims every held row with the VTX on or off and adopts a
 template/base-map row it holds within 0.3 cells as an own row. Calibration is
 recommended only at the servo's trim limit, without a row, after a fault, or
-after 30 s of qualified DC above 1.5 cells. See docs/FASTER_CALIBRATION.md.
-Range edge audit (2026-10-27, docs/FINDINGS.md "Range edge audit"): the hold
+after 30 s of qualified DC above 1.5 cells.
+Range edge audit (2026-10-27): the hold
 guard in `dco_service()` releases/bans a row only where the servo cannot trim
 it (a ban used to lock the servo out of railing edge rows for 2-32 s); the
 servo brackets the sign bit where its share saturates (double / halve, hold a
 one-code crossing) and decides on 4096 samples there. Do not restore the
 unconditional rail ban. Bank 1 of the DC words is pinned per DC table
 (`phy.c pin_bank1`): never copy the live bank 1 into a hold again (a vendor
-rewrite moved every row beyond the trim, docs/FINDINGS.md "DC fault after a
-walk"). One-sided rails are `dc_rails` (a DC fault the search fixes), not a
+rewrite moved every row beyond the trim). One-sided rails are `dc_rails` (a DC fault the search fixes), not a
 carrier; a row the servo cannot hold raises DC_FAULT (menu DC CAL!). Manual calibration ends on CALIBRATION OK /
 INCOMPLETE (`CAL_RESULT`). The AFC porch window is 1.2-3.6 us after the
 detected sync end (the PAL-set 3.4-4.4 us read NTSC active video).
 
 ## Startup calibration acceleration (2026-10-25, hardware pending)
 
-`docs/FASTER_CALIBRATION.md` records the startup-only fast search extensions:
-short DC probes with full verification/fallback; all-setting filter screening
+The startup-only fast search extensions: short DC probes with full verification/fallback; all-setting filter screening
 with full contender and winner checks; confirmed three-position phase fast path
 with nine-position fallback; exact-context fresh DC noise reuse; 2 s absent-VTX
 grace with unchanged deviation evidence. Preserve the fallback and final
@@ -348,16 +327,10 @@ discovery. This credit does not assert sole authorship of every implementation,
 ownership of Espressif technology, or a new license restriction. The attribution
 rules above still apply.
 
-The full ledger (data sources and acquisition methods, C5VRX-1 to C5VRX-4
-pipelines, the Espressif EOF issue, the C5VRX-5 decision history, IQLaneFusion
-and the archived C5VRX-3/4 invariants) is `docs/RESEARCH_LEDGER.md`. Read it,
-with `legacy/c5vrx3/docs/KNOWLEDGE_INDEX.md`, before proposing a CPU, source,
-DMA, DSP or DAC route.
+When proposing a new CPU, source, DMA, DSP or DAC route:
 
-1. Search the ledger (`docs/RESEARCH_LEDGER.md`), the original source paths,
-   `legacy/c5vrx3/docs/KNOWLEDGE_INDEX.md` and
-   `legacy/c5vrx3/docs/pr-derived-findings.md` before proposing a CPU, source,
-   DMA, DSP or DAC route. State which previously investigated method it extends.
+1. State which previously investigated method it extends, naming the original
+   source paths it builds on.
 2. Record source format/tap, acquired rate, CPU vs hardware ownership, ring
    format, number of bundles/lookups, unique DAC rate, physical TX rate and
    boundary state separately. "40 MHz" alone does not describe a pipeline.
@@ -369,15 +342,15 @@ DMA, DSP or DAC route.
    hardware setup. A new architecture may revisit them with new evidence;
    previously tried does not mean universally impossible or forbidden.
 5. When new work changes a result or creates another source/processing route,
-   update the ledger and its linked evidence. Credit Twotoz
-   and the relevant C5VRX contributors for the prior research being extended.
+   record it with its evidence. Credit Twotoz and the relevant C5VRX
+   contributors for the prior research being extended.
 
 ## Releases and CI
 
 ### Workflows
 
 - `.github/workflows/c5vrx5.yml` ("C5VRX-5 Build") is the firmware workflow.
-  It runs the host tests and research checks, builds firmware/c5 and
+  It runs the host tests, builds firmware/c5 and
   firmware/c3 with ESP-IDF v6.0.2 and publishes:
   - `c5vrx5-v5.0.<run number>` for a firmware change on `main` (immutable;
     never replace published version assets), marked as the repository's
