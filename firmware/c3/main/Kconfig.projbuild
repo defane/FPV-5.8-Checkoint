@@ -1,0 +1,33 @@
+menu "Checkpoint C3 bridge"
+
+    config C3_UART_NUM
+        int "Link UART controller number"
+        default 1
+        range 0 1
+
+    config C3_UART_TX_GPIO
+        int "Link UART TX GPIO (to the C5 RX, GPIO 15)"
+        default 5
+
+    config C3_UART_RX_GPIO
+        int "Link UART RX GPIO (from the C5 TX, GPIO 6)"
+        default 4
+
+    config C3_UART_BAUD
+        int "Link UART baud rate (must match the C5)"
+        default 115200
+
+    config C3_AP_SSID
+        string "Wi-Fi SoftAP SSID"
+        default "checkpoint-c3"
+
+    config C3_AP_PASSWORD
+        string "Wi-Fi SoftAP password (>= 8 chars, empty = open)"
+        default "dronepass"
+
+    config C3_AP_CHANNEL
+        int "Wi-Fi SoftAP channel"
+        default 1
+        range 1 13
+
+endmenu

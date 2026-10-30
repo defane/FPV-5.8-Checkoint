@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Checkpoint C3</title>
+<style>
+  :root { color-scheme: dark; }
+  body { font-family: system-ui, sans-serif; margin: 0; background: #14171c; color: #e7ebf0; }
+  header { padding: 14px 16px; background: #1b2026; font-weight: 600; font-size: 1.1rem; }
+  main { padding: 16px; max-width: 640px; margin: 0 auto; }
+  h2 { font-size: 0.95rem; text-transform: uppercase; letter-spacing: .04em; color: #8b97a7; margin: 22px 0 8px; }
+  .card { background: #1b2026; border: 1px solid #2a313a; border-radius: 10px; padding: 14px; }
+  label { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 8px 0; font-size: .92rem; }
+  input[type=number] { width: 110px; background: #0f1216; color: #e7ebf0; border: 1px solid #2a313a; border-radius: 6px; padding: 6px; }
+  .row { display: flex; gap: 18px; flex-wrap: wrap; }
+  .stat { flex: 1 1 120px; }
+  .stat b { display: block; font-size: 1.4rem; }
+  .stat span { color: #8b97a7; font-size: .8rem; }
+  button { margin-top: 12px; background: #2f6feb; color: #fff; border: 0; border-radius: 8px; padding: 10px 16px; font-size: .95rem; cursor: pointer; }
+  button:active { background: #255ac2; }
+  #events { list-style: none; padding: 0; margin: 0; font-variant-numeric: tabular-nums; }
+  #events li { padding: 6px 0; border-top: 1px solid #2a313a; font-size: .9rem; }
+  .muted { color: #8b97a7; }
+  .pill { font-size: .8rem; padding: 2px 8px; border-radius: 999px; background: #2a313a; }
+</style>
+</head>
+<body>
+<header>Checkpoint C3 <span id="link" class="pill">…</span></header>
+<main>
+  <h2>Live</h2>
+  <div class="card row">
+    <div class="stat"><b id="s_cn">—</b><span>C/N dB</span></div>
+    <div class="stat"><b id="s_ch">—</b><span>channel</span></div>
+    <div class="stat"><b id="s_state">—</b><span>state</span></div>
+    <div class="stat"><b id="s_passes">—</b><span>passes</span></div>
+    <div class="stat"><b id="s_played">—</b><span>played</span></div>
+  </div>
+
+  <h2>Detector</h2>
+  <div class="card">
+    <label>Smoothing alpha <input id="alpha" type="number" step="0.05" min="0.05" max="1"></label>
+    <label>Activity threshold (dB) <input id="active" type="number" step="0.5"></label>
+    <label>Hysteresis (dB) <input id="hyst" type="number" step="0.5"></label>
+    <label>Pass drop (dB) <input id="drop" type="number" step="0.5"></label>
+    <label>Minimum peak (dB) <input id="minpeak" type="number" step="0.5"></label>
+    <label>Refractory (ms) <input id="refr" type="number" step="250" min="0"></label>
+    <label>Stale (ms) <input id="stale" type="number" step="250" min="1"></label>
+    <label>Volume (%) <input id="vol" type="number" step="5" min="0" max="100"></label>
+    <label>Muted <input id="muted" type="checkbox"></label>
+    <button id="save">Apply &amp; save</button>
+    <span id="msg" class="muted"></span>
+  </div>
+
+  <h2>Recent passes</h2>
+  <ul id="events" class="card"></ul>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const CH = n => "R" + (n + 1);
+const STATES = ["IDLE", "RISING", "PEAK_PASSED", "COOLDOWN"];
+let dirty = false;
+["alpha","active","hyst","drop","minpeak","refr","stale","vol","muted"].forEach(
+  id => $(id).addEventListener("input", () => { dirty = true; }));
+
+function fillConfig(c) {
+  if (dirty) return;                 // don't stomp on edits in progress
+  $("alpha").value  = (c.alpha_milli / 1000).toFixed(2);
+  $("active").value = (c.active_db_x10 / 10).toFixed(1);
+  $("hyst").value   = (c.hysteresis_db_x10 / 10).toFixed(1);
+  $("drop").value   = (c.drop_db_x10 / 10).toFixed(1);
+  $("minpeak").value= (c.min_peak_db_x10 / 10).toFixed(1);
+  $("refr").value   = c.refractory_ms;
+  $("stale").value  = c.stale_ms;
+  $("vol").value    = c.volume_pct;
+  $("muted").checked= !!c.muted;
+}
+
+async function poll() {
+  try {
+    const s = await (await fetch("/api/state")).json();
+    $("link").textContent = s.has_stats ? "linked" : "no C5 yet";
+    if (s.has_config) fillConfig(s.config);
+    const st = s.stats || {};
+    $("s_cn").textContent = (s.has_stats && st.cn_x10 > -990) ? (st.cn_x10 / 10).toFixed(1) : "—";
+    $("s_ch").textContent = s.has_stats ? CH(st.channel) : "—";
+    $("s_state").textContent = s.has_stats ? (STATES[st.state] || st.state) : "—";
+    $("s_passes").textContent = s.total_events;
+    $("s_played").textContent = s.has_stats ? st.played : "—";
+    $("events").innerHTML = (s.events || []).map(e =>
+      `<li>${CH(e.channel)} &middot; peak ${(e.peak_db_x10/10).toFixed(1)} dB &middot; <span class="muted">${e.at_ms} ms</span></li>`
+    ).join("") || '<li class="muted">none yet</li>';
+  } catch (e) { $("link").textContent = "offline"; }
+}
+
+$("save").addEventListener("click", async () => {
+  const body = {
+    alpha_milli: Math.round(parseFloat($("alpha").value) * 1000),
+    active_db_x10: Math.round(parseFloat($("active").value) * 10),
+    hysteresis_db_x10: Math.round(parseFloat($("hyst").value) * 10),
+    drop_db_x10: Math.round(parseFloat($("drop").value) * 10),
+    min_peak_db_x10: Math.round(parseFloat($("minpeak").value) * 10),
+    refractory_ms: parseInt($("refr").value, 10),
+    stale_ms: parseInt($("stale").value, 10),
+    volume_pct: parseInt($("vol").value, 10),
+    muted: $("muted").checked ? 1 : 0,
+  };
+  $("msg").textContent = "saving…";
+  try {
+    await fetch("/api/config", { method: "POST", body: JSON.stringify(body) });
+    dirty = false;
+    $("msg").textContent = "saved";
+    setTimeout(() => $("msg").textContent = "", 1500);
+  } catch (e) { $("msg").textContent = "failed"; }
+});
+
+poll();
+setInterval(poll, 1000);
+</script>
+</body>
+</html>
