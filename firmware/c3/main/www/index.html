@@ -48,6 +48,7 @@
     <label>Stale (ms) <input id="stale" type="number" step="250" min="1"></label>
     <label>Volume (%) <input id="vol" type="number" step="5" min="0" max="100"></label>
     <label>Muted <input id="muted" type="checkbox"></label>
+    <label>Band / RF channel index <input id="chan" type="number" min="0" max="47" placeholder="unchanged"></label>
     <button id="save">Apply &amp; save</button>
     <span id="msg" class="muted"></span>
   </div>
@@ -104,6 +105,7 @@ $("save").addEventListener("click", async () => {
     stale_ms: parseInt($("stale").value, 10),
     volume_pct: parseInt($("vol").value, 10),
     muted: $("muted").checked ? 1 : 0,
+    channel: $("chan").value === "" ? -1 : parseInt($("chan").value, 10),
   };
   $("msg").textContent = "saving…";
   try {

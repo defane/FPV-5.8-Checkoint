@@ -104,6 +104,8 @@ static esp_err_t post_config(httpd_req_t *req)
 
     c3_store_set_config(&cur, true);
     c3_link_push_config(&cur);
+    const int32_t ch = json_i(buf, "channel", -1);   /* optional band selection */
+    if (ch >= 0) c3_link_set_channel((uint8_t)ch);
     ESP_LOGI(TAG, "config updated from web");
 
     httpd_resp_set_type(req, "application/json");

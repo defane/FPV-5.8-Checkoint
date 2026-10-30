@@ -1,60 +1,53 @@
 #include "c3_link.h"
-#include "c3_store.h"
 #include "driver/uart.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
 #include "sdkconfig.h"
+#include <string.h>
 
 #define LINK_UART     ((uart_port_t)CONFIG_C3_UART_NUM)
 #define LINK_RX_BUF   256u
 #define LINK_READ_MS  100u
-#define LINK_OUTQ     2u
+#define OUTQ_DEPTH    4u
 
 static const char *TAG = "c3_link";
-static QueueHandle_t s_outq;   /* lp_config_t to send as CONFIG_SET */
+static QueueHandle_t s_outq;        /* pre-encoded frames to send to the C5 */
+static void (*s_on_pass)(const lp_event_t *);
+static void (*s_on_stats)(const lp_stats_t *);
 
-static void send_frame(const uint8_t *buf, size_t n) {
-    if (n) uart_write_bytes(LINK_UART, (const char *)buf, n);
+typedef struct { uint8_t buf[LP_MAX_FRAME]; uint8_t len; } frame_t;
+
+static void enqueue(const uint8_t *b, size_t n) {
+    if (!n || !s_outq) return;
+    frame_t f;
+    memcpy(f.buf, b, n);
+    f.len = (uint8_t)n;
+    (void)xQueueSend(s_outq, &f, 0);
 }
 
-static void send_config_set(const lp_config_t *c) {
-    uint8_t buf[LP_MAX_FRAME];
-    send_frame(buf, lp_encode_config(buf, sizeof buf, LP_MSG_CONFIG_SET, c));
+void c3_link_set_handlers(void (*on_pass)(const lp_event_t *),
+                          void (*on_stats)(const lp_stats_t *)) {
+    s_on_pass = on_pass;
+    s_on_stats = on_stats;
 }
 
-static void send_simple(size_t (*enc)(uint8_t *, size_t)) {
-    uint8_t buf[LP_MAX_FRAME];
-    send_frame(buf, enc(buf, sizeof buf));
+void c3_link_push_config(const lp_config_t *c) {
+    uint8_t b[LP_MAX_FRAME];
+    enqueue(b, lp_encode_config(b, sizeof b, LP_MSG_CONFIG_SET, c));
 }
 
-/* The C5 (re)started or we are starting: enforce our config if we have one,
- * otherwise ask for the C5's so a fresh C3 adopts it. */
-static void resync(void) {
-    lp_config_t c;
-    if (c3_store_get_config(&c)) send_config_set(&c);
-    else send_simple(lp_encode_config_req);
+void c3_link_set_channel(uint8_t rf_index) {
+    uint8_t b[LP_MAX_FRAME];
+    enqueue(b, lp_encode_set_channel(b, sizeof b, rf_index));
 }
 
 static void handle_msg(const lp_msg_t *m) {
     switch (m->type) {
-    case LP_MSG_CONFIG_STATE: {
-        lp_config_t cur;
-        if (!c3_store_get_config(&cur)) c3_store_set_config(&m->config, true); /* adopt */
-        break;
-    }
-    case LP_MSG_EVENT_PASS:
-        c3_store_add_event(&m->event);
-        break;
-    case LP_MSG_STATS:
-        c3_store_set_stats(&m->stats);
-        break;
-    case LP_MSG_HELLO:          /* C5 announced itself: it just booted */
-        resync();
-        break;
-    default:
-        break;
+    case LP_MSG_EVENT_PASS: if (s_on_pass) s_on_pass(&m->event); break;
+    case LP_MSG_STATS:      if (s_on_stats) s_on_stats(&m->stats); break;
+    default: break;   /* CONFIG_STATE echo etc.: not consumed here */
     }
 }
 
@@ -62,10 +55,9 @@ static void link_task(void *arg) {
     (void)arg;
     lp_decoder_t dec;
     lp_decoder_init(&dec);
-
-    uint8_t buf[LP_MAX_FRAME];
-    send_frame(buf, lp_encode_hello(buf, sizeof buf, LP_ROLE_C3));
-    resync();
+    uint8_t hello[LP_MAX_FRAME];
+    size_t hn = lp_encode_hello(hello, sizeof hello, LP_ROLE_C3);
+    if (hn) uart_write_bytes(LINK_UART, (const char *)hello, hn);
 
     for (;;) {
         uint8_t rx[64];
@@ -74,15 +66,14 @@ static void link_task(void *arg) {
             lp_msg_t m;
             if (lp_decoder_push(&dec, rx[i], &m)) handle_msg(&m);
         }
-        lp_config_t out;
-        while (xQueueReceive(s_outq, &out, 0) == pdTRUE) send_config_set(&out);
+        frame_t f;
+        while (xQueueReceive(s_outq, &f, 0) == pdTRUE)
+            uart_write_bytes(LINK_UART, (const char *)f.buf, f.len);
     }
 }
 
 void c3_link_start(void) {
-    if (s_outq) return;
-    s_outq = xQueueCreate(LINK_OUTQ, sizeof(lp_config_t));
-
+    s_outq = xQueueCreate(OUTQ_DEPTH, sizeof(frame_t));
     const uart_config_t cfg = {
         .baud_rate = CONFIG_C3_UART_BAUD,
         .data_bits = UART_DATA_8_BITS,
@@ -96,10 +87,6 @@ void c3_link_start(void) {
     ESP_ERROR_CHECK(uart_set_pin(LINK_UART, CONFIG_C3_UART_TX_GPIO, CONFIG_C3_UART_RX_GPIO,
                                  UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
     xTaskCreate(link_task, "c3_link", 4096, NULL, 5, NULL);
-    ESP_LOGI(TAG, "link uart=%d tx=%d rx=%d baud=%d", (int)LINK_UART,
+    ESP_LOGI(TAG, "C5 link uart=%d tx=%d rx=%d baud=%d", (int)LINK_UART,
              CONFIG_C3_UART_TX_GPIO, CONFIG_C3_UART_RX_GPIO, CONFIG_C3_UART_BAUD);
-}
-
-void c3_link_push_config(const lp_config_t *c) {
-    if (s_outq) (void)xQueueSend(s_outq, c, 0);
 }

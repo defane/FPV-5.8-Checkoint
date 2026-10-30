@@ -26,8 +26,12 @@ menu "Checkpoint C3 bridge"
         default "dronepass"
 
     config C3_AP_CHANNEL
-        int "Wi-Fi SoftAP channel"
+        int "Wi-Fi AP / ESP-NOW channel (must match the C6 master)"
         default 1
         range 1 13
+
+    config C3_FLEET_TIMEOUT_MS
+        int "Boot: wait this long for the C6 before degraded mode (ms)"
+        default 8000
 
 endmenu
