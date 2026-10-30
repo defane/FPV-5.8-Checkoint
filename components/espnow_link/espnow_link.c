@@ -63,6 +63,8 @@ esp_err_t espnow_link_start(wifi_interface_t ifx, uint8_t channel, espnow_rx_cb_
 
 esp_err_t espnow_link_add_peer(const uint8_t mac[6]) { return add_peer(mac); }
 
+esp_err_t espnow_link_del_peer(const uint8_t mac[6]) { return esp_now_del_peer(mac); }
+
 esp_err_t espnow_link_send(const uint8_t mac[6], const uint8_t *frame, size_t len) {
     return esp_now_send(mac, frame, len);
 }

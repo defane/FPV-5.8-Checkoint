@@ -38,4 +38,7 @@ typedef struct {
 void c6_hub_start(void);                       /* after Wi-Fi AP is up */
 void c6_hub_local_pass(uint8_t channel, int32_t peak_db_x10, uint32_t at_ms);
 void c6_hub_set_pairing(bool open);
+bool c6_hub_set_node(uint8_t node_id, uint8_t gate_index, uint8_t channel);  /* reassign */
+bool c6_hub_remove_node(uint8_t node_id);
+void c6_hub_reset_race(void);
 void c6_hub_snapshot(c6_fleet_t *out);

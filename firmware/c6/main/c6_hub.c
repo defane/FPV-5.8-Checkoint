@@ -96,7 +96,15 @@ static c6_node_t *find_by_mac(const uint8_t mac[6]) {
     return NULL;
 }
 
-static uint8_t num_gates(void) { return (uint8_t)(1u + s_num_nodes); }  /* +local gate 0 */
+/* Gate count = highest assigned gate + 1 (gate 0 is always the local C5), so
+ * admin-assigned orders with gaps still size race_timing correctly. */
+static uint8_t num_gates(void) {
+    uint8_t g = 1u;
+    for (unsigned i = 0; i < s_num_nodes; i++)
+        if ((uint8_t)(s_nodes[i].gate_index + 1u) > g) g = (uint8_t)(s_nodes[i].gate_index + 1u);
+    if (g > RT_MAX_GATES) g = RT_MAX_GATES;
+    return g;
+}
 
 static void send_config_to(const c6_node_t *n) {
     const fp_config_t cfg = { .gate_index = n->gate_index, .channel = n->channel,
@@ -122,7 +130,7 @@ static void handle_pair(const uint8_t mac[6], const fp_pair_request_t *req) {
         n = &s_nodes[s_num_nodes];
         memcpy(n->mac, mac, 6);
         n->node_id = s_num_nodes;
-        n->gate_index = (uint8_t)(1u + s_num_nodes);   /* gate 0 is the local C5 */
+        n->gate_index = num_gates();                   /* next free gate (gate 0 is the local C5) */
         n->channel = req->seen_channel;
         n->cn_x10 = LP_CN_UNKNOWN;
         n->online = true;
@@ -224,6 +232,46 @@ void c6_hub_local_pass(uint8_t channel, int32_t peak_db_x10, uint32_t at_ms) {
 void c6_hub_set_pairing(bool open) {
     xSemaphoreTake(s_lock, portMAX_DELAY);
     s_pairing = open;
+    xSemaphoreGive(s_lock);
+}
+
+bool c6_hub_set_node(uint8_t node_id, uint8_t gate_index, uint8_t channel) {
+    if (gate_index < 1u || gate_index >= RT_MAX_GATES) return false;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    c6_node_t *n = NULL;
+    for (unsigned i = 0; i < s_num_nodes; i++)
+        if (s_nodes[i].node_id == node_id) { n = &s_nodes[i]; break; }
+    if (!n) { xSemaphoreGive(s_lock); return false; }
+    n->gate_index = gate_index;
+    n->channel = channel;
+    nodes_save();
+    rt_init(&s_rt, &(rt_config_t){ .num_gates = num_gates() });
+    const c6_node_t snap = *n;
+    xSemaphoreGive(s_lock);
+    send_config_to(&snap);
+    return true;
+}
+
+bool c6_hub_remove_node(uint8_t node_id) {
+    uint8_t mac[6];
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    int idx = -1;
+    for (unsigned i = 0; i < s_num_nodes; i++)
+        if (s_nodes[i].node_id == node_id) { idx = (int)i; break; }
+    if (idx < 0) { xSemaphoreGive(s_lock); return false; }
+    memcpy(mac, s_nodes[idx].mac, 6);
+    for (unsigned i = (unsigned)idx; i + 1u < s_num_nodes; i++) s_nodes[i] = s_nodes[i + 1u];
+    s_num_nodes--;
+    nodes_save();
+    rt_init(&s_rt, &(rt_config_t){ .num_gates = num_gates() });
+    xSemaphoreGive(s_lock);
+    espnow_link_del_peer(mac);
+    return true;
+}
+
+void c6_hub_reset_race(void) {
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    rt_reset(&s_rt);
     xSemaphoreGive(s_lock);
 }
 

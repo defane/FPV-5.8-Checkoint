@@ -22,6 +22,7 @@ typedef void (*espnow_rx_cb_t)(const uint8_t mac[6], const fp_msg_t *msg);
 esp_err_t espnow_link_start(wifi_interface_t ifx, uint8_t channel, espnow_rx_cb_t on_msg);
 
 esp_err_t espnow_link_add_peer(const uint8_t mac[6]);   /* unicast peer */
+esp_err_t espnow_link_del_peer(const uint8_t mac[6]);
 esp_err_t espnow_link_send(const uint8_t mac[6], const uint8_t *frame, size_t len);
 
 const uint8_t *espnow_link_broadcast_addr(void);        /* FF:FF:FF:FF:FF:FF */

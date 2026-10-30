@@ -1,8 +1,11 @@
 #include "c6_web.h"
+#include "c6_hub.h"
 #include "c6_store.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 static const char *TAG = "c6_web";
 
@@ -18,15 +21,39 @@ static esp_err_t get_root(httpd_req_t *req) {
 static esp_err_t get_state(httpd_req_t *req) {
     c6_snapshot_t s;
     c6_store_snapshot(&s);
+    c6_fleet_t f;
+    c6_hub_snapshot(&f);
 
-    char body[2048];
+    static char body[3072];   /* larger than the stack; this handler is serialised by httpd */
     int o = 0;
     o += snprintf(body + o, sizeof body - o,
-                  "{\"has_local\":%s,\"local\":{\"channel\":%u,\"cn_x10\":%ld,\"state\":%u,"
-                  "\"played\":%lu,\"dropped\":%lu,\"failed\":%lu},\"total_passes\":%lu,\"passes\":[",
-                  s.has_local ? "true" : "false", s.local.channel, (long)s.local.cn_x10,
-                  s.local.state, (unsigned long)s.local.played, (unsigned long)s.local.dropped,
-                  (unsigned long)s.local.failed, (unsigned long)s.total_passes);
+                  "{\"pairing\":%s,\"num_gates\":%u,\"has_local\":%s,"
+                  "\"local\":{\"channel\":%u,\"cn_x10\":%ld,\"state\":%u,\"played\":%lu,"
+                  "\"dropped\":%lu,\"failed\":%lu},\"total_passes\":%lu,",
+                  f.pairing ? "true" : "false", f.num_gates, s.has_local ? "true" : "false",
+                  s.local.channel, (long)s.local.cn_x10, s.local.state, (unsigned long)s.local.played,
+                  (unsigned long)s.local.dropped, (unsigned long)s.local.failed,
+                  (unsigned long)s.total_passes);
+
+    o += snprintf(body + o, sizeof body - o, "\"nodes\":[");
+    for (unsigned i = 0; i < f.num_nodes && o < (int)sizeof body; i++) {
+        const c6_node_t *n = &f.nodes[i];
+        o += snprintf(body + o, sizeof body - o,
+                      "%s{\"node_id\":%u,\"gate\":%u,\"channel\":%u,\"online\":%s,\"cn_x10\":%ld,"
+                      "\"mac\":\"%02x:%02x:%02x:%02x:%02x:%02x\"}",
+                      i ? "," : "", n->node_id, n->gate_index, n->channel,
+                      n->online ? "true" : "false", (long)n->cn_x10,
+                      n->mac[0], n->mac[1], n->mac[2], n->mac[3], n->mac[4], n->mac[5]);
+    }
+    o += snprintf(body + o, sizeof body - o, "],\"standings\":[");
+    for (unsigned i = 0; i < f.num_standings && o < (int)sizeof body; i++) {
+        const c6_standing_t *st = &f.standings[i];
+        o += snprintf(body + o, sizeof body - o,
+                      "%s{\"channel\":%u,\"laps\":%lu,\"last_lap_ms\":%lu,\"best_lap_ms\":%lu,\"last_gate\":%d}",
+                      i ? "," : "", st->channel, (unsigned long)st->laps,
+                      (unsigned long)st->last_lap_ms, (unsigned long)st->best_lap_ms, st->last_gate);
+    }
+    o += snprintf(body + o, sizeof body - o, "],\"passes\":[");
     for (unsigned i = 0; i < s.n_passes && o < (int)sizeof body; i++)
         o += snprintf(body + o, sizeof body - o,
                       "%s{\"gate\":%u,\"channel\":%u,\"peak_db_x10\":%ld,\"at_ms\":%lu}",
@@ -38,14 +65,80 @@ static esp_err_t get_state(httpd_req_t *req) {
     return httpd_resp_send(req, body, o);
 }
 
+/* Tiny parser for the flat integer objects our own client POSTs. */
+static int32_t json_i(const char *body, const char *key, int32_t def) {
+    char pat[40];
+    snprintf(pat, sizeof pat, "\"%s\"", key);
+    const char *p = strstr(body, pat);
+    if (!p) return def;
+    p = strchr(p + strlen(pat), ':');
+    if (!p) return def;
+    p++;
+    while (*p == ' ' || *p == '\t') p++;
+    char *end;
+    const long v = strtol(p, &end, 10);
+    return end == p ? def : (int32_t)v;
+}
+
+static bool read_body(httpd_req_t *req, char *buf, size_t cap) {
+    int total = req->content_len;
+    if (total <= 0 || total >= (int)cap) return false;
+    int got = 0;
+    while (got < total) {
+        int r = httpd_req_recv(req, buf + got, total - got);
+        if (r <= 0) return false;
+        got += r;
+    }
+    buf[got] = '\0';
+    return true;
+}
+
+static esp_err_t ok_json(httpd_req_t *req, bool ok) {
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, ok ? "{\"ok\":true}" : "{\"ok\":false}");
+}
+
+static esp_err_t post_pairing(httpd_req_t *req) {
+    char buf[128];
+    if (!read_body(req, buf, sizeof buf)) { httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "body"); return ESP_FAIL; }
+    c6_hub_set_pairing(json_i(buf, "open", 0) != 0);
+    return ok_json(req, true);
+}
+
+static esp_err_t post_node(httpd_req_t *req) {
+    char buf[128];
+    if (!read_body(req, buf, sizeof buf)) { httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "body"); return ESP_FAIL; }
+    bool ok = c6_hub_set_node((uint8_t)json_i(buf, "node_id", -1),
+                              (uint8_t)json_i(buf, "gate", 0),
+                              (uint8_t)json_i(buf, "channel", 0));
+    return ok_json(req, ok);
+}
+
+static esp_err_t post_node_remove(httpd_req_t *req) {
+    char buf[128];
+    if (!read_body(req, buf, sizeof buf)) { httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "body"); return ESP_FAIL; }
+    return ok_json(req, c6_hub_remove_node((uint8_t)json_i(buf, "node_id", -1)));
+}
+
+static esp_err_t post_reset(httpd_req_t *req) {
+    c6_hub_reset_race();
+    return ok_json(req, true);
+}
+
 void c6_web_start(void) {
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.lru_purge_enable = true;
+    cfg.max_uri_handlers = 10;
     httpd_handle_t srv = NULL;
     if (httpd_start(&srv, &cfg) != ESP_OK) { ESP_LOGE(TAG, "httpd start failed"); return; }
-    const httpd_uri_t root = { .uri = "/", .method = HTTP_GET, .handler = get_root };
-    const httpd_uri_t state = { .uri = "/api/state", .method = HTTP_GET, .handler = get_state };
-    httpd_register_uri_handler(srv, &root);
-    httpd_register_uri_handler(srv, &state);
+    const httpd_uri_t uris[] = {
+        { .uri = "/",             .method = HTTP_GET,  .handler = get_root },
+        { .uri = "/api/state",    .method = HTTP_GET,  .handler = get_state },
+        { .uri = "/api/pairing",  .method = HTTP_POST, .handler = post_pairing },
+        { .uri = "/api/node",     .method = HTTP_POST, .handler = post_node },
+        { .uri = "/api/node_remove", .method = HTTP_POST, .handler = post_node_remove },
+        { .uri = "/api/reset",    .method = HTTP_POST, .handler = post_reset },
+    };
+    for (unsigned i = 0; i < sizeof uris / sizeof uris[0]; i++) httpd_register_uri_handler(srv, &uris[i]);
     ESP_LOGI(TAG, "admin web on http://192.168.4.1/");
 }
