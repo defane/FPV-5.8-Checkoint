@@ -19,6 +19,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "audio_player.h"
+#include "checkpoint_link.h"
 #include "cn_estimate.h"
 #include "esp_timer.h"
 #include "pass_detector.h"
@@ -127,6 +128,7 @@ static void on_pass(checkpoint_t *cp, const pd_event_t *e)
            ch->name, ch->freq_mhz, e->peak_db, (unsigned long)e->peak_ms, (unsigned long)e->at_ms,
            (unsigned long)(e->at_ms - e->peak_ms), audio_pentatonic_semitones[e->channel % 8u],
            queued ? "queued" : audio_state());
+    checkpoint_link_report_pass(e);
 }
 
 /* A live receiver sample, in dB; false when there is none. */
@@ -203,6 +205,7 @@ void checkpoint_start(void)
         return;
     }
     s_cp = cp;
+    checkpoint_link_start();
 #if !CONFIG_C5VRX_VIDEO_OUTPUT
     printf("CHECKPOINT video_output=off (CONFIG_C5VRX_VIDEO_OUTPUT=n): sound only, DAC pins free\n");
 #endif
@@ -233,6 +236,73 @@ static void prefs_save(const checkpoint_t *cp)
     const checkpoint_prefs_t p = {.version = PREFS_VERSION, .volume = (uint8_t)audio_player_volume(),
                                   .muted = audio_player_muted(), .det = cp->wanted};
     if (!blob_store("checkpoint", &p, sizeof(p))) printf("CHECKPOINT warning: settings not saved (NVS)\n");
+}
+
+/* ---- C5<->C3 link accessors (checkpoint_link.h), called from the link task ---- */
+
+static int32_t to_x10(float v) { return (int32_t)(v * 10.0f + (v >= 0 ? 0.5f : -0.5f)); }
+
+static void config_to_lp(const pd_config_t *c, lp_config_t *o)
+{
+    o->alpha_milli       = (int32_t)(c->alpha * 1000.0f + 0.5f);
+    o->active_db_x10     = to_x10(c->active_db);
+    o->hysteresis_db_x10 = to_x10(c->hysteresis_db);
+    o->drop_db_x10       = to_x10(c->drop_db);
+    o->min_peak_db_x10   = to_x10(c->min_peak_db);
+    o->refractory_ms     = c->refractory_ms;
+    o->stale_ms          = c->stale_ms;
+}
+
+static void lp_to_config(const lp_config_t *o, pd_config_t *c)
+{
+    c->alpha         = (float)o->alpha_milli / 1000.0f;
+    c->active_db     = (float)o->active_db_x10 / 10.0f;
+    c->hysteresis_db = (float)o->hysteresis_db_x10 / 10.0f;
+    c->drop_db       = (float)o->drop_db_x10 / 10.0f;
+    c->min_peak_db   = (float)o->min_peak_db_x10 / 10.0f;
+    c->refractory_ms = o->refractory_ms;
+    c->stale_ms      = o->stale_ms;
+}
+
+bool checkpoint_link_apply_config(const lp_config_t *o)
+{
+    checkpoint_t *cp = s_cp;
+    if (!cp) return false;
+    pd_config_t c;
+    lp_to_config(o, &c);
+    if (!pd_config_valid(&c)) return false;
+    audio_player_set_volume(o->volume_pct);     /* audio_player clamps above 100 % */
+    audio_player_set_muted(o->muted != 0);
+    taskENTER_CRITICAL(&s_wanted_lock);
+    cp->wanted = c;
+    cp->wanted_dirty = true;
+    taskEXIT_CRITICAL(&s_wanted_lock);
+    prefs_save(cp);
+    return true;
+}
+
+void checkpoint_link_get_config(lp_config_t *out)
+{
+    const checkpoint_t *cp = s_cp;
+    pd_config_t c = cp ? cp->wanted : pd_config_default();
+    config_to_lp(&c, out);
+    out->volume_pct = (uint8_t)audio_player_volume();
+    out->muted = audio_player_muted() ? 1u : 0u;
+}
+
+void checkpoint_link_get_stats(lp_stats_t *out)
+{
+    const checkpoint_t *cp = s_cp;
+    const audio_player_stats_t a = audio_player_stats();
+    out->played = a.played;
+    out->dropped = a.dropped;
+    out->muted = a.muted;
+    out->failed = a.failed;
+    const int x10 = receiver_obs_cn_x10();
+    out->cn_x10 = (x10 == CN_UNKNOWN_X10) ? LP_CN_UNKNOWN : x10;
+    const unsigned slot = (unsigned)(rf_channel_index() % 8u);
+    out->channel = (uint8_t)slot;
+    out->state = cp ? (uint8_t)cp->det.ch[slot].state : 0u;
 }
 
 void checkpoint_play_test(void)

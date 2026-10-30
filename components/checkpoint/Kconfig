@@ -1,0 +1,42 @@
+menu "Checkpoint C5<->C3 link"
+
+    config CHECKPOINT_LINK_ENABLE
+        bool "Enable the UART link to the C3 config/telemetry bridge"
+        default y
+        help
+            Report pass events and stats to, and accept detector configuration
+            from, a second ESP (ESP32-C3) over UART. With it off, checkpoint
+            runs sound-only and the console is the only way to tune it.
+
+    config CHECKPOINT_LINK_UART_NUM
+        int "UART controller number"
+        depends on CHECKPOINT_LINK_ENABLE
+        default 1
+        range 0 1
+        help
+            The console is on USB-Serial-JTAG, so UART1 (or UART0) is free.
+
+    config CHECKPOINT_LINK_TX_GPIO
+        int "Link UART TX GPIO (to the C3 RX)"
+        depends on CHECKPOINT_LINK_ENABLE
+        default 6
+        help
+            GPIO 6 and 15 are the only pins the receiver and amplifier leave
+            free (see the GPIO map in CLAUDE.md).
+
+    config CHECKPOINT_LINK_RX_GPIO
+        int "Link UART RX GPIO (from the C3 TX)"
+        depends on CHECKPOINT_LINK_ENABLE
+        default 15
+
+    config CHECKPOINT_LINK_BAUD
+        int "Link UART baud rate"
+        depends on CHECKPOINT_LINK_ENABLE
+        default 115200
+
+    config CHECKPOINT_LINK_STATS_MS
+        int "Stats report period (ms)"
+        depends on CHECKPOINT_LINK_ENABLE
+        default 1000
+
+endmenu
