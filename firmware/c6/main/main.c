@@ -1,5 +1,6 @@
 /* Checkpoint C6 master (skeleton): UART to the local C5, centralized speaker,
  * Wi-Fi SoftAP + admin web. ESP-NOW fleet hub and race timing are added next. */
+#include "c6_hub.h"
 #include "c6_link.h"
 #include "c6_store.h"
 #include "c6_web.h"
@@ -45,6 +46,7 @@ void app_main(void) {
 
     c6_store_init();
     wifi_ap_start();
-    c6_link_start();
+    c6_hub_start();      /* ESP-NOW + timing + audio; before the link can report a pass */
+    c6_link_start();     /* UART to the local C5 (gate 0) */
     c6_web_start();
 }

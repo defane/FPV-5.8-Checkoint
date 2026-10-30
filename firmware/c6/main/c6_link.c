@@ -1,6 +1,6 @@
 #include "c6_link.h"
+#include "c6_hub.h"
 #include "c6_store.h"
-#include "audio_player.h"
 #include "driver/uart.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -15,21 +15,8 @@
 
 static const char *TAG = "c6_link";
 
-static void audio_start(void) {
-    const audio_player_config_t cfg = {
-        .bclk_gpio = CONFIG_C6_AUDIO_BCLK_GPIO, .ws_gpio = CONFIG_C6_AUDIO_WS_GPIO,
-        .dout_gpio = CONFIG_C6_AUDIO_DOUT_GPIO, .sd_gpio = CONFIG_C6_AUDIO_SD_GPIO,
-        .task_priority = 5,
-    };
-    const esp_err_t err = audio_player_start(&cfg);
-    if (err != ESP_OK) ESP_LOGW(TAG, "audio off: %s (no coin.pcm / build)", esp_err_to_name(err));
-}
-
 static void on_pass(const lp_event_t *e) {
-    const c6_pass_t p = { .channel = e->channel, .peak_db_x10 = e->peak_db_x10,
-                          .at_ms = e->at_ms, .gate = 0 };
-    c6_store_add_pass(&p);
-    audio_player_play(AUDIO_SOUND_COIN, audio_pitch_for_channel(e->channel));
+    c6_hub_local_pass(e->channel, e->peak_db_x10, e->at_ms);   /* gate 0, timed + sounded by the hub */
     ESP_LOGI(TAG, "local PASS ch=%u peak=%.1f dB", e->channel, e->peak_db_x10 / 10.0f);
 }
 
@@ -57,7 +44,6 @@ static void link_task(void *arg) {
             lp_msg_t m;
             if (lp_decoder_push(&dec, rx[i], &m)) handle_msg(&m);
         }
-        /* Ask the local C5 for its config once a second until it answers. */
         const uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
         if (now - last_req >= 1000u) {
             last_req = now;
@@ -69,7 +55,6 @@ static void link_task(void *arg) {
 }
 
 void c6_link_start(void) {
-    audio_start();
     const uart_config_t cfg = {
         .baud_rate = CONFIG_C6_UART_BAUD,
         .data_bits = UART_DATA_8_BITS,
