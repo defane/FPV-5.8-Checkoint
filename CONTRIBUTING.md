@@ -1,15 +1,15 @@
-# Contributing to C5VRX
+# Contributing
 
 Contributions are welcome under the repository's `GPL-3.0-only` public license.
 Preserve contributor attribution and third-party license notices.
 
-Only C5VRX-5 (repository root) is built; `legacy/` holds archived
-generations. Before changing RF, DSP, PARLIO, or AV behavior, read
-[docs/FINDINGS.md](docs/FINDINGS.md), the research ledger
-[docs/RESEARCH_LEDGER.md](docs/RESEARCH_LEDGER.md),
-[legacy/c5vrx3/docs/KNOWLEDGE_INDEX.md](legacy/c5vrx3/docs/KNOWLEDGE_INDEX.md) and the relevant
-historical findings. Clearly distinguish simulation, bounded hardware tests,
-and long-duration physical proof.
+Two firmwares build from `firmware/c5` and `firmware/c3` on the shared
+`components/`. Read [CLAUDE.md](CLAUDE.md) and [AGENTS.md](AGENTS.md) first:
+AGENTS.md is the reuse/attribution policy and the receive-chain realtime
+invariants (the `components/c5vrx_rx` engine is upstream C5VRX, reused
+unchanged). Do not modify the receive chain without the operator's approval,
+and clearly distinguish simulation, bounded hardware tests, and long-duration
+physical proof.
 
 The project does not currently claim a Contributor License Agreement or
 copyright assignment. If commercial dual licensing becomes a project goal, a

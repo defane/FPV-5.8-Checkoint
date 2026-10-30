@@ -1,8 +1,0 @@
-{
-  "variant": [
-    32,
-    "sync_bias"
-  ],
-  "experimental": true,
-  "law": "immutable observation-dependent gain; fixed two-bundle schedule"
-}
