@@ -1,0 +1,44 @@
+menu "Checkpoint C6 master"
+
+    comment "UART to the local C5 (link_proto). Defaults assume a C5 on TX6/RX15."
+    config C6_UART_NUM
+        int "Link UART controller number"
+        default 1
+        range 0 1
+    config C6_UART_TX_GPIO
+        int "Link UART TX GPIO (to the local C5 RX)"
+        default 4
+    config C6_UART_RX_GPIO
+        int "Link UART RX GPIO (from the local C5 TX)"
+        default 5
+    config C6_UART_BAUD
+        int "Link UART baud rate (must match the C5)"
+        default 115200
+
+    comment "MAX98357A I2S amplifier (the centralized speaker)."
+    config C6_AUDIO_BCLK_GPIO
+        int "Amplifier BCLK GPIO"
+        default 18
+    config C6_AUDIO_WS_GPIO
+        int "Amplifier LRC (WS) GPIO"
+        default 19
+    config C6_AUDIO_DOUT_GPIO
+        int "Amplifier DIN GPIO"
+        default 20
+    config C6_AUDIO_SD_GPIO
+        int "Amplifier SD GPIO (-1: not driven)"
+        default 21
+
+    comment "Wi-Fi SoftAP (admin web + ESP-NOW share this channel)."
+    config C6_AP_SSID
+        string "Wi-Fi SoftAP SSID"
+        default "checkpoint-c6"
+    config C6_AP_PASSWORD
+        string "Wi-Fi SoftAP password (>= 8 chars, empty = open)"
+        default "dronepass"
+    config C6_AP_CHANNEL
+        int "Wi-Fi SoftAP / ESP-NOW channel"
+        default 1
+        range 1 13
+
+endmenu

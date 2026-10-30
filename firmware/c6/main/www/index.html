@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Checkpoint C6</title>
+<style>
+  :root { color-scheme: dark; }
+  body { font-family: system-ui, sans-serif; margin: 0; background: #14171c; color: #e7ebf0; }
+  header { padding: 14px 16px; background: #1b2026; font-weight: 600; font-size: 1.1rem; }
+  main { padding: 16px; max-width: 640px; margin: 0 auto; }
+  h2 { font-size: .95rem; text-transform: uppercase; letter-spacing: .04em; color: #8b97a7; margin: 22px 0 8px; }
+  .card { background: #1b2026; border: 1px solid #2a313a; border-radius: 10px; padding: 14px; }
+  .row { display: flex; gap: 18px; flex-wrap: wrap; }
+  .stat { flex: 1 1 110px; }
+  .stat b { display: block; font-size: 1.4rem; }
+  .stat span { color: #8b97a7; font-size: .8rem; }
+  ul { list-style: none; padding: 0; margin: 0; font-variant-numeric: tabular-nums; }
+  li { padding: 6px 0; border-top: 1px solid #2a313a; font-size: .9rem; }
+  .muted { color: #8b97a7; }
+  .pill { font-size: .8rem; padding: 2px 8px; border-radius: 999px; background: #2a313a; }
+</style>
+</head>
+<body>
+<header>Checkpoint C6 — master <span id="link" class="pill">…</span></header>
+<main>
+  <h2>Local gate</h2>
+  <div class="card row">
+    <div class="stat"><b id="s_cn">—</b><span>C/N dB</span></div>
+    <div class="stat"><b id="s_ch">—</b><span>channel</span></div>
+    <div class="stat"><b id="s_passes">—</b><span>passes</span></div>
+    <div class="stat"><b id="s_played">—</b><span>played</span></div>
+  </div>
+  <p class="muted" style="margin-top:14px">Fleet pairing, gate order and lap timing are coming — this is the master skeleton.</p>
+  <h2>Recent passes</h2>
+  <ul id="passes" class="card"></ul>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+async function poll() {
+  try {
+    const s = await (await fetch("/api/state")).json();
+    $("link").textContent = s.has_local ? "C5 linked" : "no local C5";
+    const L = s.local || {};
+    $("s_cn").textContent = (s.has_local && L.cn_x10 > -990) ? (L.cn_x10/10).toFixed(1) : "—";
+    $("s_ch").textContent = s.has_local ? ("R" + ((L.channel|0)%8 + 1)) : "—";
+    $("s_passes").textContent = s.total_passes;
+    $("s_played").textContent = s.has_local ? L.played : "—";
+    $("passes").innerHTML = (s.passes || []).map(e =>
+      `<li>gate ${e.gate} &middot; R${(e.channel%8)+1} &middot; peak ${(e.peak_db_x10/10).toFixed(1)} dB <span class="muted">${e.at_ms} ms</span></li>`
+    ).join("") || '<li class="muted">none yet</li>';
+  } catch (e) { $("link").textContent = "offline"; }
+}
+poll(); setInterval(poll, 1000);
+</script>
+</body>
+</html>
