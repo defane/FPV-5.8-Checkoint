@@ -166,6 +166,11 @@ schema: `docs/fleet.svg`.
 - **Degraded C3**: if the C6 is not reached within `CONFIG_C3_FLEET_TIMEOUT_MS`
   at boot, the C3 serves its own AP + web (band selection → `SET_CHANNEL`,
   results) instead of relaying.
+- **Temporary C5-as-master** (until a C6 is available): run `firmware/c6` on a
+  spare C5 — `idf.py -DIDF_TARGET=esp32c5 -DSDKCONFIG=sdkconfig.c5
+  -DSDKCONFIG_DEFAULTS=sdkconfig.c5.defaults -B build-c5 build` from
+  `firmware/c6`. The amp moves to the C5 pins 9/8/7/10 (GPIO 16-22 are the C5
+  flash); UART stays 4/5. Diagram: `docs/wiring-c5c5.svg`.
 
 ## Build and tests
 

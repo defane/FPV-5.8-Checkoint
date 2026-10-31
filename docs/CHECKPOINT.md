@@ -39,8 +39,17 @@ Schéma global des éléments et de leurs interactions :
 [`fleet.svg`](fleet.svg). Câblage pin-level par type de set :
 [`wiring-master.svg`](wiring-master.svg) (C6 + C5),
 [`wiring-node.svg`](wiring-node.svg) (C3 + C5),
+[`wiring-c5c5.svg`](wiring-c5c5.svg) (C5+C5 temporaire),
 [`wiring.svg`](wiring.svg) (C5 autonome). Brochage consolidé : voir le
 [README](../README.md#pinout).
+
+**Montage temporaire C5+C5** (en attendant le C6) : un second C5 fait tourner le
+firmware du maître compilé pour esp32c5 (`firmware/c6`, cible esp32c5). L'ampli
+passe sur les broches C5 9/8/7/10 (les GPIO 16‑22 sont la flash du C5), l'UART
+reste 4/5. Build : `idf.py -DIDF_TARGET=esp32c5 -DSDKCONFIG=sdkconfig.c5
+-DSDKCONFIG_DEFAULTS=sdkconfig.c5.defaults -B build-c5 build` depuis
+`firmware/c6`. On remplace ensuite ce C5 par un vrai C6 sans rien changer côté
+porte.
 
 - **Protocoles** : `components/link_proto` (UART C5↔pont, dont `SET_CHANNEL` qui
   déclenche un retune `rf_set_channel` sur le C5) ; `components/fleet_proto`

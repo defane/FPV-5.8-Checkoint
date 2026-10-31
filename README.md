@@ -63,6 +63,9 @@ single-set wiring (C3, C5 and the amplifier).
 ( cd firmware/c5 && idf.py build )     # ESP32-C5, must stay at 0 warnings
 ( cd firmware/c3 && idf.py build )     # ESP32-C3 node bridge
 ( cd firmware/c6 && idf.py build )     # ESP32-C6 master
+# temporary "C5 as master" (run the C6 firmware on a spare C5 until the C6 arrives):
+( cd firmware/c6 && idf.py -DIDF_TARGET=esp32c5 -DSDKCONFIG=sdkconfig.c5 \
+    -DSDKCONFIG_DEFAULTS=sdkconfig.c5.defaults -B build-c5 build )
 
 # Host tests
 cd test
@@ -84,6 +87,7 @@ cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/race_timing/include \
 - **Pin-level wiring, per set type:**
   - master **C6 + C5**: [docs/wiring-master.svg](docs/wiring-master.svg)
   - node **C3 + C5**: [docs/wiring-node.svg](docs/wiring-node.svg)
+  - temporary **C5 + C5** (a spare C5 runs the master firmware until the C6 arrives): [docs/wiring-c5c5.svg](docs/wiring-c5c5.svg)
   - standalone **C5** (detects + sounds locally, optional C3 web): [docs/wiring.svg](docs/wiring.svg)
 
 ## Pinout
