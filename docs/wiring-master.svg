@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 620" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif">
+  <defs>
+    <marker id="g" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#16a34a"/></marker>
+    <marker id="t" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#0d9488"/></marker>
+    <marker id="r" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#dc2626"/></marker>
+    <marker id="v" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#7c3aed"/></marker>
+  </defs>
+  <rect x="0" y="0" width="1180" height="620" fill="#ffffff"/>
+  <text x="40" y="42" font-size="23" font-weight="700" fill="#0f172a">Master set — C6 + C5 (gate 0)</text>
+  <text x="40" y="66" font-size="13" fill="#64748b">The C6 is UART-wired to its own C5 and carries the centralized speaker + the admin Wi-Fi web. Pins are Kconfig defaults.</text>
+
+  <!-- C5 -->
+  <rect x="50" y="180" width="190" height="250" rx="12" fill="#f8fafc" stroke="#334155" stroke-width="2"/>
+  <text x="145" y="212" font-size="16" font-weight="700" fill="#0f172a" text-anchor="middle">ESP32-C5</text>
+  <text x="145" y="231" font-size="11" fill="#64748b" text-anchor="middle">gate 0 · RF detect</text>
+  <!-- C6 -->
+  <rect x="440" y="150" width="240" height="330" rx="12" fill="#eef4ff" stroke="#2563eb" stroke-width="2.5"/>
+  <text x="560" y="182" font-size="16" font-weight="700" fill="#0f172a" text-anchor="middle">ESP32-C6 master</text>
+  <text x="560" y="201" font-size="11" fill="#64748b" text-anchor="middle">hub · timing · admin web</text>
+  <!-- amp -->
+  <rect x="820" y="170" width="190" height="300" rx="12" fill="#f0fdfa" stroke="#0d9488" stroke-width="2"/>
+  <text x="915" y="202" font-size="15" font-weight="700" fill="#0f172a" text-anchor="middle">MAX98357A</text>
+  <!-- speaker -->
+  <path d="M1050,250 h24 l28,-22 v104 l-28,-22 h-24 Z" fill="#ede9fe" stroke="#7c3aed" stroke-width="2"/>
+  <text x="1082" y="356" font-size="12" font-weight="600" fill="#7c3aed" text-anchor="middle">4 Ω</text>
+
+  <!-- UART C5<->C6 -->
+  <line x1="240" y1="270" x2="440" y2="270" stroke="#16a34a" stroke-width="2.5" marker-end="url(#g)"/>
+  <line x1="440" y1="320" x2="240" y2="320" stroke="#16a34a" stroke-width="2.5" marker-end="url(#g)"/>
+  <line x1="240" y1="380" x2="440" y2="380" stroke="#475569" stroke-width="2.5" stroke-dasharray="6 4"/>
+  <text x="340" y="262" font-size="11" fill="#16a34a" text-anchor="middle" font-weight="600">UART link_proto</text>
+  <circle cx="240" cy="270" r="4" fill="#16a34a"/><text x="232" y="266" font-size="11" font-family="ui-monospace,monospace" text-anchor="end" fill="#0f172a">GPIO6 TX</text>
+  <circle cx="240" cy="320" r="4" fill="#16a34a"/><text x="232" y="316" font-size="11" font-family="ui-monospace,monospace" text-anchor="end" fill="#0f172a">GPIO15 RX</text>
+  <circle cx="240" cy="380" r="4" fill="#475569"/><text x="232" y="376" font-size="11" font-family="ui-monospace,monospace" text-anchor="end" fill="#0f172a">GND</text>
+  <circle cx="440" cy="270" r="4" fill="#16a34a"/><text x="448" y="266" font-size="11" font-family="ui-monospace,monospace" fill="#0f172a">GPIO5 RX</text>
+  <circle cx="440" cy="320" r="4" fill="#16a34a"/><text x="448" y="316" font-size="11" font-family="ui-monospace,monospace" fill="#0f172a">GPIO4 TX</text>
+  <circle cx="440" cy="380" r="4" fill="#475569"/><text x="448" y="376" font-size="11" font-family="ui-monospace,monospace" fill="#0f172a">GND</text>
+
+  <!-- I2S C6<->amp -->
+  <line x1="680" y1="210" x2="820" y2="210" stroke="#0d9488" stroke-width="2.5" marker-end="url(#t)"/>
+  <line x1="680" y1="250" x2="820" y2="250" stroke="#0d9488" stroke-width="2.5" marker-end="url(#t)"/>
+  <line x1="680" y1="290" x2="820" y2="290" stroke="#0d9488" stroke-width="2.5" marker-end="url(#t)"/>
+  <line x1="680" y1="330" x2="820" y2="330" stroke="#0d9488" stroke-width="2.5" marker-end="url(#t)"/>
+  <line x1="680" y1="420" x2="820" y2="420" stroke="#dc2626" stroke-width="2.5" marker-end="url(#r)"/>
+  <line x1="680" y1="455" x2="820" y2="455" stroke="#475569" stroke-width="2.5" stroke-dasharray="6 4"/>
+  <text x="750" y="202" font-size="11" fill="#0d9488" text-anchor="middle" font-weight="600">I2S</text>
+  <g font-size="11" font-family="ui-monospace,monospace" fill="#0f172a">
+    <circle cx="680" cy="210" r="4" fill="#0d9488"/><text x="672" y="206" text-anchor="end">GPIO18 BCLK</text>
+    <circle cx="680" cy="250" r="4" fill="#0d9488"/><text x="672" y="246" text-anchor="end">GPIO19 LRC</text>
+    <circle cx="680" cy="290" r="4" fill="#0d9488"/><text x="672" y="286" text-anchor="end">GPIO20 DIN</text>
+    <circle cx="680" cy="330" r="4" fill="#0d9488"/><text x="672" y="326" text-anchor="end">GPIO21 SD</text>
+    <circle cx="680" cy="420" r="4" fill="#dc2626"/><text x="672" y="416" text-anchor="end">5V</text>
+    <circle cx="680" cy="455" r="4" fill="#475569"/><text x="672" y="451" text-anchor="end">GND</text>
+    <circle cx="820" cy="210" r="4" fill="#0d9488"/><text x="828" y="206">BCLK</text>
+    <circle cx="820" cy="250" r="4" fill="#0d9488"/><text x="828" y="246">LRC</text>
+    <circle cx="820" cy="290" r="4" fill="#0d9488"/><text x="828" y="286">DIN</text>
+    <circle cx="820" cy="330" r="4" fill="#0d9488"/><text x="828" y="326">SD</text>
+    <circle cx="820" cy="420" r="4" fill="#dc2626"/><text x="828" y="416">VIN 5V</text>
+    <circle cx="820" cy="455" r="4" fill="#475569"/><text x="828" y="451">GND</text>
+  </g>
+  <!-- amp -> speaker -->
+  <line x1="1010" y1="285" x2="1050" y2="285" stroke="#7c3aed" stroke-width="2.5" marker-end="url(#v)"/>
+  <line x1="1010" y1="330" x2="1050" y2="330" stroke="#7c3aed" stroke-width="2.5" marker-end="url(#v)"/>
+  <circle cx="1010" cy="285" r="4" fill="#7c3aed"/><text x="1002" y="281" font-size="11" font-family="ui-monospace,monospace" text-anchor="end" fill="#0f172a">OUT+</text>
+  <circle cx="1010" cy="330" r="4" fill="#7c3aed"/><text x="1002" y="326" font-size="11" font-family="ui-monospace,monospace" text-anchor="end" fill="#0f172a">OUT−</text>
+
+  <!-- C6 WiFi -->
+  <text x="560" y="455" font-size="11" fill="#7c3aed" text-anchor="middle">Wi-Fi AP + admin web (pairing / timing) · ESP-NOW hub for C3 nodes</text>
+
+  <text x="40" y="560" font-size="12" fill="#64748b">Crossed UART, common ground. C6 pins (UART 4/5, I2S 18-21) are defaults — verify against the C6 board's strapping pins.</text>
+  <text x="40" y="580" font-size="12" fill="#64748b">The C6 powers/plays the shared speaker; the gate C5 needs no amplifier in a fleet.</text>
+</svg>

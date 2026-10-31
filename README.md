@@ -80,9 +80,11 @@ cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/race_timing/include \
 
 ## Architecture
 
-Global schema of the elements and their interactions:
-**[docs/fleet.svg](docs/fleet.svg)**. Pin-level single-set wiring (C5, bridge,
-amplifier): **[docs/wiring.svg](docs/wiring.svg)**.
+- **Global schema** (elements + interactions): [docs/fleet.svg](docs/fleet.svg)
+- **Pin-level wiring, per set type:**
+  - master **C6 + C5**: [docs/wiring-master.svg](docs/wiring-master.svg)
+  - node **C3 + C5**: [docs/wiring-node.svg](docs/wiring-node.svg)
+  - standalone **C5** (detects + sounds locally, optional C3 web): [docs/wiring.svg](docs/wiring.svg)
 
 ## Pinout
 

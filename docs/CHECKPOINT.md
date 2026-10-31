@@ -36,7 +36,10 @@ un C5 ; le C5 du maître est câblé en UART au C6 (porte 0), les autres sont
 reliés à un **C3 nœud** qui relaie en **ESP-NOW** vers le C6.
 
 Schéma global des éléments et de leurs interactions :
-[`fleet.svg`](fleet.svg). Brochage consolidé des trois cartes : voir le
+[`fleet.svg`](fleet.svg). Câblage pin-level par type de set :
+[`wiring-master.svg`](wiring-master.svg) (C6 + C5),
+[`wiring-node.svg`](wiring-node.svg) (C3 + C5),
+[`wiring.svg`](wiring.svg) (C5 autonome). Brochage consolidé : voir le
 [README](../README.md#pinout).
 
 - **Protocoles** : `components/link_proto` (UART C5↔pont, dont `SET_CHANNEL` qui
