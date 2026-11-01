@@ -113,61 +113,24 @@ off all three channels' interrupts on every transport restart.
 ## Detector (`components/pass_detector`, pure C)
 
 Input: the tuned channel's C/N in dB (`receiver_obs_cn_x10()`), every 50 ms.
-Channel slot = `rf_channel_index() % 8` (R1..R8 → 0..7).
-States `IDLE → RISING → PEAK_PASSED → COOLDOWN`; re-arm needs the refractory
-period elapsed AND the level under `active_db - hysteresis_db`.
-
-| Parameter | Default | Console (`K` + key) |
-| --- | --- | --- |
-| alpha | 0.30 | a / A ±0.05 |
-| active_db | 15 dB | t / T ±1 |
-| hysteresis_db | 3 dB | h / H ±0.5 |
-| drop_db | 3 dB | d / D ±0.5 |
-| min_peak_db | 25 dB | m / M ±1 |
-| refractory_ms | 1500 | r / R ±250 |
-| stale_ms | 1000 | — |
-| volume | 60 % | v / V ±10 |
-
-`K l` live trace, `K 0` defaults, `P` play, `p` mute (console in
-`components/c5vrx_rx/console.c`); the glue is `components/checkpoint`. The same
-settings are editable from the C3 web UI, which pushes them over the link
-(`CONFIG_SET`) and the C5 echoes the validated result (`CONFIG_STATE`). Saved
-in NVS `checkpoint` (`checkpoint_prefs_t`, bump `PREFS_VERSION` on layout
-change).
+Channel slot = `rf_channel_index() % 8` (R1..R8 → 0..7). States
+`IDLE → RISING → PEAK_PASSED → COOLDOWN`; re-arm needs the refractory period
+elapsed AND the level under `active_db - hysteresis_db`. The glue is
+`components/checkpoint`; the parameters are editable from the console
+(`K`+key, `components/c5vrx_rx/console.c`) and the C3 web UI (pushed over the
+link as `CONFIG_SET`, echoed as `CONFIG_STATE`), saved in NVS `checkpoint`
+(`checkpoint_prefs_t` — bump `PREFS_VERSION` on a layout change). Parameter
+table (defaults + console keys): **`docs/CHECKPOINT.md` → "Paramètres"**.
 
 ## Status LED
 
-A board's onboard WS2812 shows state through `components/status_led` (a pure-C
-state→colour core + an RMT WS2812 driver, priority-1 task, ~15% brightness,
-started after the splash). Onboard GPIO: **10** (node, C3-Zero), **8** (master,
-C6-Zero). **The detector (C5-Zero) has no status LED**: its onboard WS2812 is on
-**GPIO27**, one of the receiver's IQ-loopback pins, so driving it would break the
-C/N chain (and in fact boot-loops). Disabled there (`CONFIG_STATUS_LED_ENABLE=n`
-in `firmware/detector/sdkconfig.defaults`).
-
-| State | LED |
-| --- | --- |
-| boot / self-check | yellow blink |
-| healthy (detector: bridge link alive) | green breathing |
-| degraded (detector: no bridge · node: no master) | blue breathing |
-| pairing (fleet) | magenta double-pulse |
-| recoverable error (link/peer lost) | red fast blink |
-| fatal error (init) | red solid |
-| a pass | brief white flash (even when the sound is off) |
-
-The core and its checkpoint hooks exist (a bridge-link-alive green via
-`checkpoint_link_last_rx_ms()`, a white pass flash), but they are inert on the
-detector while the LED is disabled. Wired on the **node** (GPIO10: green when the
-master is alive, blue degraded, magenta pairing, red if the C5 link drops, white
-pass flash) and the **master** (GPIO8 on the C6-Zero; GPIO27 on the C5-as-master
-variant, free there since it runs no receiver — green running, blue when a paired
-gate drops, magenta pairing, white pass flash). The task runs a brief red→green→
-blue self-test at boot to make a new board's LED and colour order obvious.
-Optional bench mode maps C/N to the HEALTHY brightness.
-
-> Board note: the status LED needs an addressable WS2812. The Waveshare
-> C3/C5/C6-Zero boards have one; a bare ESP32-C3 SuperMini does **not** (only a
-> mono LED on GPIO8 + a power LED), so it can't show the colour scheme.
+A board's onboard WS2812 shows state via `components/status_led` (pure-C
+state→colour core, host-tested; RMT WS2812 driver; boot red→green→blue
+self-test; priority-1 task; ~15%). Onboard GPIO: node **10**, master **8**
+(C5-as-master **27**). **The detector has no status LED** — the C5-Zero WS2812 is
+on **GPIO27**, a receiver IQ-loopback pin, so it is disabled
+(`CONFIG_STATUS_LED_ENABLE=n`); a C3 SuperMini has no WS2812 either. Full scheme
+(colours per state and role): **`docs/CHECKPOINT.md` → "LED de statut"**.
 
 ## Fleet (C6 master + C3 nodes)
 
