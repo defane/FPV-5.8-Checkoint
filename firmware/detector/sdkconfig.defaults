@@ -44,3 +44,6 @@ CONFIG_SPIRAM=n
 # its exact timing; the DAC pins are routed to nothing and free for the
 # amplifier (docs/CHECKPOINT.md). Delete sdkconfig after changing this.
 CONFIG_C5VRX_VIDEO_OUTPUT=n
+
+# Status LED: onboard WS2812 of the Waveshare C5-Zero is on GPIO29.
+CONFIG_STATUS_LED_GPIO=29

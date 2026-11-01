@@ -7,6 +7,8 @@
 /* Implemented in checkpoint_link.c, called by checkpoint.c. */
 void checkpoint_link_start(void);               /* after the task is up */
 void checkpoint_link_report_pass(const pd_event_t *e);
+uint32_t checkpoint_link_last_rx_ms(void);      /* esp_timer ms of the last valid
+                                                   frame from the bridge; 0 = never */
 
 /* Implemented in checkpoint.c, called by checkpoint_link.c. These reach into
  * the running detector/audio state, so they are no-ops before checkpoint_start. */

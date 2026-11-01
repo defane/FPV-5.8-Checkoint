@@ -45,3 +45,12 @@ void       sled_pass(sled_t *s, uint32_t now_ms);     /* latch a pass flash     
 void       sled_set_quality(sled_t *s, uint8_t q);    /* enable bench C/N level */
 void       sled_clear_quality(sled_t *s);
 sled_rgb_t sled_tick(sled_t *s, uint32_t now_ms);     /* colour for `now_ms`    */
+
+/* ---- ESP runtime (status_led_esp.c); not compiled by the host test ---- *
+ * Thread-safe setters the firmware calls from any task; a priority-1 task
+ * renders the core every CONFIG_STATUS_LED_TICK_MS. All are no-ops when
+ * CONFIG_STATUS_LED_ENABLE=n, so callers need no #ifdef. */
+void status_led_start(void);                    /* create WS2812 driver + task  */
+void status_led_set_base(sled_base_t base);
+void status_led_pass(void);                     /* latch a pass flash           */
+void status_led_set_quality_cn_x10(int cn_x10); /* bench C/N; <0 clears          */

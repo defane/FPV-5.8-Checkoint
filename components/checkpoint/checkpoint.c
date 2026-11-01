@@ -25,10 +25,12 @@
 #include "pass_detector.h"
 #include "rf.h"
 #include "sdkconfig.h"
+#include "status_led.h"
 
 #define CHECKPOINT_TICK_MS   50u
 #define CHECKPOINT_PRIORITY  1u     /* below every receiver task */
 #define CHECKPOINT_STACK     3072u
+#define CHECKPOINT_LINK_ALIVE_MS 3000u  /* bridge counts as present within this */
 
 /* NVS "checkpoint"; a new layout gets a new version (old blobs ignored). */
 #define PREFS_VERSION 1u
@@ -129,6 +131,7 @@ static void on_pass(checkpoint_t *cp, const pd_event_t *e)
            (unsigned long)(e->at_ms - e->peak_ms), audio_pentatonic_semitones[e->channel % 8u],
            queued ? "queued" : audio_state());
     checkpoint_link_report_pass(e);
+    status_led_pass();  /* brief white flash, even when the sound is off */
 }
 
 /* A live receiver sample, in dB; false when there is none. */
@@ -149,6 +152,12 @@ static void checkpoint_task(void *arg)
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(CHECKPOINT_TICK_MS));
         const uint32_t now = now_ms();
+        /* Status LED: green when the bridge is talking to us, blue otherwise. */
+        {
+            const uint32_t last = checkpoint_link_last_rx_ms();
+            const bool link_up = last != 0u && (uint32_t)(now - last) < CHECKPOINT_LINK_ALIVE_MS;
+            status_led_set_base(link_up ? SLED_HEALTHY : SLED_DEGRADED);
+        }
         const size_t index = rf_channel_index();
         /* Retune, scan or calibration: whatever was in progress is not a pass. */
         if (s_control_epoch != seen_epoch || index != seen_index) {
@@ -186,8 +195,9 @@ static void checkpoint_task(void *arg)
 void checkpoint_start(void)
 {
     if (s_cp) return;
+    status_led_start();   /* shows BOOT; the task below flips it to the link state */
     checkpoint_t *cp = calloc(1, sizeof(*cp));
-    if (!cp) { printf("CHECKPOINT disabled: no memory\n"); return; }
+    if (!cp) { status_led_set_base(SLED_ERR_FATAL); printf("CHECKPOINT disabled: no memory\n"); return; }
     checkpoint_prefs_t prefs;
     const bool saved = blob_load("checkpoint", &prefs, sizeof(prefs)) && prefs.version == PREFS_VERSION &&
                        pd_config_valid(&prefs.det);
@@ -201,6 +211,7 @@ void checkpoint_start(void)
     audio_start();
     if (xTaskCreate(checkpoint_task, "checkpoint", CHECKPOINT_STACK, cp, CHECKPOINT_PRIORITY, NULL) != pdPASS) {
         free(cp);
+        status_led_set_base(SLED_ERR_FATAL);
         printf("CHECKPOINT disabled: no memory for the task\n");
         return;
     }

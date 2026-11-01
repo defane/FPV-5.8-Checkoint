@@ -26,6 +26,7 @@
 #define LINK_READ_MS    100u
 
 static QueueHandle_t s_evq;     /* pd_event_t from the detector task */
+static volatile uint32_t s_last_rx_ms;  /* last valid frame decoded from the bridge */
 
 static uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
 
@@ -79,7 +80,7 @@ static void link_task(void *arg) {
         const int n = uart_read_bytes(LINK_UART, rx, sizeof rx, pdMS_TO_TICKS(LINK_READ_MS));
         for (int i = 0; i < n; i++) {
             lp_msg_t m;
-            if (lp_decoder_push(&dec, rx[i], &m)) handle_msg(&m);
+            if (lp_decoder_push(&dec, rx[i], &m)) { s_last_rx_ms = now_ms(); handle_msg(&m); }
         }
 
         pd_event_t e;
@@ -140,9 +141,12 @@ void checkpoint_link_report_pass(const pd_event_t *e) {
     if (s_evq) (void)xQueueSend(s_evq, e, 0);   /* non-blocking; drop if full */
 }
 
+uint32_t checkpoint_link_last_rx_ms(void) { return s_last_rx_ms; }
+
 #else  /* !CONFIG_CHECKPOINT_LINK_ENABLE */
 
 void checkpoint_link_start(void) {}
 void checkpoint_link_report_pass(const pd_event_t *e) { (void)e; }
+uint32_t checkpoint_link_last_rx_ms(void) { return 0; }
 
 #endif

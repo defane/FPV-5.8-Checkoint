@@ -1,0 +1,35 @@
+menu "Status LED"
+
+    config STATUS_LED_ENABLE
+        bool "Enable the WS2812 status LED"
+        default y
+
+    config STATUS_LED_GPIO
+        int "WS2812 data GPIO"
+        depends on STATUS_LED_ENABLE
+        default 29
+        help
+            Onboard WS2812 on the Waveshare Zero boards: 29 (C5-Zero,
+            detector), 10 (C3-Zero, node), 8 (C6-Zero, master). Set the
+            right one per firmware in its sdkconfig.defaults.
+
+    config STATUS_LED_BRIGHTNESS
+        int "Master brightness (1..255)"
+        depends on STATUS_LED_ENABLE
+        range 1 255
+        default 40
+        help
+            ~15% of full. A WS2812 at full scale is blinding and draws
+            real current; keep it low.
+
+    config STATUS_LED_TICK_MS
+        int "Render period (ms)"
+        depends on STATUS_LED_ENABLE
+        default 50
+
+    config STATUS_LED_STACK
+        int "Task stack (bytes)"
+        depends on STATUS_LED_ENABLE
+        default 2560
+
+endmenu

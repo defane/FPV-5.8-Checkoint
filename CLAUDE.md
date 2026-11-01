@@ -104,6 +104,7 @@ without video) and was abandoned. Audio is off until `coin.pcm` exists
 | 26 | antenna switch (C5-Zero) | forbidden |
 | 28 | BOOT button | input, strapping |
 | 6, 8 | C5 ↔ C3 UART link | TX 6, RX 8 (C5-Zero header pins; 8 is the amp LRC, free on a fleet gate / video off; GPIO 15 is not broken out) |
+| 29 | status LED (WS2812, C5-Zero onboard) | driven by `status_led` over RMT; onboard, no wiring |
 
 GDMA: 3 AHB pairs. C5VRX uses 1 RX (PARLIO RX) and 1 TX (PARLIO TX; the TX
 BitScrambler is inline, no channel of its own). I2S gets a free TX channel,
@@ -134,6 +135,28 @@ settings are editable from the C3 web UI, which pushes them over the link
 (`CONFIG_SET`) and the C5 echoes the validated result (`CONFIG_STATE`). Saved
 in NVS `checkpoint` (`checkpoint_prefs_t`, bump `PREFS_VERSION` on layout
 change).
+
+## Status LED
+
+Each board's onboard WS2812 shows state through `components/status_led` (a
+pure-C state→colour core + an RMT WS2812 driver, priority-1 task, ~15%
+brightness, started after the splash). Onboard GPIO: **29** (detector, C5-Zero),
+**10** (node, C3-Zero), **8** (master, C6-Zero).
+
+| State | LED |
+| --- | --- |
+| boot / self-check | yellow blink |
+| healthy (detector: bridge link alive) | green breathing |
+| degraded (detector: no bridge · node: no master) | blue breathing |
+| pairing (fleet) | magenta double-pulse |
+| recoverable error (link/peer lost) | red fast blink |
+| fatal error (init) | red solid |
+| a pass | brief white flash (even when the sound is off) |
+
+The detector goes green only while the bridge is talking to it: the C3 sends a
+periodic HELLO keepalive and the C5 counts the link alive within 3 s of the last
+frame (`checkpoint_link_last_rx_ms()`). Currently wired on the **detector**;
+node/master follow. Optional bench mode maps C/N to the HEALTHY brightness.
 
 ## Fleet (C6 master + C3 nodes)
 

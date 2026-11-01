@@ -1,6 +1,7 @@
 #include "c3_link.h"
 #include "driver/uart.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
@@ -58,6 +59,7 @@ static void link_task(void *arg) {
     uint8_t hello[LP_MAX_FRAME];
     size_t hn = lp_encode_hello(hello, sizeof hello, LP_ROLE_C3);
     if (hn) uart_write_bytes(LINK_UART, (const char *)hello, hn);
+    uint32_t last_hello = (uint32_t)(esp_timer_get_time() / 1000);
 
     for (;;) {
         uint8_t rx[64];
@@ -69,6 +71,14 @@ static void link_task(void *arg) {
         frame_t f;
         while (xQueueReceive(s_outq, &f, 0) == pdTRUE)
             uart_write_bytes(LINK_UART, (const char *)f.buf, f.len);
+
+        /* Periodic HELLO keepalive: lets the C5 sense the link is alive and
+         * light its status LED green (the C3 is otherwise silent on the UART). */
+        const uint32_t t = (uint32_t)(esp_timer_get_time() / 1000);
+        if (hn && (uint32_t)(t - last_hello) >= 1000u) {
+            last_hello = t;
+            uart_write_bytes(LINK_UART, (const char *)hello, hn);
+        }
     }
 }
 
