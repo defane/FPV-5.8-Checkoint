@@ -49,4 +49,12 @@ menu "Checkpoint C6 master"
         string "Admin web password (empty disables admin auth)"
         default "checkpoint"
 
+    config C6_BOOT_CHIME
+        bool "Play the coin sound once at boot (speaker check)"
+        default n
+        help
+            Plays one coin sound at startup to confirm the speaker/amplifier.
+            Needs an audio build (Checkpoint audio / CONFIG_AUDIO_PLAYER_ENABLE
+            and coin.pcm); it is a no-op otherwise.
+
 endmenu

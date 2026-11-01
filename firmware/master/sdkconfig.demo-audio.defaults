@@ -1,0 +1,8 @@
+# DEMO overlay: enable the centralized audio + a one-shot boot chime to test the
+# C6 speaker/amplifier. Needs components/audio_player/sounds/coin.pcm (local;
+# tools/coin_sound.py, or a synthetic placeholder). Build in its own dir:
+#   idf.py -DSDKCONFIG=sdkconfig.demo \
+#     -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.demo-audio.defaults" \
+#     -B build-demo build
+CONFIG_AUDIO_PLAYER_ENABLE=y
+CONFIG_C6_BOOT_CHIME=y

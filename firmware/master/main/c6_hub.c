@@ -225,6 +225,9 @@ static void beacon_task(void *arg) {
 void c6_hub_start(void) {
     s_lock = xSemaphoreCreateMutex();
     audio_start();
+#if CONFIG_C6_BOOT_CHIME
+    audio_player_play(AUDIO_SOUND_COIN, audio_pitch_for_channel(0));  /* speaker check */
+#endif
     nodes_load();
     rt_init(&s_rt, &(rt_config_t){ .num_gates = num_gates() });
 
