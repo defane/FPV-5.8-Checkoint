@@ -132,6 +132,10 @@ jobs:
           cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/race_timing/include test_race_timing.c \
             ../components/race_timing/race_timing.c -o /tmp/test_race_timing
           /tmp/test_race_timing | tail -1
+          # Status LED core (components/status_led): state -> colour/pattern.
+          cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/status_led/include test_status_led.c \
+            ../components/status_led/status_led.c -o /tmp/test_status_led
+          /tmp/test_status_led | tail -1
       - name: Diagnostic log semantics
         run: |
           python3 test/test_field_diag_compare.py

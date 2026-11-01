@@ -46,6 +46,7 @@ components/
   fleet_proto/   pure-C C6<->C3 ESP-NOW protocol (host-tested)
   race_timing/   pure-C lap/sector timing engine (host-tested)
   espnow_link/   ESP-NOW transport carrying fleet_proto (C6 + C3)
+  status_led/    single-WS2812 status indicator (pure-C core host-tested)
 firmware/detector/  ESP32-C5 application (RF + detection; sound local or report-only)
 firmware/node/      ESP32-C3 node bridge (UART + ESP-NOW relay, degraded Wi-Fi web)
 firmware/master/    ESP32-C6 master (UART + ESP-NOW hub + speaker + admin web + timing)
@@ -83,6 +84,8 @@ cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/fleet_proto/include -I../c
    test_fleet_proto.c ../components/fleet_proto/fleet_proto.c ../components/link_proto/link_proto.c -o /tmp/t && /tmp/t
 cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/race_timing/include \
    test_race_timing.c ../components/race_timing/race_timing.c -o /tmp/t && /tmp/t
+cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/status_led/include \
+   test_status_led.c ../components/status_led/status_led.c -o /tmp/t && /tmp/t
 ```
 
 ## Architecture
