@@ -68,29 +68,13 @@ as plain C5VRX.
 
 ## Wiring
 
-MAX98357A I2S amplifier, 5 V supply, 4 Ω speaker, on the pins freed by
-the video output (Kconfig defaults):
-
-| Amplifier | GPIO |
-| --- | --- |
-| BCLK | 9 |
-| LRC (WS) | 8 |
-| DIN | 7 (strapping pin: only a high-impedance input on it, never SD) |
-| SD (HIGH = on, LOW between sounds) | 10 |
-
-C5 ↔ C3 UART link (`CONFIG_CHECKPOINT_LINK_*`, cross-wired to the C3's TX/RX):
-
-| C5 link | GPIO |
-| --- | --- |
-| UART TX (→ C3 RX) | 6 |
-| UART RX (← C3 TX) | 8 |
-
-The first amplifier wiring (GPIO3 BCLK, 4 LRC, 5 DIN, 1 SD) sat on the IQ
-loopback (`RF_IQ_GPIO_NUMS = {1, 0, 25, 2, 27, 5, 3, 4}`,
-`components/c5vrx_rx/rf.h`, driven at 40 MS/s and needed for the C/N even
-without video) and was abandoned. Audio is off until `coin.pcm` exists
-(`CONFIG_AUDIO_PLAYER_ENABLE=n`); pins are checked at boot by
-`components/checkpoint/checkpoint.c:pin_owner()`.
+MAX98357A I2S amplifier on the video-DAC pins freed with video off: **BCLK 9,
+LRC 8, DIN 7** (strapping — high-impedance input only, never SD), **SD 10**.
+C5↔C3 UART link (`CONFIG_CHECKPOINT_LINK_*`, crossed): **TX 6, RX 8**. The first
+amp wiring (3/4/5/1) sat on the IQ loopback and was abandoned. Audio is off until
+`coin.pcm` exists (`CONFIG_AUDIO_PLAYER_ENABLE=n`); audio pins are checked at boot
+by `components/checkpoint/checkpoint.c:pin_owner()` against the GPIO map below.
+Full per-board pinout: README "Pinout" + `docs/wiring*.svg`.
 
 ## GPIO map
 
@@ -136,40 +120,28 @@ on **GPIO27**, a receiver IQ-loopback pin, so it is disabled
 
 Race timing across ordered gates (each gate = a C5). The **C6** (`firmware/master`,
 esp32c6) is UART-wired to its own C5 (gate 0) and aggregates remote gates over
-**ESP-NOW**; a remote gate is a C5 UART-wired to a **C3** (`firmware/node`). Global
-schema: `docs/fleet.svg`.
+**ESP-NOW**; a remote gate is a C5 UART-wired to a **C3** (`firmware/node`).
+Protocols: `components/link_proto` (C5↔bridge UART, incl. `LP_MSG_SET_CHANNEL` —
+the one place checkpoint commands `rf_set_channel()` rather than reading),
+`components/fleet_proto` over `components/espnow_link` (pairing, beacons,
+`GATE_PASS`, `NODE_STATUS`), `components/race_timing`. Sound is centralized on
+the C6 (remote C5s report only). A C3 that cannot reach the C6 within
+`CONFIG_C3_FLEET_TIMEOUT_MS` falls back to a degraded local AP+web. The C6/C3 APs
+and ESP-NOW share one Wi-Fi channel (`CONFIG_C6_AP_CHANNEL`/`CONFIG_C3_AP_CHANNEL`).
 
-- **Protocols**: UART `components/link_proto` (C5↔bridge: passes, config, and
-  `LP_MSG_SET_CHANNEL` which makes the C5 call `rf_set_channel()` — the only
-  place checkpoint commands a retune rather than reading); ESP-NOW
-  `components/fleet_proto` (pairing, time beacons, `CONFIG`, `GATE_PASS`,
-  `NODE_STATUS`) over `components/espnow_link`; `components/race_timing`
-  (lap/sector per channel, host-tested).
-- **Pinout** (Kconfig defaults; crossed UART, common ground):
+Pinout (Kconfig defaults; crossed UART, common ground):
 
-  | Board | UART TX / RX | Amplifier (BCLK/LRC/DIN/SD) |
-  | --- | --- | --- |
-  | C5 (gate) | 6 / 8 → bridge | 9/8/7/10 (local sound only; off in a fleet) |
-  | C3 (node) | 5 / 4 → C5 | — |
-  | C6 (master) | 4 / 5 → local C5 | 18/19/20/21 → 4 Ω speaker |
+| Board | UART TX / RX | Amplifier (BCLK/LRC/DIN/SD) |
+| --- | --- | --- |
+| C5 (gate) | 6 / 8 → bridge | 9/8/7/10 (local sound only; off in a fleet) |
+| C3 (node) | 5 / 4 → C5 | — |
+| C6 (master) | 4 / 5 → local C5 | 18/19/20/21 → 4 Ω speaker |
 
-  C6 amp/UART pins are placeholders — check against the C6 board's strapping
-  pins. The C6 AP, the C3 APs and ESP-NOW share one Wi-Fi channel
-  (`CONFIG_C6_AP_CHANNEL` / `CONFIG_C3_AP_CHANNEL`).
-- **Sound** is centralized on the C6 (remote C5s report only).
-- **Web roles** (C6 admin web and the C3 degraded web): a **spectator** reads
-  standings/status with no login; **admin** actions need a login
-  (`CONFIG_*_ADMIN_USER`/`_PASSWORD`, HTTP Basic, checked server-side on every
-  mutation endpoint; empty password disables auth).
-- **Degraded C3**: if the C6 is not reached within `CONFIG_C3_FLEET_TIMEOUT_MS`
-  at boot, the C3 serves its own AP + web (band selection → `SET_CHANNEL`,
-  results) instead of relaying.
-- **Temporary C5-as-master** (until a C6 is available): run `firmware/master` on a
-  spare C5 — `idf.py -DIDF_TARGET=esp32c5 -DSDKCONFIG=sdkconfig.c5
-  -DSDKCONFIG_DEFAULTS=sdkconfig.c5.defaults -B build-c5 build` from
-  `firmware/master` (→ `build-c5/master-c5.bin`, vs `master-c6.bin` on the C6).
-  The amp moves to the C5 pins 9/8/7/10 (GPIO 16-22 are the C5
-  flash); UART stays 4/5. Diagram: `docs/wiring-c5c5.svg`.
+C6 amp/UART pins are placeholders — check against the C6 board's strapping pins.
+**Temporary C5-as-master**: run the master on a spare C5 (`make flash
+FW=master-wave-c5`; amp on 9/8/7/10, UART 4/5). Protocols in depth, pairing, web
+roles (spectator vs admin login), degraded mode and the C5-as-master build:
+`docs/CHECKPOINT.md` → "Flotte", `docs/fleet.svg`, `docs/wiring-c5c5.svg`.
 
 ## Build and tests
 
