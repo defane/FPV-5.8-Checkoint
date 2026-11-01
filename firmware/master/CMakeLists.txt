@@ -9,4 +9,11 @@ endif()
 set(EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/../../components")
 set(COMPONENTS main)
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
-project(checkpoint_c6)
+# One firmware, two targets: C6 (default) or a spare C5 as a stand-in master
+# (-DIDF_TARGET=esp32c5). Name the binary by role + chip so the two images are
+# distinguishable (master-c6.bin vs master-c5.bin).
+if("$ENV{IDF_TARGET}" STREQUAL "esp32c5" OR "${IDF_TARGET}" STREQUAL "esp32c5")
+    project(master-c5)
+else()
+    project(master-c6)
+endif()

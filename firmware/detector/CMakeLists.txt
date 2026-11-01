@@ -11,4 +11,4 @@ endif()
 # audio_player and the C5VRX engine are reused by both firmware targets.
 set(EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/../../components")
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
-project(c5vrx5)
+project(detector-c5)
