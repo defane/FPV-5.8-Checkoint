@@ -26,6 +26,11 @@ build_ci/
 sdkconfig.*
 !sdkconfig.defaults
 !sdkconfig.*.defaults
+# Local, uncommitted overrides (passwords, audio, ...); fw.sh appends it last.
+sdkconfig.local.defaults
+
+# Generated coin sound (run tools/coin_sound.py; assets/coin_source.mp3 is not versioned).
+components/audio_player/sounds/coin.pcm
 
 # Raw board logs and captures stay out of git; summarize results in docs/.
 research/data/board_*

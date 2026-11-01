@@ -65,8 +65,12 @@ menu if an arg is omitted), `make monitor`, `make variants` (list the `FW=`
 names: `detector`/`node`/`master` defaults plus variants like
 `detector-xiao-c5`, `detector-wave-c5-lcd`, `master-wave-c5`), `make clean`. flash/monitor fall
 back to esptool / a serial terminal on the already-built image when ESP-IDF is
-not installed, so you can build in one place and flash in another. The raw
-commands:
+not installed, so you can build in one place and flash in another.
+
+For local, uncommitted settings — the Wi-Fi AP and admin-web passwords, or
+enabling audio — put them in `firmware/<role>/sdkconfig.local.defaults` (one
+`CONFIG_...=...` per line). It is gitignored, and `make`/`tools/fw.sh` append it
+last so it overrides the committed defaults. The raw commands:
 
 ```sh
 . ~/esp/esp-idf-v6.0.2/export.sh

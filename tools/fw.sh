@@ -60,6 +60,9 @@ resolve() {
         "") echo "no firmware selected" >&2; return 2 ;;
         *)  echo "unknown firmware: '$1' (choose: $FIRMWARES)" >&2; return 2 ;;
     esac
+    # Local, uncommitted overrides (gitignored): passwords, audio, etc. Applied
+    # last in the SDKCONFIG_DEFAULTS chain, so they win over the committed ones.
+    [ -f "$DIR/sdkconfig.local.defaults" ] && DEFAULTS="$DEFAULTS;sdkconfig.local.defaults"
 }
 
 idf_available() { [ -f "$IDF_EXPORT" ]; }
