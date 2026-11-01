@@ -1,74 +1,138 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 640" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif">
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1180" height="640" viewBox="0 0 1180 640">
   <defs>
-    <marker id="g" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#16a34a"/></marker>
-    <marker id="t" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#0d9488"/></marker>
-    <marker id="r" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#dc2626"/></marker>
-    <marker id="v" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#7c3aed"/></marker>
+    <clipPath id="clip-path-1">
+      <path d="M422.5 277.5 L445 277.5 L445 300 L422.5 300 Z"/>
+    </clipPath>
+    <clipPath id="clip-path-2">
+      <path d="M257.5 342.5 L235 342.5 L235 320 L257.5 320 Z"/>
+    </clipPath>
+    <clipPath id="clip-path-3">
+      <path d="M802.5 217.5 L825 217.5 L825 240 L802.5 240 Z"/>
+    </clipPath>
+    <clipPath id="clip-path-4">
+      <path d="M802.5 257.5 L825 257.5 L825 280 L802.5 280 Z"/>
+    </clipPath>
+    <clipPath id="clip-path-5">
+      <path d="M802.5 297.5 L825 297.5 L825 320 L802.5 320 Z"/>
+    </clipPath>
+    <clipPath id="clip-path-6">
+      <path d="M802.5 337.5 L825 337.5 L825 360 L802.5 360 Z"/>
+    </clipPath>
+    <clipPath id="clip-path-7">
+      <path d="M802.5 422.5 L825 422.5 L825 445 L802.5 445 Z"/>
+    </clipPath>
+    <clipPath id="clip-path-8">
+      <path d="M1032.5 292.5 L1055 292.5 L1055 315 L1032.5 315 Z"/>
+    </clipPath>
+    <clipPath id="clip-path-9">
+      <path d="M1032.5 337.5 L1055 337.5 L1055 360 L1032.5 360 Z"/>
+    </clipPath>
   </defs>
-  <rect x="0" y="0" width="1180" height="640" fill="#ffffff"/>
-  <text x="40" y="42" font-size="23" font-weight="700" fill="#0f172a">Temporary set — C5 + C5 (C5 as master)</text>
-  <text x="40" y="66" font-size="13" fill="#64748b">A stand-in for C6+C5 until the C6 arrives: a second C5 runs the master firmware built for esp32c5.</text>
-  <text x="40" y="85" font-size="13" fill="#64748b">Build:  (cd firmware/c6 &amp;&amp; idf.py -DIDF_TARGET=esp32c5 -DSDKCONFIG=sdkconfig.c5 -DSDKCONFIG_DEFAULTS=sdkconfig.c5.defaults -B build-c5 build)</text>
-
-  <!-- gate C5 -->
-  <rect x="50" y="205" width="190" height="240" rx="12" fill="#f8fafc" stroke="#334155" stroke-width="2"/>
-  <text x="145" y="237" font-size="16" font-weight="700" fill="#0f172a" text-anchor="middle">ESP32-C5</text>
-  <text x="145" y="256" font-size="11" fill="#64748b" text-anchor="middle">gate · firmware/c5</text>
-  <text x="145" y="272" font-size="11" fill="#64748b" text-anchor="middle">RF detect</text>
-  <!-- master C5 -->
-  <rect x="440" y="170" width="250" height="340" rx="12" fill="#eef4ff" stroke="#2563eb" stroke-width="2.5"/>
-  <text x="565" y="202" font-size="16" font-weight="700" fill="#0f172a" text-anchor="middle">ESP32-C5 as master</text>
-  <text x="565" y="221" font-size="11" fill="#64748b" text-anchor="middle">firmware/c6 @ esp32c5</text>
-  <text x="565" y="237" font-size="11" fill="#64748b" text-anchor="middle">UART + sound + web</text>
-  <!-- amp -->
-  <rect x="820" y="185" width="190" height="300" rx="12" fill="#f0fdfa" stroke="#0d9488" stroke-width="2"/>
-  <text x="915" y="217" font-size="15" font-weight="700" fill="#0f172a" text-anchor="middle">MAX98357A</text>
-  <path d="M1050,265 h24 l28,-22 v104 l-28,-22 h-24 Z" fill="#ede9fe" stroke="#7c3aed" stroke-width="2"/>
-  <text x="1082" y="371" font-size="12" font-weight="600" fill="#7c3aed" text-anchor="middle">4 Ω</text>
-
-  <!-- UART gate<->master -->
-  <line x1="240" y1="285" x2="440" y2="285" stroke="#16a34a" stroke-width="2.5" marker-end="url(#g)"/>
-  <line x1="440" y1="335" x2="240" y2="335" stroke="#16a34a" stroke-width="2.5" marker-end="url(#g)"/>
-  <line x1="240" y1="395" x2="440" y2="395" stroke="#475569" stroke-width="2.5" stroke-dasharray="6 4"/>
-  <text x="340" y="277" font-size="11" fill="#16a34a" text-anchor="middle" font-weight="600">UART link_proto</text>
-  <g font-size="11" font-family="ui-monospace,monospace" fill="#0f172a">
-    <circle cx="240" cy="285" r="4" fill="#16a34a"/><text x="232" y="281" text-anchor="end">GPIO6 TX</text>
-    <circle cx="240" cy="335" r="4" fill="#16a34a"/><text x="232" y="331" text-anchor="end">GPIO15 RX</text>
-    <circle cx="240" cy="395" r="4" fill="#475569"/><text x="232" y="391" text-anchor="end">GND</text>
-    <circle cx="440" cy="285" r="4" fill="#16a34a"/><text x="448" y="281">GPIO5 RX</text>
-    <circle cx="440" cy="335" r="4" fill="#16a34a"/><text x="448" y="331">GPIO4 TX</text>
-    <circle cx="440" cy="395" r="4" fill="#475569"/><text x="448" y="391">GND</text>
+  <title>wiring-c5c5.svg</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <rect id="rect4" x="0" y="0" width="1180" height="640" fill="#ffffff"/>
+    <text id="text4" transform="matrix(1 0 0 1 40 42)" x="0" y="0" xml:space="preserve" font-family="system-ui, sans-serif" font-size="23" font-weight="bold" fill="#0f172a"><tspan x="0" y="0">Temporary set — C5 + C5 (C5 as master)</tspan></text>
+    <text id="text5" transform="matrix(1 0 0 1 40 66)" x="0" y="0" xml:space="preserve" font-family="system-ui, sans-serif" font-size="13" fill="#64748b"><tspan x="0" y="0">A stand-in for C6+C5 until the C6 arrives: a second C5 runs the master firmware built for esp32c5.</tspan></text>
+    <text id="text6" transform="matrix(1 0 0 1 40 85)" x="0" y="0" xml:space="preserve" font-family="system-ui, sans-serif" font-size="13" fill="#64748b"><tspan x="0" y="0">Build: (cd firmware/master &amp;&amp; idf.py -DIDF_TARGET=esp32c5 -DSDKCONFIG=sdkconfig.c5 -DSDKCONFIG_DEFAULTS=sdkconfig.c5.defaults -B build-c5 build)</tspan></text>
+    <path id="rect6" d="M62 205 L228 205 C234.627 205 240 210.373 240 217 L240 433 C240 439.627 234.627 445 228 445 L62 445 C55.373 445 50 439.627 50 433 L50 217 C50 210.373 55.373 205 62 205 Z" fill="#f8fafc" stroke="#334155" stroke-width="2"/>
+    <text id="text7" transform="matrix(1 0 0 1 145 237)" x="0" y="0" xml:space="preserve" font-family="system-ui, sans-serif" font-size="16" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="0" y="0">ESP32-C5</tspan></text>
+    <text id="text8" transform="matrix(1 0 0 1 145 256)" x="0" y="0" xml:space="preserve" font-family="system-ui, sans-serif" font-size="11" fill="#64748b" text-anchor="middle"><tspan x="0" y="0">gate · firmware/detector</tspan></text>
+    <text id="text9" transform="matrix(1 0 0 1 145 272)" x="0" y="0" xml:space="preserve" font-family="system-ui, sans-serif" font-size="11" fill="#64748b" text-anchor="middle"><tspan x="0" y="0">RF detect</tspan></text>
+    <path id="rect9" d="M452.042 150.025 L677.958 150.025 C681.139 150.025 684.19 151.289 686.44 153.538 C688.69 155.788 689.953 158.839 689.953 162.021 L689.953 504.011 C689.953 507.192 688.69 510.243 686.44 512.493 C684.19 514.743 681.139 516.006 677.958 516.006 L452.042 516.006 C445.417 516.006 440.047 510.636 440.047 504.011 L440.047 162.021 C440.047 155.396 445.417 150.025 452.042 150.025 Z" fill="#eef4ff" stroke="#2563eb" stroke-width="2.593"/>
+    <text id="text10" transform="matrix(1 0 0 1 565.466 173.597)" x="0" y="0" xml:space="preserve" font-family="system-ui, sans-serif" font-size="16" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="0" y="0">ESP32-C5 as master</tspan></text>
+    <text id="text11" transform="matrix(1 0 0 1 563.138 190.269)" x="0" y="0" xml:space="preserve" font-family="system-ui, sans-serif" font-size="11" fill="#64748b" text-anchor="middle"><tspan x="0" y="0">firmware/master @ esp32c5</tspan></text>
+    <text id="text12" transform="matrix(1 0 0 1 562.672 203.941)" x="0" y="0" xml:space="preserve" font-family="system-ui, sans-serif" font-size="11" fill="#64748b" text-anchor="middle"><tspan x="0" y="0">UART + sound + web</tspan></text>
+    <path id="rect12" d="M832 185 L998 185 C1004.627 185 1010 190.373 1010 197 L1010 473 C1010 479.627 1004.627 485 998 485 L832 485 C825.373 485 820 479.627 820 473 L820 197 C820 190.373 825.373 185 832 185 Z" fill="#f0fdfa" stroke="#0d9488" stroke-width="2"/>
+    <text id="text13" transform="matrix(1 0 0 1 915 217)" x="0" y="0" xml:space="preserve" font-family="system-ui, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="0" y="0">MAX98357A</tspan></text>
+    <polygon id="path13" points="1050,295.293 1074,295.293 1102,273.293 1102,377.293 1074,355.293 1050,355.293" fill="#ede9fe" stroke="#7c3aed" stroke-width="2"/>
+    <text id="text14" transform="matrix(1 0 0 1 1076 329.337)" x="0" y="0" xml:space="preserve" font-family="system-ui, sans-serif" font-size="12" font-weight="600" fill="#7c3aed" text-anchor="middle"><tspan x="0" y="0">4 Ω</tspan></text>
+    <line id="line14" x1="240" y1="285" x2="440" y2="285" fill="#000000" stroke="#16a34a" stroke-width="2.5"/>
+    <g clip-path="url(#clip-path-1)">
+      <polygon points="422.5,277.5 440,285 422.5,292.5" fill="#16a34a"/>
+    </g>
+    <line id="line15" x1="440" y1="335" x2="240" y2="335" fill="#000000" stroke="#16a34a" stroke-width="2.5"/>
+    <g clip-path="url(#clip-path-2)">
+      <polygon points="257.5,342.5 240,335 257.5,327.5" fill="#16a34a"/>
+    </g>
+    <line id="line16" x1="240" y1="395" x2="440" y2="395" fill="#000000" stroke="#475569" stroke-width="2.5" stroke-dasharray="6 4"/>
+    <text id="text16" transform="matrix(1 0 0 1 340 277)" x="0" y="0" xml:space="preserve" font-family="system-ui, sans-serif" font-size="11" font-weight="600" fill="#16a34a" text-anchor="middle"><tspan x="0" y="0">UART link_proto</tspan></text>
+    <g id="g22">
+      <circle id="circle16" cx="240" cy="285" r="4" fill="#16a34a"/>
+      <text id="text17" transform="matrix(1 0 0 1 232 281)" x="0" y="0" xml:space="preserve" font-family="ui-monospace, sans-serif" font-size="11" fill="#0f172a" text-anchor="end"><tspan x="0" y="0">GPIO6 TX</tspan></text>
+      <circle id="circle17" cx="240" cy="335" r="4" fill="#16a34a"/>
+      <text id="text18" transform="matrix(1 0 0 1 232 331)" x="0" y="0" xml:space="preserve" font-family="ui-monospace, sans-serif" font-size="11" fill="#0f172a" text-anchor="end"><tspan x="0" y="0">GPIO8 RX</tspan></text>
+      <circle id="circle18" cx="240" cy="395" r="4" fill="#475569"/>
+      <text id="text19" transform="matrix(1 0 0 1 232 391)" x="0" y="0" xml:space="preserve" font-family="ui-monospace, sans-serif" font-size="11" fill="#0f172a" text-anchor="end"><tspan x="0" y="0">GND</tspan></text>
+      <circle id="circle19" cx="440" cy="285" r="4" fill="#16a34a"/>
+      <text id="text20" transform="matrix(1 0 0 1 448 281)" x="0" y="0" xml:space="preserve" font-family="ui-monospace, sans-serif" font-size="11" fill="#0f172a"><tspan x="0" y="0">GPIO5 RX</tspan></text>
+      <circle id="circle20" cx="440" cy="335" r="4" fill="#16a34a"/>
+      <text id="text21" transform="matrix(1 0 0 1 448 331)" x="0" y="0" xml:space="preserve" font-family="ui-monospace, sans-serif" font-size="11" fill="#0f172a"><tspan x="0" y="0">GPIO4 TX</tspan></text>
+      <circle id="circle21" cx="440" cy="395" r="4" fill="#475569"/>
+      <text id="text22" transform="matrix(1 0 0 1 448 391)" x="0" y="0" xml:space="preserve" font-family="ui-monospace, sans-serif" font-size="11" fill="#0f172a"><tspan x="0" y="0">GND</tspan></text>
+    </g>
+    <line id="line22" x1="690" y1="225" x2="820" y2="225" fill="#000000" stroke="#0d9488" stroke-width="2.5"/>
+    <g clip-path="url(#clip-path-3)">
+      <polygon points="802.5,217.5 820,225 802.5,232.5" fill="#0d9488"/>
+    </g>
+    <line id="line23" x1="690" y1="265" x2="820" y2="265" fill="#000000" stroke="#0d9488" stroke-width="2.5"/>
+    <g clip-path="url(#clip-path-4)">
+      <polygon points="802.5,257.5 820,265 802.5,272.5" fill="#0d9488"/>
+    </g>
+    <line id="line24" x1="690" y1="305" x2="820" y2="305" fill="#000000" stroke="#0d9488" stroke-width="2.5"/>
+    <g clip-path="url(#clip-path-5)">
+      <polygon points="802.5,297.5 820,305 802.5,312.5" fill="#0d9488"/>
+    </g>
+    <line id="line25" x1="690" y1="345" x2="820" y2="345" fill="#000000" stroke="#0d9488" stroke-width="2.5"/>
+    <g clip-path="url(#clip-path-6)">
+      <polygon points="802.5,337.5 820,345 802.5,352.5" fill="#0d9488"/>
+    </g>
+    <line id="line26" x1="690" y1="430" x2="820" y2="430" fill="#000000" stroke="#dc2626" stroke-width="2.5"/>
+    <g clip-path="url(#clip-path-7)">
+      <polygon points="802.5,422.5 820,430 802.5,437.5" fill="#dc2626"/>
+    </g>
+    <line id="line27" x1="690" y1="465" x2="820" y2="465" fill="#000000" stroke="#475569" stroke-width="2.5" stroke-dasharray="6 4"/>
+    <text id="text27" transform="matrix(1 0 0 1 755 217)" x="0" y="0" xml:space="preserve" font-family="system-ui, sans-serif" font-size="11" font-weight="600" fill="#0d9488" text-anchor="middle"><tspan x="0" y="0">I2S</tspan></text>
+    <g id="g39">
+      <circle id="circle27" cx="690" cy="225" r="4" fill="#0d9488"/>
+      <text id="text28" transform="matrix(1 0 0 1 682 221)" x="0" y="0" xml:space="preserve" font-family="ui-monospace, sans-serif" font-size="11" fill="#0f172a" text-anchor="end"><tspan x="0" y="0">GPIO9 BCLK</tspan></text>
+      <circle id="circle28" cx="690" cy="265" r="4" fill="#0d9488"/>
+      <text id="text29" transform="matrix(1 0 0 1 682 261)" x="0" y="0" xml:space="preserve" font-family="ui-monospace, sans-serif" font-size="11" fill="#0f172a" text-anchor="end"><tspan x="0" y="0">GPIO8 LRC</tspan></text>
+      <circle id="circle29" cx="690" cy="305" r="4" fill="#0d9488"/>
+      <text id="text30" transform="matrix(1 0 0 1 682 301)" x="0" y="0" xml:space="preserve" font-family="ui-monospace, sans-serif" font-size="11" fill="#0f172a" text-anchor="end"><tspan x="0" y="0">GPIO7 DIN</tspan></text>
+      <circle id="circle30" cx="690" cy="345" r="4" fill="#0d9488"/>
+      <text id="text31" transform="matrix(1 0 0 1 682 341)" x="0" y="0" xml:space="preserve" font-family="ui-monospace, sans-serif" font-size="11" fill="#0f172a" text-anchor="end"><tspan x="0" y="0">GPIO10 SD</tspan></text>
+      <circle id="circle31" cx="690" cy="430" r="4" fill="#dc2626"/>
+      <text id="text32" transform="matrix(1 0 0 1 682 426)" x="0" y="0" xml:space="preserve" font-family="ui-monospace, sans-serif" font-size="11" fill="#0f172a" text-anchor="end"><tspan x="0" y="0">5V</tspan></text>
+      <circle id="circle32" cx="690" cy="465" r="4" fill="#475569"/>
+      <text id="text33" transform="matrix(1 0 0 1 682 461)" x="0" y="0" xml:space="preserve" font-family="ui-monospace, sans-serif" font-size="11" fill="#0f172a" text-anchor="end"><tspan x="0" y="0">GND</tspan></text>
+      <circle id="circle33" cx="820" cy="225" r="4" fill="#0d9488"/>
+      <text id="text34" transform="matrix(1 0 0 1 828 221)" x="0" y="0" xml:space="preserve" font-family="ui-monospace, sans-serif" font-size="11" fill="#0f172a"><tspan x="0" y="0">BCLK</tspan></text>
+      <circle id="circle34" cx="820" cy="265" r="4" fill="#0d9488"/>
+      <text id="text35" transform="matrix(1 0 0 1 828 261)" x="0" y="0" xml:space="preserve" font-family="ui-monospace, sans-serif" font-size="11" fill="#0f172a"><tspan x="0" y="0">LRC</tspan></text>
+      <circle id="circle35" cx="820" cy="305" r="4" fill="#0d9488"/>
+      <text id="text36" transform="matrix(1 0 0 1 828 301)" x="0" y="0" xml:space="preserve" font-family="ui-monospace, sans-serif" font-size="11" fill="#0f172a"><tspan x="0" y="0">DIN</tspan></text>
+      <circle id="circle36" cx="820" cy="345" r="4" fill="#0d9488"/>
+      <text id="text37" transform="matrix(1 0 0 1 828 341)" x="0" y="0" xml:space="preserve" font-family="ui-monospace, sans-serif" font-size="11" fill="#0f172a"><tspan x="0" y="0">SD</tspan></text>
+      <circle id="circle37" cx="820" cy="430" r="4" fill="#dc2626"/>
+      <text id="text38" transform="matrix(1 0 0 1 828 426)" x="0" y="0" xml:space="preserve" font-family="ui-monospace, sans-serif" font-size="11" fill="#0f172a"><tspan x="0" y="0">VIN 5V</tspan></text>
+      <circle id="circle38" cx="820" cy="465" r="4" fill="#475569"/>
+      <text id="text39" transform="matrix(1 0 0 1 828 461)" x="0" y="0" xml:space="preserve" font-family="ui-monospace, sans-serif" font-size="11" fill="#0f172a"><tspan x="0" y="0">GND</tspan></text>
+    </g>
+    <line id="line39" x1="1010" y1="300" x2="1050" y2="300" fill="#000000" stroke="#7c3aed" stroke-width="2.5"/>
+    <g clip-path="url(#clip-path-8)">
+      <polygon points="1032.5,292.5 1050,300 1032.5,307.5" fill="#7c3aed"/>
+    </g>
+    <line id="line40" x1="1010" y1="345" x2="1050" y2="345" fill="#000000" stroke="#7c3aed" stroke-width="2.5"/>
+    <g clip-path="url(#clip-path-9)">
+      <polygon points="1032.5,337.5 1050,345 1032.5,352.5" fill="#7c3aed"/>
+    </g>
+    <circle id="circle40" cx="1010" cy="300" r="4" fill="#7c3aed"/>
+    <text id="text40" transform="matrix(1 0 0 1 1002 296)" x="0" y="0" xml:space="preserve" font-family="ui-monospace, sans-serif" font-size="11" fill="#0f172a" text-anchor="end"><tspan x="0" y="0">OUT+</tspan></text>
+    <circle id="circle41" cx="1010" cy="345" r="4" fill="#7c3aed"/>
+    <text id="text41" transform="matrix(1 0 0 1 1002 341)" x="0" y="0" xml:space="preserve" font-family="ui-monospace, sans-serif" font-size="11" fill="#0f172a" text-anchor="end"><tspan x="0" y="0">OUT−</tspan></text>
+    <text id="text42" transform="matrix(1 0 0 1 565.931 492.471)" x="0" y="0" xml:space="preserve" font-family="system-ui, sans-serif" font-size="11" fill="#7c3aed" text-anchor="middle"><tspan x="0" y="0">Wi-Fi AP + web (admin / spectator)</tspan></text>
+    <text id="text43" transform="matrix(1 0 0 1 40 560)" x="0" y="0" xml:space="preserve" font-family="system-ui, sans-serif" font-size="12" fill="#64748b"><tspan x="0" y="0">The master C5 runs no receiver, so GPIO 16-22 (its SPI flash) stay clear: the amp uses the proven C5 pins 9/8/7/10 (SD on 10; GPIO7 is strapping).</tspan></text>
+    <text id="text44" transform="matrix(1 0 0 1 40 580)" x="0" y="0" xml:space="preserve" font-family="system-ui, sans-serif" font-size="12" fill="#64748b"><tspan x="0" y="0">Swap this C5 for a real C6 later with no wiring change on the gate side; only the master&apos;s amp pins move to 18/19/20/21 on the C6.</tspan></text>
   </g>
-
-  <!-- I2S master<->amp (C5 amp pins 9/8/7/10) -->
-  <line x1="690" y1="225" x2="820" y2="225" stroke="#0d9488" stroke-width="2.5" marker-end="url(#t)"/>
-  <line x1="690" y1="265" x2="820" y2="265" stroke="#0d9488" stroke-width="2.5" marker-end="url(#t)"/>
-  <line x1="690" y1="305" x2="820" y2="305" stroke="#0d9488" stroke-width="2.5" marker-end="url(#t)"/>
-  <line x1="690" y1="345" x2="820" y2="345" stroke="#0d9488" stroke-width="2.5" marker-end="url(#t)"/>
-  <line x1="690" y1="430" x2="820" y2="430" stroke="#dc2626" stroke-width="2.5" marker-end="url(#r)"/>
-  <line x1="690" y1="465" x2="820" y2="465" stroke="#475569" stroke-width="2.5" stroke-dasharray="6 4"/>
-  <text x="755" y="217" font-size="11" fill="#0d9488" text-anchor="middle" font-weight="600">I2S</text>
-  <g font-size="11" font-family="ui-monospace,monospace" fill="#0f172a">
-    <circle cx="690" cy="225" r="4" fill="#0d9488"/><text x="682" y="221" text-anchor="end">GPIO9 BCLK</text>
-    <circle cx="690" cy="265" r="4" fill="#0d9488"/><text x="682" y="261" text-anchor="end">GPIO8 LRC</text>
-    <circle cx="690" cy="305" r="4" fill="#0d9488"/><text x="682" y="301" text-anchor="end">GPIO7 DIN</text>
-    <circle cx="690" cy="345" r="4" fill="#0d9488"/><text x="682" y="341" text-anchor="end">GPIO10 SD</text>
-    <circle cx="690" cy="430" r="4" fill="#dc2626"/><text x="682" y="426" text-anchor="end">5V</text>
-    <circle cx="690" cy="465" r="4" fill="#475569"/><text x="682" y="461" text-anchor="end">GND</text>
-    <circle cx="820" cy="225" r="4" fill="#0d9488"/><text x="828" y="221">BCLK</text>
-    <circle cx="820" cy="265" r="4" fill="#0d9488"/><text x="828" y="261">LRC</text>
-    <circle cx="820" cy="305" r="4" fill="#0d9488"/><text x="828" y="301">DIN</text>
-    <circle cx="820" cy="345" r="4" fill="#0d9488"/><text x="828" y="341">SD</text>
-    <circle cx="820" cy="430" r="4" fill="#dc2626"/><text x="828" y="426">VIN 5V</text>
-    <circle cx="820" cy="465" r="4" fill="#475569"/><text x="828" y="461">GND</text>
-  </g>
-  <line x1="1010" y1="300" x2="1050" y2="300" stroke="#7c3aed" stroke-width="2.5" marker-end="url(#v)"/>
-  <line x1="1010" y1="345" x2="1050" y2="345" stroke="#7c3aed" stroke-width="2.5" marker-end="url(#v)"/>
-  <circle cx="1010" cy="300" r="4" fill="#7c3aed"/><text x="1002" y="296" font-size="11" font-family="ui-monospace,monospace" text-anchor="end" fill="#0f172a">OUT+</text>
-  <circle cx="1010" cy="345" r="4" fill="#7c3aed"/><text x="1002" y="341" font-size="11" font-family="ui-monospace,monospace" text-anchor="end" fill="#0f172a">OUT−</text>
-
-  <text x="565" y="465" font-size="11" fill="#7c3aed" text-anchor="middle">Wi-Fi AP + web (admin / spectator)</text>
-
-  <text x="40" y="560" font-size="12" fill="#64748b">The master C5 runs no receiver, so GPIO 16-22 (its SPI flash) stay clear: the amp uses the proven C5 pins 9/8/7/10 (SD on 10; GPIO7 is strapping).</text>
-  <text x="40" y="580" font-size="12" fill="#64748b">Swap this C5 for a real C6 later with no wiring change on the gate side; only the master's amp pins move to 18/19/20/21 on the C6.</text>
 </svg>
