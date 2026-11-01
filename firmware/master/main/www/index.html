@@ -52,7 +52,8 @@
       <thead><tr><th>Channel</th><th>Laps</th><th>Last lap</th><th>Best lap</th><th>Last gate</th></tr></thead>
       <tbody id="standings"><tr><td colspan="5" class="muted">no passes yet</td></tr></tbody>
     </table>
-    <div class="bar admin-only" style="margin-top:12px"><button id="reset" class="warn">Reset race</button></div>
+    <div class="bar admin-only" style="margin-top:12px"><button id="reset" class="warn">Reset race</button>
+      <label style="margin-left:auto">Volume <input id="vol" type="range" min="0" max="100" step="5" style="vertical-align:middle;width:120px"> <b id="vol_v">—</b>%</label></div>
   </div>
 
   <h2>Gates / nodes</h2>
@@ -109,6 +110,7 @@ async function poll() {
     $("l_cn").textContent = (s.has_local && L.cn_x10 > -990) ? (L.cn_x10/10).toFixed(1) : "—";
     $("l_ch").textContent = s.has_local ? L.channel : "—";
     $("l_passes").textContent = s.total_passes;
+    if (s.volume != null) { $("vol_v").textContent = s.volume; if (document.activeElement !== $("vol")) $("vol").value = s.volume; }
 
     const st = s.standings || [];
     $("standings").innerHTML = st.length ? st.map(x => `
@@ -139,6 +141,8 @@ $("pair_toggle").addEventListener("click", async () => {
   await post("/api/pairing", { open: $("pair_state").textContent !== "OPEN" ? 1 : 0 }); poll();
 });
 $("reset").addEventListener("click", async () => { await post("/api/reset", {}); poll(); });
+$("vol").addEventListener("input", () => { $("vol_v").textContent = $("vol").value; });
+$("vol").addEventListener("change", async () => { await post("/api/volume", { volume: +$("vol").value }); });
 document.addEventListener("focusin", e => { if (e.target.closest("#nodes")) editing = true; });
 $("nodes").addEventListener("click", async e => {
   const tr = e.target.closest("tr"); if (!tr || !admin) return;

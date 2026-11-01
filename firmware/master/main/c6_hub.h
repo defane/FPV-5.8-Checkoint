@@ -30,6 +30,7 @@ typedef struct {
     bool          pairing;
     uint8_t       num_gates;
     uint8_t       num_nodes;
+    uint8_t       volume;        /* centralized audio volume, 0..100 % */
     c6_node_t     nodes[C6_MAX_NODES];
     uint8_t       num_standings;
     c6_standing_t standings[RT_MAX_CHANNELS];
@@ -38,6 +39,7 @@ typedef struct {
 void c6_hub_start(void);                       /* after Wi-Fi AP is up */
 void c6_hub_local_pass(uint8_t channel, int32_t peak_db_x10, uint32_t at_ms);
 void c6_hub_set_pairing(bool open);
+void c6_hub_set_volume(uint8_t pct);           /* 0..100 %, applied + saved in NVS */
 bool c6_hub_set_node(uint8_t node_id, uint8_t gate_index, uint8_t channel);  /* reassign */
 bool c6_hub_remove_node(uint8_t node_id);
 void c6_hub_reset_race(void);

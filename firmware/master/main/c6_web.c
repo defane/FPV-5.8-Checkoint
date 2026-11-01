@@ -31,11 +31,11 @@ static esp_err_t get_state(httpd_req_t *req) {
     o += snprintf(body + o, sizeof body - o,
                   "{\"pairing\":%s,\"num_gates\":%u,\"has_local\":%s,"
                   "\"local\":{\"channel\":%u,\"cn_x10\":%ld,\"state\":%u,\"played\":%lu,"
-                  "\"dropped\":%lu,\"failed\":%lu},\"total_passes\":%lu,",
+                  "\"dropped\":%lu,\"failed\":%lu},\"total_passes\":%lu,\"volume\":%u,",
                   f.pairing ? "true" : "false", f.num_gates, s.has_local ? "true" : "false",
                   s.local.channel, (long)s.local.cn_x10, s.local.state, (unsigned long)s.local.played,
                   (unsigned long)s.local.dropped, (unsigned long)s.local.failed,
-                  (unsigned long)s.total_passes);
+                  (unsigned long)s.total_passes, (unsigned)f.volume);
 
     o += snprintf(body + o, sizeof body - o, "\"nodes\":[");
     for (unsigned i = 0; i < f.num_nodes && o < (int)sizeof body; i++) {
@@ -162,6 +162,14 @@ static esp_err_t post_reset(httpd_req_t *req) {
     return ok_json(req, true);
 }
 
+static esp_err_t post_volume(httpd_req_t *req) {
+    if (!require_admin(req)) return ESP_OK;
+    char buf[128];
+    if (!read_body(req, buf, sizeof buf)) { httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "body"); return ESP_FAIL; }
+    c6_hub_set_volume((uint8_t)json_i(buf, "volume", 60));
+    return ok_json(req, true);
+}
+
 void c6_web_start(void) {
     build_auth();
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
@@ -177,6 +185,7 @@ void c6_web_start(void) {
         { .uri = "/api/node",     .method = HTTP_POST, .handler = post_node },
         { .uri = "/api/node_remove", .method = HTTP_POST, .handler = post_node_remove },
         { .uri = "/api/reset",    .method = HTTP_POST, .handler = post_reset },
+        { .uri = "/api/volume",   .method = HTTP_POST, .handler = post_volume },
     };
     for (unsigned i = 0; i < sizeof uris / sizeof uris[0]; i++) httpd_register_uri_handler(srv, &uris[i]);
     ESP_LOGI(TAG, "admin web on http://192.168.4.1/");

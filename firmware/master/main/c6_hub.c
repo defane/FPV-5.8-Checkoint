@@ -39,6 +39,23 @@ static void audio_start(void) {
     if (err != ESP_OK) ESP_LOGW(TAG, "audio off: %s (no coin.pcm / build)", esp_err_to_name(err));
 }
 
+/* Centralized audio volume, persisted in NVS so the web setting survives a reboot. */
+static void volume_apply_saved(void) {
+    uint8_t v = AUDIO_VOLUME_DEFAULT;
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS, NVS_READONLY, &h) == ESP_OK) { nvs_get_u8(h, "volume", &v); nvs_close(h); }
+    audio_player_set_volume(v);
+}
+
+void c6_hub_set_volume(uint8_t pct) {
+    if (pct > 100u) pct = 100u;
+    audio_player_set_volume(pct);
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS, NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_u8(h, "volume", pct); nvs_commit(h); nvs_close(h);
+    }
+}
+
 static lp_config_t default_config(void) {
     const lp_config_t c = {
         .alpha_milli = 300, .active_db_x10 = 150, .hysteresis_db_x10 = 30,
@@ -225,6 +242,7 @@ static void beacon_task(void *arg) {
 void c6_hub_start(void) {
     s_lock = xSemaphoreCreateMutex();
     audio_start();
+    volume_apply_saved();
 #if CONFIG_C6_BOOT_CHIME
     audio_player_play(AUDIO_SOUND_COIN, audio_pitch_for_channel(0));  /* speaker check */
 #endif
@@ -295,6 +313,7 @@ void c6_hub_snapshot(c6_fleet_t *out) {
     out->pairing = s_pairing;
     out->num_gates = num_gates();
     out->num_nodes = s_num_nodes;
+    out->volume = (uint8_t)audio_player_volume();
     for (unsigned i = 0; i < s_num_nodes; i++) out->nodes[i] = s_nodes[i];
     out->num_standings = s_rt.num_channels;
     for (unsigned i = 0; i < s_rt.num_channels; i++) {
