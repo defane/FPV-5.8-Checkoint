@@ -22,7 +22,7 @@ digraph wiring {
   c5 [label=<
     <table border="1" cellborder="0" cellspacing="6" bgcolor="#f8fafc">
       <tr><td colspan="2"><b>ESP32-C5 (Zero)</b><br/><font point-size="9">RF receive + pass detect + coin sound</font></td></tr>
-      <tr><td align="left" port="rx"><font color="#16a34a">GPIO15 RX</font></td><td align="right" port="bclk"><font color="#2563eb">BCLK GPIO9</font></td></tr>
+      <tr><td align="left" port="rx"><font color="#16a34a">GPIO11 RX</font></td><td align="right" port="bclk"><font color="#2563eb">BCLK GPIO9</font></td></tr>
       <tr><td align="left" port="tx"><font color="#16a34a">GPIO6 TX</font></td><td align="right" port="lrc"><font color="#2563eb">LRC GPIO8</font></td></tr>
       <tr><td align="left" port="gnd"><font color="#475569">GND</font></td><td align="right" port="din"><font color="#2563eb">DIN GPIO7</font></td></tr>
       <tr><td></td><td align="right" port="sd"><font color="#0d9488">SD GPIO10</font></td></tr>

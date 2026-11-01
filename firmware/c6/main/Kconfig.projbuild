@@ -1,6 +1,6 @@
 menu "Checkpoint C6 master"
 
-    comment "UART to the local C5 (link_proto). Defaults assume a C5 on TX6/RX15."
+    comment "UART to the local C5 (link_proto). Defaults assume a C5 on TX6/RX8."
     config C6_UART_NUM
         int "Link UART controller number"
         default 1

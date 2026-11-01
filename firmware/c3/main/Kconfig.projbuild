@@ -6,7 +6,7 @@ menu "Checkpoint C3 bridge"
         range 0 1
 
     config C3_UART_TX_GPIO
-        int "Link UART TX GPIO (to the C5 RX, GPIO 15)"
+        int "Link UART TX GPIO (to the C5 RX, GPIO 8)"
         default 5
 
     config C3_UART_RX_GPIO

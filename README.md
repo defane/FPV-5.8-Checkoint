@@ -102,7 +102,7 @@ is reserved on every board.
 | Function | GPIO | Notes |
 | --- | --- | --- |
 | Link UART TX → bridge RX | 6 | to a C3 (node) or the C6 (master) |
-| Link UART RX ← bridge TX | 15 | |
+| Link UART RX ← bridge TX | 8 | C5-Zero header pin (GPIO 15 is not broken out); the amp LRC, free on a fleet gate |
 | Amplifier BCLK / LRC / DIN / SD | 9 / 8 / 7 / 10 | only when the C5 sounds locally (standalone); off in a fleet |
 | forbidden | 0-5, 25, 27 (IQ) · 13,14 (USB) · 16-22 (flash) · 26 (antenna) | receiver-owned |
 
@@ -110,7 +110,7 @@ is reserved on every board.
 
 | Function | GPIO | Notes |
 | --- | --- | --- |
-| UART TX → C5 RX (15) | 5 | |
+| UART TX → C5 RX (8) | 5 | |
 | UART RX ← C5 TX (6) | 4 | |
 | Wi-Fi / ESP-NOW | — | no GPIO; ESP-NOW to the C6 on the shared AP channel |
 
@@ -118,7 +118,7 @@ is reserved on every board.
 
 | Function | GPIO | Notes |
 | --- | --- | --- |
-| UART TX → local C5 RX (15) | 4 | |
+| UART TX → local C5 RX (8) | 4 | |
 | UART RX ← local C5 TX (6) | 5 | |
 | Amplifier BCLK / LRC / DIN / SD | 18 / 19 / 20 / 21 | the centralized speaker; `VIN` 5 V, `OUT±` to a 4 Ω speaker |
 | Wi-Fi AP + ESP-NOW | — | admin web + fleet hub; same channel as the nodes |

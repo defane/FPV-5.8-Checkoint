@@ -82,7 +82,7 @@ C5 ↔ C3 UART link (`CONFIG_CHECKPOINT_LINK_*`, cross-wired to the C3's TX/RX):
 | C5 link | GPIO |
 | --- | --- |
 | UART TX (→ C3 RX) | 6 |
-| UART RX (← C3 TX) | 15 |
+| UART RX (← C3 TX) | 8 |
 
 The first amplifier wiring (GPIO3 BCLK, 4 LRC, 5 DIN, 1 SD) sat on the IQ
 loopback (`RF_IQ_GPIO_NUMS = {1, 0, 25, 2, 27, 5, 3, 4}`,
@@ -102,7 +102,7 @@ without video) and was abandoned. Audio is off until `coin.pcm` exists
 | 16–22 | SPI flash | forbidden |
 | 26 | antenna switch (C5-Zero) | forbidden |
 | 28 | BOOT button | input, strapping |
-| 6, 15 | C5 ↔ C3 UART link | TX 6, RX 15 (only receiver-free pins) |
+| 6, 8 | C5 ↔ C3 UART link | TX 6, RX 8 (C5-Zero header pins; 8 is the amp LRC, free on a fleet gate / video off; GPIO 15 is not broken out) |
 
 GDMA: 3 AHB pairs. C5VRX uses 1 RX (PARLIO RX) and 1 TX (PARLIO TX; the TX
 BitScrambler is inline, no channel of its own). I2S gets a free TX channel,
@@ -151,7 +151,7 @@ schema: `docs/fleet.svg`.
 
   | Board | UART TX / RX | Amplifier (BCLK/LRC/DIN/SD) |
   | --- | --- | --- |
-  | C5 (gate) | 6 / 15 → bridge | 9/8/7/10 (local sound only; off in a fleet) |
+  | C5 (gate) | 6 / 8 → bridge | 9/8/7/10 (local sound only; off in a fleet) |
   | C3 (node) | 5 / 4 → C5 | — |
   | C6 (master) | 4 / 5 → local C5 | 18/19/20/21 → 4 Ω speaker |
 

@@ -35,7 +35,7 @@
   <text x="1150" y="416" font-size="12" fill="#64748b" text-anchor="middle">speaker</text>
 
   <!-- ===================== UART LINK (C3 <-> C5) ===================== -->
-  <!-- C3 TX GPIO5 -> C5 RX GPIO15 -->
+  <!-- C3 TX GPIO5 -> C5 RX GPIO11 (standalone: GP8 is the amp LRC) -->
   <line x1="270" y1="300" x2="450" y2="300" stroke="#16a34a" stroke-width="2.5" marker-end="url(#aGreen)"/>
   <!-- C5 TX GPIO6 -> C3 RX GPIO4 -->
   <line x1="450" y1="350" x2="270" y2="350" stroke="#16a34a" stroke-width="2.5" marker-end="url(#aGreen)"/>
@@ -51,7 +51,7 @@
   <circle cx="270" cy="410" r="4" fill="#475569"/><text x="262" y="406" font-size="12" font-family="ui-monospace, monospace" fill="#0f172a" text-anchor="end">GND</text>
 
   <!-- C5 left pin labels (inside, left edge x=450) -->
-  <circle cx="450" cy="300" r="4" fill="#16a34a"/><text x="458" y="296" font-size="12" font-family="ui-monospace, monospace" fill="#0f172a" text-anchor="start">GPIO15 RX</text>
+  <circle cx="450" cy="300" r="4" fill="#16a34a"/><text x="458" y="296" font-size="12" font-family="ui-monospace, monospace" fill="#0f172a" text-anchor="start">GPIO11 RX</text>
   <circle cx="450" cy="350" r="4" fill="#16a34a"/><text x="458" y="346" font-size="12" font-family="ui-monospace, monospace" fill="#0f172a" text-anchor="start">GPIO6 TX</text>
   <circle cx="450" cy="410" r="4" fill="#475569"/><text x="458" y="406" font-size="12" font-family="ui-monospace, monospace" fill="#0f172a" text-anchor="start">GND</text>
 

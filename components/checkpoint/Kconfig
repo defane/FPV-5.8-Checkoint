@@ -21,13 +21,18 @@ menu "Checkpoint C5<->C3 link"
         depends on CHECKPOINT_LINK_ENABLE
         default 6
         help
-            GPIO 6 and 15 are the only pins the receiver and amplifier leave
-            free (see the GPIO map in CLAUDE.md).
+            GPIO 6 (TX) and 8 (RX) are receiver-free header pins on the
+            C5-Zero (GPIO 15 is not broken out). GPIO 8 is a video-DAC/amp
+            pin, free when video is off and the gate plays no local sound
+            (a fleet gate); it clashes with the amplifier LRC only in the
+            standalone sound mode -- there, set the RX to GPIO 11 instead
+            (the only free header RX with the amp on 7/8/9/10). See the GPIO
+            map in CLAUDE.md.
 
     config CHECKPOINT_LINK_RX_GPIO
         int "Link UART RX GPIO (from the C3 TX)"
         depends on CHECKPOINT_LINK_ENABLE
-        default 15
+        default 8
 
     config CHECKPOINT_LINK_BAUD
         int "Link UART baud rate"
