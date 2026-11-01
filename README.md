@@ -18,14 +18,14 @@ C6-mastered, multi-gate race-timing fleet.
 
 ## What it is
 
-- **ESP32-C5** (`firmware/c5`, Waveshare ESP32-C5-Zero) — runs the full C5VRX
+- **ESP32-C5** (`firmware/detector`, Waveshare ESP32-C5-Zero) — runs the full C5VRX
   receive chain, detects a pass from the tuned channel's C/N, and plays a coin
   sound on a MAX98357A I2S amplifier. Sound is the only local output: the video
   DAC is off (`CONFIG_C5VRX_VIDEO_OUTPUT=n`), freeing its pins for the amplifier.
-- **ESP32-C3** (`firmware/c3`) — a node bridge: UART to the C5, ESP-NOW uplink to
+- **ESP32-C3** (`firmware/node`) — a node bridge: UART to the C5, ESP-NOW uplink to
   the C6 master; if no master is reachable at boot it falls back to a local
   Wi-Fi SoftAP + web (band selection, results).
-- **ESP32-C6** (`firmware/c6`) — the optional **race-timing master**: UART to its
+- **ESP32-C6** (`firmware/master`) — the optional **race-timing master**: UART to its
   own C5, the centralized speaker, a Wi-Fi AP web, and an ESP-NOW hub that
   aggregates the C3 nodes. Each gate is a C5; the C6 times laps per channel.
 
@@ -46,9 +46,9 @@ components/
   fleet_proto/   pure-C C6<->C3 ESP-NOW protocol (host-tested)
   race_timing/   pure-C lap/sector timing engine (host-tested)
   espnow_link/   ESP-NOW transport carrying fleet_proto (C6 + C3)
-firmware/c5/     ESP32-C5 application (RF + detection; sound local or report-only)
-firmware/c3/     ESP32-C3 node bridge (UART + ESP-NOW relay, degraded Wi-Fi web)
-firmware/c6/     ESP32-C6 master (UART + ESP-NOW hub + speaker + admin web + timing)
+firmware/detector/  ESP32-C5 application (RF + detection; sound local or report-only)
+firmware/node/      ESP32-C3 node bridge (UART + ESP-NOW relay, degraded Wi-Fi web)
+firmware/master/    ESP32-C6 master (UART + ESP-NOW hub + speaker + admin web + timing)
 docs/            CHECKPOINT.md (feature notes + bench), wiring.svg
 ```
 
@@ -60,11 +60,11 @@ single-set wiring (C3, C5 and the amplifier).
 
 ```sh
 . ~/esp/esp-idf-v6.0.2/export.sh
-( cd firmware/c5 && idf.py build )     # ESP32-C5, must stay at 0 warnings
-( cd firmware/c3 && idf.py build )     # ESP32-C3 node bridge
-( cd firmware/c6 && idf.py build )     # ESP32-C6 master
+( cd firmware/detector && idf.py build )  # ESP32-C5, must stay at 0 warnings
+( cd firmware/node && idf.py build )      # ESP32-C3 node bridge
+( cd firmware/master && idf.py build )    # ESP32-C6 master
 # temporary "C5 as master" (run the C6 firmware on a spare C5 until the C6 arrives):
-( cd firmware/c6 && idf.py -DIDF_TARGET=esp32c5 -DSDKCONFIG=sdkconfig.c5 \
+( cd firmware/master && idf.py -DIDF_TARGET=esp32c5 -DSDKCONFIG=sdkconfig.c5 \
     -DSDKCONFIG_DEFAULTS=sdkconfig.c5.defaults -B build-c5 build )
 
 # Host tests
@@ -97,7 +97,7 @@ ground. Pins are Kconfig defaults (`menuconfig`); the C6 defaults should be
 checked against your board's strapping pins. USB-Serial-JTAG (flashing/console)
 is reserved on every board.
 
-**ESP32-C5** (`firmware/c5`, detector — one per gate)
+**ESP32-C5** (`firmware/detector`, detector — one per gate)
 
 | Function | GPIO | Notes |
 | --- | --- | --- |
@@ -106,7 +106,7 @@ is reserved on every board.
 | Amplifier BCLK / LRC / DIN / SD | 9 / 8 / 7 / 10 | only when the C5 sounds locally (standalone); off in a fleet |
 | forbidden | 0-5, 25, 27 (IQ) · 13,14 (USB) · 16-22 (flash) · 26 (antenna) | receiver-owned |
 
-**ESP32-C3** (`firmware/c3`, node bridge)
+**ESP32-C3** (`firmware/node`, node bridge)
 
 | Function | GPIO | Notes |
 | --- | --- | --- |
@@ -114,7 +114,7 @@ is reserved on every board.
 | UART RX ← C5 TX (6) | 4 | |
 | Wi-Fi / ESP-NOW | — | no GPIO; ESP-NOW to the C6 on the shared AP channel |
 
-**ESP32-C6** (`firmware/c6`, master)
+**ESP32-C6** (`firmware/master`, master)
 
 | Function | GPIO | Notes |
 | --- | --- | --- |

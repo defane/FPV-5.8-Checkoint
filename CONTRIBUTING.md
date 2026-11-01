@@ -3,7 +3,7 @@
 Contributions are welcome under the repository's `GPL-3.0-only` public license.
 Preserve contributor attribution and third-party license notices.
 
-Two firmwares build from `firmware/c5` and `firmware/c3` on the shared
+Two firmwares build from `firmware/detector` and `firmware/node` on the shared
 `components/`. Read [CLAUDE.md](CLAUDE.md) and [AGENTS.md](AGENTS.md) first:
 AGENTS.md is the reuse/attribution policy and the receive-chain realtime
 invariants (the `components/c5vrx_rx` engine is upstream C5VRX, reused

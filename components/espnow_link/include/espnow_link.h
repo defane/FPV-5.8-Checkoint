@@ -1,5 +1,5 @@
-/* espnow_link: ESP-NOW transport for the fleet, shared by firmware/c6 and
- * firmware/c3. It carries fleet_proto datagrams on a fixed Wi-Fi channel (the
+/* espnow_link: ESP-NOW transport for the fleet, shared by firmware/master and
+ * firmware/node. It carries fleet_proto datagrams on a fixed Wi-Fi channel (the
  * channel the C6 SoftAP uses). Wi-Fi must already be initialised and started by
  * the app (AP on the C6, STA on a relaying C3) before espnow_link_start.
  *

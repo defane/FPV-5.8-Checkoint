@@ -4,18 +4,18 @@ A "drone just passed" platform built on C5VRX-5 (upstream:
 https://github.com/Twotoz/C5VRX, remote `upstream`): a two-ESP checkpoint
 (C5 + C3) that scales to a C6-mastered race-timing fleet (see Fleet below).
 
-- **ESP32-C5** (Waveshare ESP32-C5-Zero, `firmware/c5`): the full C5VRX RF
+- **ESP32-C5** (Waveshare ESP32-C5-Zero, `firmware/detector`): the full C5VRX RF
   receive chain → pass detection on the tuned channel's C/N → a coin sound.
   **The only local output is the sound**: no video
-  (`CONFIG_C5VRX_VIDEO_OUTPUT=n` in `firmware/c5/sdkconfig.defaults`; the
+  (`CONFIG_C5VRX_VIDEO_OUTPUT=n` in `firmware/detector/sdkconfig.defaults`; the
   transport runs unchanged but `s_dac_gpio` routes it to no pin).
-- **ESP32-C3** (`firmware/c3`): the bridge. UART to the C5; when a C6 master is
+- **ESP32-C3** (`firmware/node`): the bridge. UART to the C5; when a C6 master is
   reachable it relays over ESP-NOW (headless), otherwise it falls back to a
   local Wi-Fi SoftAP + web UI that tunes the detector and shows its live C/N,
   stats and passes.
 
 It also scales to a **race-timing fleet** (`docs/CHECKPOINT.md`): an **ESP32-C6
-master** (`firmware/c6`, UART to its own C5 + the speaker + a Wi-Fi AP admin
+master** (`firmware/master`, UART to its own C5 + the speaker + a Wi-Fi AP admin
 web) aggregates passes from remote **C3 nodes** over **ESP-NOW**, each node a
 gate wired to a C5. The C6 orders gates, pairs nodes, assigns channels (retune
 via `SET_CHANNEL`), times laps/sectors per channel, and plays the central sound.
@@ -41,9 +41,9 @@ components/
   fleet_proto/   pure-C C6<->C3 ESP-NOW protocol (host-tested)
   race_timing/   pure-C lap/sector timing engine (host-tested)
   espnow_link/   ESP-NOW transport (C6 + C3) carrying fleet_proto
-firmware/c5/     ESP32-C5 app (RF + detection; sound local, or report-only in a fleet)
-firmware/c3/     ESP32-C3 node bridge (UART + ESP-NOW relay, degraded Wi-Fi web)
-firmware/c6/     ESP32-C6 master (UART + ESP-NOW hub + speaker + admin web + timing)
+firmware/detector/  ESP32-C5 app (RF + detection; sound local, or report-only in a fleet)
+firmware/node/      ESP32-C3 node bridge (UART + ESP-NOW relay, degraded Wi-Fi web)
+firmware/master/    ESP32-C6 master (UART + ESP-NOW hub + speaker + admin web + timing)
 ```
 
 The console/boot calls into checkpoint are kept without a circular dependency
@@ -62,7 +62,7 @@ as plain C5VRX.
   (gain_fast 4, control 3, gain_obs 3). The C5<->C3 UART task is priority 1 too.
 - RAM is tight: ~2 KB free at the boot peak without PSRAM. Checkpoint
   state is heap-allocated after the splash (`checkpoint_start()` in
-  `firmware/c5/main/main.c`); do not add static `.bss` buffers.
+  `firmware/detector/main/main.c`); do not add static `.bss` buffers.
 - Conventional Commits, one commit per feature.
 
 ## Wiring
@@ -136,9 +136,9 @@ change).
 
 ## Fleet (C6 master + C3 nodes)
 
-Race timing across ordered gates (each gate = a C5). The **C6** (`firmware/c6`,
+Race timing across ordered gates (each gate = a C5). The **C6** (`firmware/master`,
 esp32c6) is UART-wired to its own C5 (gate 0) and aggregates remote gates over
-**ESP-NOW**; a remote gate is a C5 UART-wired to a **C3** (`firmware/c3`). Global
+**ESP-NOW**; a remote gate is a C5 UART-wired to a **C3** (`firmware/node`). Global
 schema: `docs/fleet.svg`.
 
 - **Protocols**: UART `components/link_proto` (C5↔bridge: passes, config, and
@@ -166,19 +166,19 @@ schema: `docs/fleet.svg`.
 - **Degraded C3**: if the C6 is not reached within `CONFIG_C3_FLEET_TIMEOUT_MS`
   at boot, the C3 serves its own AP + web (band selection → `SET_CHANNEL`,
   results) instead of relaying.
-- **Temporary C5-as-master** (until a C6 is available): run `firmware/c6` on a
+- **Temporary C5-as-master** (until a C6 is available): run `firmware/master` on a
   spare C5 — `idf.py -DIDF_TARGET=esp32c5 -DSDKCONFIG=sdkconfig.c5
   -DSDKCONFIG_DEFAULTS=sdkconfig.c5.defaults -B build-c5 build` from
-  `firmware/c6`. The amp moves to the C5 pins 9/8/7/10 (GPIO 16-22 are the C5
+  `firmware/master`. The amp moves to the C5 pins 9/8/7/10 (GPIO 16-22 are the C5
   flash); UART stays 4/5. Diagram: `docs/wiring-c5c5.svg`.
 
 ## Build and tests
 
 ```sh
 . ~/esp/esp-idf-v6.0.2/export.sh
-( cd firmware/c5 && idf.py build )    # C5, must stay at 0 warnings
-( cd firmware/c3 && idf.py build )    # C3 node bridge
-( cd firmware/c6 && idf.py build )    # C6 master (esp32c6)
+( cd firmware/detector && idf.py build )  # C5, must stay at 0 warnings
+( cd firmware/node && idf.py build )      # C3 node bridge
+( cd firmware/master && idf.py build )    # C6 master (esp32c6)
 cd test     # host tests (engine headers now at ../components/c5vrx_rx)
 cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/pass_detector/include \
   test_pass_detector.c ../components/pass_detector/pass_detector.c -lm -o /tmp/t && /tmp/t

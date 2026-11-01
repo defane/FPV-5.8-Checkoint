@@ -136,7 +136,7 @@ int main(void){
 }
 ''')
  def test_actual_splash_respects_application_deadline(self):
-  s=(ROOT/'firmware/c5/main/main.c').read_text()
+  s=(ROOT/'firmware/detector/main/main.c').read_text()
   body=s[s.index('static void splash_wait_gain('):s.index('void app_main(void)')]
   run(r'''
 #include <assert.h>

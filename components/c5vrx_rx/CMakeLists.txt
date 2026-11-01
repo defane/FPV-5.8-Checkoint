@@ -1,7 +1,7 @@
 # C5VRX receive engine, consumable as a component. This is upstream C5VRX
 # (https://github.com/Twotoz/C5VRX) re-packaged unchanged: the MODEM_DIAG ->
 # BitScrambler -> PARLIO -> AGC chain, its control/calibration/diagnostics and
-# the serial console. The firmware application (firmware/c5) links this plus
+# the serial console. The firmware application (firmware/detector) links this plus
 # the checkpoint component on top; nothing here is modified to add a feature.
 #
 # checkpoint_weak.c provides weak no-op fallbacks for the checkpoint extension

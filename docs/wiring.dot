@@ -1,6 +1,6 @@
 // FPV 5.8 Checkpoint wiring: ESP32-C3 <-UART-> ESP32-C5 <-I2S-> MAX98357A -> speaker.
 // Render:  dot -Tpng docs/wiring.dot -o docs/wiring.png   (or -Tsvg)
-// Pin defaults: firmware/c3/main/Kconfig.projbuild, components/checkpoint/Kconfig,
+// Pin defaults: firmware/node/main/Kconfig.projbuild, components/checkpoint/Kconfig,
 //               components/audio_player/Kconfig (see CLAUDE.md "Wiring").
 digraph wiring {
   rankdir=LR;

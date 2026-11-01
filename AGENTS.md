@@ -90,7 +90,7 @@ permitted GPL reuse. Credit external sources used by C5VRX with the same care.
 - `components/fleet_proto/`, `components/race_timing/`, `components/espnow_link/`
   — the race-timing fleet: the C6<->C3 ESP-NOW protocol, the lap/sector engine,
   and the ESP-NOW transport.
-- `firmware/c5/`, `firmware/c3/` (node bridge) and `firmware/c6/` (ESP32-C6
+- `firmware/detector/`, `firmware/node/` (node bridge) and `firmware/master/` (ESP32-C6
   race-timing master) — the ESP32 applications.
 - `test/` host tests, `tools/` console/log/build helpers, `docs/` the
   platform's feature notes (`docs/CHECKPOINT.md`) and wiring.
@@ -354,8 +354,8 @@ When proposing a new CPU, source, DMA, DSP or DAC route:
 ### Workflows
 
 - `.github/workflows/c5vrx5.yml` ("C5VRX-5 Build") is the firmware workflow.
-  It runs the host tests, builds firmware/c5, firmware/c3 and
-  firmware/c6 with ESP-IDF v6.0.2 and publishes (the C5 is the released image):
+  It runs the host tests, builds firmware/detector, firmware/node and
+  firmware/master with ESP-IDF v6.0.2 and publishes (the C5 is the released image):
   - `c5vrx5-v5.0.<run number>` for a firmware change on `main` (immutable;
     never replace published version assets), marked as the repository's
     Latest release (an unchanged-input main run re-marks the newest one);

@@ -37,7 +37,7 @@ jobs:
         shell: bash
         run: |
           . "$IDF_PATH/export.sh"
-          cd firmware/c5
+          cd firmware/detector
           idf.py -B build-psram -DSDKCONFIG=sdkconfig.psram \
             "-DSDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.psram.defaults" build
   build:
@@ -161,28 +161,28 @@ jobs:
         shell: bash
         run: |
           . "$IDF_PATH/export.sh"
-          cd firmware/c5
+          cd firmware/detector
           idf.py -DC5VRX5_VERSION="${{ steps.version.outputs.version }}" \
             -DC5VRX5_COMMIT="${{ github.event.pull_request.head.sha || github.sha }}" build
       - name: Build Checkpoint C3 bridge
         shell: bash
         run: |
           . "$IDF_PATH/export.sh"
-          cd firmware/c3
+          cd firmware/node
           idf.py build
       - name: Build Checkpoint C6 master
         shell: bash
         run: |
           . "$IDF_PATH/export.sh"
-          cd firmware/c6
+          cd firmware/master
           idf.py build
       - name: Package firmware for web flashing
         shell: bash
         run: |
           . "$IDF_PATH/export.sh"
           mkdir -p release
-          cp firmware/c5/build/c5vrx5.bin firmware/c5/build/bootloader/bootloader.bin \
-             firmware/c5/build/partition_table/partition-table.bin firmware/c5/build/flasher_args.json release/
+          cp firmware/detector/build/c5vrx5.bin firmware/detector/build/bootloader/bootloader.bin \
+             firmware/detector/build/partition_table/partition-table.bin firmware/detector/build/flasher_args.json release/
           esptool.py --chip esp32c5 merge_bin -o release/c5vrx5_merged.bin \
             --flash_mode dio --flash_size 8MB --flash_freq 80m \
             0x2000 release/bootloader.bin 0x8000 release/partition-table.bin 0x10000 release/c5vrx5.bin

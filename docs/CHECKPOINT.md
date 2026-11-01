@@ -11,14 +11,14 @@ pentatonique majeure, de −7 à +9 demi-tons, R4 = hauteur d'origine).
 | Intégration (détection + son + lien) | `components/checkpoint/checkpoint.c`, `checkpoint_link.c` |
 | Console | `components/c5vrx_rx/console.c` (moteur C5VRX amont) |
 | Protocole UART C5↔C3 | `components/link_proto/` (test : `test/test_link_proto.c`) |
-| Pont config/télémétrie C3 | `firmware/c3/` (Wi-Fi SoftAP + web) |
+| Pont config/télémétrie C3 | `firmware/node/` (Wi-Fi SoftAP + web) |
 | Son | `tools/coin_sound.py` → `components/audio_player/sounds/coin.pcm` (`assets/README.md`) |
 | Banc A/B/A | `tools/checkpoint_bench.py` |
 
 ## Plateforme à deux ESP
 
-Le C5 (`firmware/c5`) fait toute la réception C5VRX, la détection et le son.
-Le C3 (`firmware/c3`) expose un point d'accès Wi-Fi et une page web qui règlent
+Le C5 (`firmware/detector`) fait toute la réception C5VRX, la détection et le son.
+Le C3 (`firmware/node`) expose un point d'accès Wi-Fi et une page web qui règlent
 le détecteur et affichent le C/N, les stats et les passages, via un lien UART
 (`components/link_proto`, GPIO 6/15 côté C5). Le C3 est **autoritaire** sur la
 config : il la garde en NVS, l'adopte du C5 au premier démarrage s'il n'en a
@@ -30,7 +30,7 @@ Schéma de câblage : [`wiring.svg`](wiring.svg). Source Graphviz régénérable
 
 ## Flotte de chronométrage (maître C6)
 
-Pour une course à plusieurs portes, un **maître ESP32-C6** (`firmware/c6`)
+Pour une course à plusieurs portes, un **maître ESP32-C6** (`firmware/master`)
 remplace le rôle de cerveau du C3 et porte le haut-parleur. Chaque **porte** est
 un C5 ; le C5 du maître est câblé en UART au C6 (porte 0), les autres sont
 reliés à un **C3 nœud** qui relaie en **ESP-NOW** vers le C6.
@@ -44,11 +44,11 @@ Schéma global des éléments et de leurs interactions :
 [README](../README.md#pinout).
 
 **Montage temporaire C5+C5** (en attendant le C6) : un second C5 fait tourner le
-firmware du maître compilé pour esp32c5 (`firmware/c6`, cible esp32c5). L'ampli
+firmware du maître compilé pour esp32c5 (`firmware/master`, cible esp32c5). L'ampli
 passe sur les broches C5 9/8/7/10 (les GPIO 16‑22 sont la flash du C5), l'UART
 reste 4/5. Build : `idf.py -DIDF_TARGET=esp32c5 -DSDKCONFIG=sdkconfig.c5
 -DSDKCONFIG_DEFAULTS=sdkconfig.c5.defaults -B build-c5 build` depuis
-`firmware/c6`. On remplace ensuite ce C5 par un vrai C6 sans rien changer côté
+`firmware/master`. On remplace ensuite ce C5 par un vrai C6 sans rien changer côté
 porte.
 
 - **Protocoles** : `components/link_proto` (UART C5↔pont, dont `SET_CHANNEL` qui
@@ -120,14 +120,14 @@ le canal ne se réarme pas entre deux tours.
 
 ## Pas de sortie vidéo
 
-Le projet ne produit que du son : `firmware/c5/sdkconfig.defaults` met
+Le projet ne produit que du son : `firmware/detector/sdkconfig.defaults` met
 `CONFIG_C5VRX_VIDEO_OUTPUT=n` (menu *C5VRX receiver*). Le transport (PARLIO
 TX + BitScrambler) tourne exactement comme avant, mais ses bits ne sortent
 sur aucune broche (`s_dac_gpio` à -1 dans `components/c5vrx_rx/transport.c`).
 La capture I/Q, le C/N, le gain et `FIELD_DIAG` ne changent pas. On perd
 l'image, le menu à l'écran et le test DAC (`Z`). Les six broches du DAC (8, 9,
 11, 12, 23 et 24) ainsi que 7 et 10 deviennent libres pour l'ampli. Après un
-changement de `firmware/c5/sdkconfig.defaults`, supprimez `firmware/c5/sdkconfig`
+changement de `firmware/detector/sdkconfig.defaults`, supprimez `firmware/detector/sdkconfig`
 avant de reconstruire.
 
 ## Audio : désactivé par défaut
@@ -166,7 +166,7 @@ PORT --monitor-only --log run.log`.
 ### 1. Build, flash, démarrage
 
 ```sh
-( cd firmware/c5 && idf.py build )            # 0 warning attendu
+( cd firmware/detector && idf.py build )            # 0 warning attendu
 python tools/flash.py PORT --check
 ```
 

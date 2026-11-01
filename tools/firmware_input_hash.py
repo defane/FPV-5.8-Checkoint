@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fingerprint the tracked C5 firmware inputs (components/ + firmware/c5/).
+"""Fingerprint the tracked C5 firmware inputs (components/ + firmware/detector/).
 
 Identical inputs keep an existing release (c5vrx5.yml publish step), so a
 docs-only change never mints new firmware.
@@ -10,10 +10,10 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-# The C5 firmware is firmware/c5 plus the shared components (c5vrx_rx engine,
+# The C5 firmware is firmware/detector plus the shared components (c5vrx_rx engine,
 # checkpoint, pass_detector, audio_player, link_proto). Its build root files
-# (CMakeLists.txt, partitions.csv, sdkconfig*.defaults) live under firmware/c5/.
-INPUT_DIRS = ('components/', 'firmware/c5/')
+# (CMakeLists.txt, partitions.csv, sdkconfig*.defaults) live under firmware/detector/.
+INPUT_DIRS = ('components/', 'firmware/detector/')
 INPUT_FILES = ('.github/workflows/c5vrx5.yml', 'tools/firmware_input_hash.py')
 
 
