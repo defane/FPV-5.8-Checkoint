@@ -175,6 +175,11 @@ schema: `docs/fleet.svg`.
 
 ## Build and tests
 
+The root `Makefile` wraps the per-firmware commands: `make firmware` builds all
+four images, `make flash [FW=<name>] [PORT=<port>]` flashes one (interactive
+firmware/port menu when an arg is omitted), plus `make monitor` and `make
+clean`. The raw commands:
+
 ```sh
 . ~/esp/esp-idf-v6.0.2/export.sh
 ( cd firmware/detector && idf.py build )  # esp32c5 → detector-c5.bin (0 warnings)

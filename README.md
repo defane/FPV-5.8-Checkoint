@@ -58,6 +58,10 @@ single-set wiring (C3, C5 and the amplifier).
 
 ## Build
 
+The root `Makefile` is the quick path: `make firmware` builds all four images,
+`make flash [FW=<name>] [PORT=<port>]` flashes one (interactive firmware/port
+menu if an arg is omitted), `make monitor`, `make clean`. The raw commands:
+
 ```sh
 . ~/esp/esp-idf-v6.0.2/export.sh
 ( cd firmware/detector && idf.py build )  # esp32c5 → build/detector-c5.bin (0 warnings)
