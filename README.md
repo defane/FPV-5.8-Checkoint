@@ -60,10 +60,10 @@ single-set wiring (C3, C5 and the amplifier).
 
 ```sh
 . ~/esp/esp-idf-v6.0.2/export.sh
-( cd firmware/detector && idf.py build )  # ESP32-C5, must stay at 0 warnings
-( cd firmware/node && idf.py build )      # ESP32-C3 node bridge
-( cd firmware/master && idf.py build )    # ESP32-C6 master
-# temporary "C5 as master" (run the C6 firmware on a spare C5 until the C6 arrives):
+( cd firmware/detector && idf.py build )  # esp32c5 → build/detector-c5.bin (0 warnings)
+( cd firmware/node && idf.py build )      # esp32c3 → build/node-c3.bin
+( cd firmware/master && idf.py build )    # esp32c6 → build/master-c6.bin
+# temporary "C5 as master" (run the master firmware on a spare C5 until the C6 arrives) → build-c5/master-c5.bin:
 ( cd firmware/master && idf.py -DIDF_TARGET=esp32c5 -DSDKCONFIG=sdkconfig.c5 \
     -DSDKCONFIG_DEFAULTS=sdkconfig.c5.defaults -B build-c5 build )
 

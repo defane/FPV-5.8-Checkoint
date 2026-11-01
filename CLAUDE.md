@@ -169,16 +169,17 @@ schema: `docs/fleet.svg`.
 - **Temporary C5-as-master** (until a C6 is available): run `firmware/master` on a
   spare C5 — `idf.py -DIDF_TARGET=esp32c5 -DSDKCONFIG=sdkconfig.c5
   -DSDKCONFIG_DEFAULTS=sdkconfig.c5.defaults -B build-c5 build` from
-  `firmware/master`. The amp moves to the C5 pins 9/8/7/10 (GPIO 16-22 are the C5
+  `firmware/master` (→ `build-c5/master-c5.bin`, vs `master-c6.bin` on the C6).
+  The amp moves to the C5 pins 9/8/7/10 (GPIO 16-22 are the C5
   flash); UART stays 4/5. Diagram: `docs/wiring-c5c5.svg`.
 
 ## Build and tests
 
 ```sh
 . ~/esp/esp-idf-v6.0.2/export.sh
-( cd firmware/detector && idf.py build )  # C5, must stay at 0 warnings
-( cd firmware/node && idf.py build )      # C3 node bridge
-( cd firmware/master && idf.py build )    # C6 master (esp32c6)
+( cd firmware/detector && idf.py build )  # esp32c5 → detector-c5.bin (0 warnings)
+( cd firmware/node && idf.py build )      # esp32c3 → node-c3.bin
+( cd firmware/master && idf.py build )    # esp32c6 → master-c6.bin
 cd test     # host tests (engine headers now at ../components/c5vrx_rx)
 cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/pass_detector/include \
   test_pass_detector.c ../components/pass_detector/pass_detector.c -lm -o /tmp/t && /tmp/t

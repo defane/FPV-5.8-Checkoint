@@ -48,7 +48,7 @@ firmware du maître compilé pour esp32c5 (`firmware/master`, cible esp32c5). L'
 passe sur les broches C5 9/8/7/10 (les GPIO 16‑22 sont la flash du C5), l'UART
 reste 4/5. Build : `idf.py -DIDF_TARGET=esp32c5 -DSDKCONFIG=sdkconfig.c5
 -DSDKCONFIG_DEFAULTS=sdkconfig.c5.defaults -B build-c5 build` depuis
-`firmware/master`. On remplace ensuite ce C5 par un vrai C6 sans rien changer côté
+`firmware/master` (→ `build-c5/master-c5.bin`). On remplace ensuite ce C5 par un vrai C6 sans rien changer côté
 porte.
 
 - **Protocoles** : `components/link_proto` (UART C5↔pont, dont `SET_CHANNEL` qui
@@ -166,7 +166,7 @@ PORT --monitor-only --log run.log`.
 ### 1. Build, flash, démarrage
 
 ```sh
-( cd firmware/detector && idf.py build )            # 0 warning attendu
+( cd firmware/detector && idf.py build )            # → build/detector-c5.bin (0 warning attendu)
 python tools/flash.py PORT --check
 ```
 
