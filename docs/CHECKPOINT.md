@@ -1,42 +1,42 @@
-# Checkpoint : « le drone vient de passer »
+# Checkpoint: "a drone just passed"
 
-Ajout à C5VRX-5 : un détecteur de passage sur le **canal accordé** et un son
-de pièce 8-bit joué à une hauteur propre au canal (R1 à R8, gamme
-pentatonique majeure, de −7 à +9 demi-tons, R4 = hauteur d'origine).
+An addition to C5VRX-5: a pass detector on the **tuned channel** plus an 8-bit
+coin sound played at a per-channel pitch (R1..R8, major pentatonic, −7 to +9
+semitones, R4 = the original pitch).
 
-| Partie | Fichier |
+| Part | Files |
 | --- | --- |
-| Détecteur, C pur | `components/pass_detector/` (test : `test/test_pass_detector.c`) |
-| Lecteur audio I2S | `components/audio_player/` (test : `test/test_audio_resample.c`) |
-| Intégration (détection + son + lien) | `components/checkpoint/checkpoint.c`, `checkpoint_link.c` |
-| Console | `components/c5vrx_rx/console.c` (moteur C5VRX amont) |
-| Protocole UART C5↔C3 | `components/link_proto/` (test : `test/test_link_proto.c`) |
-| Pont config/télémétrie C3 | `firmware/node/` (Wi-Fi SoftAP + web) |
-| Son | `tools/coin_sound.py` → `components/audio_player/sounds/coin.pcm` (`assets/README.md`) |
-| Banc A/B/A | `tools/checkpoint_bench.py` |
+| Detector, pure C | `components/pass_detector/` (test: `test/test_pass_detector.c`) |
+| I2S audio player | `components/audio_player/` (test: `test/test_audio_resample.c`) |
+| Glue (detection + sound + link) | `components/checkpoint/checkpoint.c`, `checkpoint_link.c` |
+| Console | `components/c5vrx_rx/console.c` (upstream C5VRX engine) |
+| C5↔C3 UART protocol | `components/link_proto/` (test: `test/test_link_proto.c`) |
+| C3 config/telemetry bridge | `firmware/node/` (Wi-Fi SoftAP + web) |
+| Sound | `tools/coin_sound.py` → `components/audio_player/sounds/coin.pcm` (`assets/README.md`) |
+| A/B/A bench | `tools/checkpoint_bench.py` |
 
 ## Pages
 
-- **[Détecteur : fonctionnement et paramètres](detector.md)** — signal C/N,
-  machine à états, paramètres console `K` (sauvés en NVS).
-- **[Pas de vidéo, audio optionnel](no-video-audio.md)** — sortie son seule,
-  broches libérées par la vidéo off, activation de l'audio après recâblage.
-- **[Flotte de chronométrage (maître C6)](fleet.md)** — C6 + nœuds C3,
-  protocoles, appairage, rôles web, mode dégradé, C5-as-master.
-- **[LED de statut](status-led.md)** — WS2812 par carte, schéma couleur ↔ état.
-- **[Procédure de banc](bench.md)** — build/flash, source du signal, essais
-  détecteur et audio, qualité de réception A/B/A.
+- **[Detector: operation and parameters](detector.md)** — the C/N signal, the
+  state machine, the `K`-console parameters (saved in NVS).
+- **[No video, optional audio](no-video-audio.md)** — sound-only output, the
+  pins freed with video off, enabling audio after rewiring.
+- **[Race-timing fleet (C6 master)](fleet.md)** — C6 + C3 nodes: protocols,
+  pairing, web roles, degraded mode, C5-as-master.
+- **[Status LED](status-led.md)** — the per-board WS2812, state ↔ colour scheme.
+- **[Bench procedure](bench.md)** — build/flash, signal source, detector and
+  audio tests, A/B/A receive-quality check.
 
-## Plateforme à deux ESP
+## Two-ESP platform
 
-Le C5 (`firmware/detector`) fait toute la réception C5VRX, la détection et le son.
-Le C3 (`firmware/node`) expose un point d'accès Wi-Fi et une page web qui règlent
-le détecteur et affichent le C/N, les stats et les passages, via un lien UART
-(`components/link_proto`, GPIO 6/8 côté C5). Le C3 est **autoritaire** sur la
-config : il la garde en NVS, l'adopte du C5 au premier démarrage s'il n'en a
-pas, et la repousse à chaque `HELLO` du C5 (donc après un reboot du C5). Le C5
-émet un `EVENT_PASS` par passage et des `STATS` périodiques.
+The C5 (`firmware/detector`) does the whole C5VRX receive chain, the detection
+and the sound. The C3 (`firmware/node`) serves a Wi-Fi access point and a web
+page that tune the detector and show its live C/N, stats and passes, over a UART
+link (`components/link_proto`, GPIO 6/8 on the C5 side). The C3 is
+**authoritative** for the config: it keeps it in NVS, adopts it from the C5 on
+first boot if it has none, and pushes it back on every `HELLO` from the C5 (so
+after a C5 reboot). The C5 emits one `EVENT_PASS` per pass and periodic `STATS`.
 
-Schéma de câblage : [`wiring.svg`](wiring.svg). Source Graphviz régénérable :
+Wiring diagram: [`wiring.svg`](wiring.svg). Regenerable Graphviz source:
 [`wiring.dot`](wiring.dot) (`dot -Tpng docs/wiring.dot -o docs/wiring.png`).
-Brochage consolidé : [README](../README.md#pinout).
+Consolidated pinout: [README](../README.md#pinout).

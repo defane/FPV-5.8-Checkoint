@@ -1,47 +1,45 @@
-# LED de statut
+# Status LED
 
-Chaque carte dotée d'une WS2812 adressable affiche son état via le composant
-`components/status_led` : un cœur pur-C état→couleur (testé à l'hôte,
-`test/test_status_led.c`) + un driver WS2812 sur l'encodeur RMT (pas de
-dépendance externe), une tâche de rendu priorité 1 démarrée après le splash,
-luminosité ~15 %. Au boot, la tâche joue un **auto-test rouge → vert → bleu**
-(~0,4 s chacun) : on vérifie d'un coup d'œil le câblage, la broche et l'ordre
-des couleurs d'une nouvelle carte (et on distingue la WS2812 d'une éventuelle
-LED d'alimentation).
+Each board with an addressable WS2812 shows its state via the
+`components/status_led` component: a pure-C state→colour core (host-tested,
+`test/test_status_led.c`) + a WS2812 driver over the RMT bytes encoder (no
+external dependency), a priority-1 render task started after the splash, ~15%
+brightness. At boot the task plays a **🔴 red → 🟢 green → 🔵 blue self-test**
+(~0.4 s each): a glance confirms a new board's wiring, pin and colour order (and
+tells the WS2812 apart from a separate power LED).
 
-Broches onboard : **node** C3-Zero **GP10**, **master** C6-Zero **GP8**
-(variante C5-as-master : **GP27**, libre car cette carte ne fait pas tourner le
-récepteur).
+Onboard pins: **node** C3-Zero **GP10**, **master** C6-Zero **GP8**
+(C5-as-master variant: **GP27**, free because that board runs no receiver).
 
-| État | Couleur | Motif |
+| State | Colour | Pattern |
 | --- | --- | --- |
-| boot / self-test | R→G→B puis jaune | clignote |
-| sain / opérationnel | vert | respiration |
-| dégradé (node : pas de master · master : un gate tombé) | bleu | respiration |
-| appairage (flotte) | magenta | double-pulse |
-| erreur récupérable (node : lien C5 perdu) | rouge | clignote rapide |
-| erreur fatale (init) | rouge | fixe |
-| passage | blanc | flash bref (prioritaire, même son coupé) |
+| boot / self-test | 🔴→🟢→🔵 then 🟡 yellow | blink |
+| healthy / operating | 🟢 green | breathing |
+| degraded (node: no master · master: a gate dropped) | 🔵 blue | breathing |
+| pairing (fleet) | 🟣 magenta | double-pulse |
+| recoverable error (node: C5 link lost) | 🔴 red | fast blink |
+| fatal error (init) | 🔴 red | solid |
+| a pass | ⚪ white | brief flash (priority, even when sound is off) |
 
-Par rôle :
+Per role:
 
-- **node** (C3-Zero, GP10) : vert quand le master est vivant (message flotte
-  reçu < 5 s), bleu en mode dégradé (AP local), magenta en appairage, rouge si
-  le lien UART vers son C5 est muet (> 3 s), flash blanc à chaque passage.
-- **master** (C6-Zero, GP8) : vert en marche, magenta tant qu'aucun gate n'est
-  appairé, bleu si un gate appairé passe hors-ligne, flash blanc à chaque
-  passage (gate local ou distant).
+- **node** (C3-Zero, GP10): 🟢 green when the master is alive (a fleet message
+  within 5 s), 🔵 blue in degraded mode (local AP), 🟣 magenta while pairing, 🔴
+  red if the UART link to its C5 goes silent (> 3 s), ⚪ white flash on each pass.
+- **master** (C6-Zero, GP8): 🟢 green while running, 🟣 magenta while no gate is
+  paired yet, 🔵 blue if a paired gate goes offline, ⚪ white flash on each pass
+  (local or remote gate).
 
-Cas sans LED couleur :
+No-colour cases:
 
-- **detector** (C5) : **pas de LED de statut**. La WS2812 onboard du C5-Zero est
-  sur **GPIO27**, une broche du loopback I/Q du récepteur (`RF_IQ_GPIO_NUMS`) ;
-  la chaîne de réception est prioritaire, donc la LED est désactivée
-  (`CONFIG_STATUS_LED_ENABLE=n`). *(Le C5 n'a pas de GPIO29 : le « GP29 » du
-  pinout Waveshare est erroné.)*
-- **ESP32-C3 SuperMini** : pas de WS2812 adressable (une LED bleue mono sur
-  GPIO8 + une LED d'alim rouge). Le schéma couleur ne s'applique pas — prendre un
-  C3-Zero pour un node avec LED de statut.
+- **detector** (C5): **no status LED**. The C5-Zero's onboard WS2812 is on
+  **GPIO27**, one of the receiver's I/Q-loopback pins (`RF_IQ_GPIO_NUMS`); the
+  receive chain comes first, so the LED is disabled
+  (`CONFIG_STATUS_LED_ENABLE=n`). *(The C5 has no GPIO29 — the Waveshare pinout's
+  "GP29" is wrong.)*
+- **ESP32-C3 SuperMini**: no addressable WS2812 (only a mono blue LED on GPIO8 +
+  a red power LED). The colour scheme does not apply — use a C3-Zero for a node
+  with a status LED.
 
-Réglages : `CONFIG_STATUS_LED_*` (ENABLE, GPIO, BRIGHTNESS ~40/255, TICK, STACK) ;
-la broche est posée par carte dans le `sdkconfig.defaults` du firmware.
+Settings: `CONFIG_STATUS_LED_*` (ENABLE, GPIO, BRIGHTNESS ~40/255, TICK, STACK);
+the pin is set per board in the firmware's `sdkconfig.defaults`.

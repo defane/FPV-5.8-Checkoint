@@ -1,46 +1,44 @@
-# Flotte de chronométrage (maître C6)
+# Race-timing fleet (C6 master)
 
-Pour une course à plusieurs portes, un **maître ESP32-C6** (`firmware/master`)
-remplace le rôle de cerveau du C3 et porte le haut-parleur. Chaque **porte** est
-un C5 ; le C5 du maître est câblé en UART au C6 (porte 0), les autres sont
-reliés à un **C3 nœud** qui relaie en **ESP-NOW** vers le C6.
+For a multi-gate race, an **ESP32-C6 master** (`firmware/master`) takes over the
+C3's brain role and carries the speaker. Each **gate** is a C5; the master's C5
+is UART-wired to the C6 (gate 0), the others are each wired to a **C3 node** that
+relays over **ESP-NOW** to the C6.
 
-Schéma global des éléments et de leurs interactions :
-[`fleet.svg`](fleet.svg). Câblage pin-level par type de set :
-[`wiring-master.svg`](wiring-master.svg) (C6 + C5),
+Overall element/interaction diagram: [`fleet.svg`](fleet.svg). Pin-level wiring
+per set type: [`wiring-master.svg`](wiring-master.svg) (C6 + C5),
 [`wiring-node.svg`](wiring-node.svg) (C3 + C5),
-[`wiring-c5c5.svg`](wiring-c5c5.svg) (C5+C5 temporaire),
-[`wiring.svg`](wiring.svg) (C5 autonome). Brochage consolidé : voir le
+[`wiring-c5c5.svg`](wiring-c5c5.svg) (temporary C5+C5),
+[`wiring.svg`](wiring.svg) (standalone C5). Consolidated pinout: the
 [README](../README.md#pinout).
 
-**Montage temporaire C5+C5** (en attendant le C6) : un second C5 fait tourner le
-firmware du maître compilé pour esp32c5 (`firmware/master`, cible esp32c5). L'ampli
-passe sur les broches C5 9/8/7/10 (les GPIO 16‑22 sont la flash du C5), l'UART
-reste 4/5. Build : `make flash FW=master-wave-c5` (ou `idf.py -DIDF_TARGET=esp32c5
--DSDKCONFIG=sdkconfig.c5 -DSDKCONFIG_DEFAULTS=sdkconfig.c5.defaults -B build-c5
-build` depuis `firmware/master`, → `build-c5/master-c5.bin`). On remplace ensuite
-ce C5 par un vrai C6 sans rien changer côté porte.
+**Temporary C5+C5 set** (until a C6 is available): a second C5 runs the master
+firmware built for esp32c5 (`firmware/master`, target esp32c5). The amp moves to
+the C5 pins 9/8/7/10 (GPIO 16‑22 are the C5 flash); UART stays 4/5. Build: `make
+flash FW=master-wave-c5` (or `idf.py -DIDF_TARGET=esp32c5 -DSDKCONFIG=sdkconfig.c5
+-DSDKCONFIG_DEFAULTS=sdkconfig.c5.defaults -B build-c5 build` from
+`firmware/master`, → `build-c5/master-c5.bin`). Later swap that C5 for a real C6
+with no change on the gate side.
 
-- **Protocoles** : `components/link_proto` (UART C5↔pont, dont `SET_CHANNEL` qui
-  déclenche un retune `rf_set_channel` sur le C5) ; `components/fleet_proto`
-  (ESP-NOW C6↔C3 : appairage, balises temps, `CONFIG`, `GATE_PASS`,
-  `NODE_STATUS`) ; `components/espnow_link` (transport) ;
-  `components/race_timing` (tours/secteurs par canal).
-- **C6** (`c6_hub`) : table de nœuds en NVS, balises temps périodiques, moteur
-  `race_timing`, **son centralisé**, et un **web d'admin** (AP) pour appairer,
-  ordonner les portes, assigner les canaux et voir les chronos.
-- **Appairage** : web C6 → *pairing open* ; un C3 non appairé diffuse un
-  `PAIR_REQUEST` ; le C6 lui assigne porte+canal (`PAIR_ACCEPT` + `CONFIG`),
-  persistés de part et d'autre.
-- **Mode dégradé C3** : si le C6 est injoignable `CONFIG_C3_FLEET_TIMEOUT_MS` au
-  boot, le C3 sert son AP+web local (sélection de bande → `SET_CHANNEL`,
-  affichage des passages).
-- **Rôles web** : deux niveaux. Un **spectateur** voit les chronos/état en
-  lecture seule (sans login) ; les actions **admin** (appairage, ordre des
-  portes, canal, reset ; sélection de bande sur un C3 dégradé) exigent un login
-  (`CONFIG_*_ADMIN_USER`/`_PASSWORD`, en-tête HTTP Basic vérifié côté ESP). Un
-  mot de passe vide désactive l'auth admin.
-- **Contrainte** : l'AP du C6 et des C3 **et** ESP-NOW partagent le **même canal
-  WiFi** (`CONFIG_*_AP_CHANNEL` / `CONFIG_C6_AP_CHANNEL`).
-- **Limite** : la base de temps (balises ESP-NOW) vise ~10 ms ; pas un
-  photo-finish sub-ms.
+- **Protocols:** `components/link_proto` (C5↔bridge UART, incl. `SET_CHANNEL`
+  which triggers an `rf_set_channel` retune on the C5); `components/fleet_proto`
+  (C6↔C3 ESP-NOW: pairing, time beacons, `CONFIG`, `GATE_PASS`, `NODE_STATUS`);
+  `components/espnow_link` (transport); `components/race_timing` (laps/sectors
+  per channel).
+- **C6** (`c6_hub`): node table in NVS, periodic time beacons, the `race_timing`
+  engine, **centralized sound**, and an **admin web** (AP) to pair, order the
+  gates, assign channels and see the timings.
+- **Pairing:** C6 web → *pairing open*; an unpaired C3 broadcasts a
+  `PAIR_REQUEST`; the C6 assigns it a gate + channel (`PAIR_ACCEPT` + `CONFIG`),
+  persisted on both sides.
+- **Degraded C3:** if the C6 is unreachable for `CONFIG_C3_FLEET_TIMEOUT_MS` at
+  boot, the C3 serves its own local AP + web (band selection → `SET_CHANNEL`,
+  pass display).
+- **Web roles:** two levels. A **spectator** sees timings/status read-only (no
+  login); **admin** actions (pairing, gate order, channel, reset; band selection
+  on a degraded C3) need a login (`CONFIG_*_ADMIN_USER`/`_PASSWORD`, HTTP Basic
+  header checked on the ESP). An empty password disables admin auth.
+- **Constraint:** the C6 and C3 APs **and** ESP-NOW share the **same Wi-Fi
+  channel** (`CONFIG_*_AP_CHANNEL` / `CONFIG_C6_AP_CHANNEL`).
+- **Limit:** the time base (ESP-NOW beacons) aims for ~10 ms; not a sub-ms photo
+  finish.

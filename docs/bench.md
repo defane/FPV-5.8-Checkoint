@@ -1,84 +1,78 @@
-# Procédure de banc
+# Bench procedure
 
-Matériel : le récepteur, un VTX sur un canal Raceband à puissance fixe, la
-vidéo sur un écran. Propulsion retirée. Console : `python tools/flash.py
-PORT --monitor-only --log run.log`.
+Hardware: the receiver, a VTX on a Raceband channel at fixed power, the video on
+a screen. Propulsion removed. Console: `python tools/flash.py PORT
+--monitor-only --log run.log`.
 
-## 1. Build, flash, démarrage
+## 1. Build, flash, startup
 
 ```sh
-( cd firmware/detector && idf.py build )            # → build/detector-c5.bin (0 warning attendu)
+( cd firmware/detector && idf.py build )            # → build/detector-c5.bin (0 warnings expected)
 python tools/flash.py PORT --check
 ```
 
-- Le démarrage se termine par `C5VRX5 … ready`. Il n'y a pas de ligne
-  `CHECKPOINT disabled`.
-- Avec `T` : une ligne `CHECKPOINT source=cn …`. Notez `heap_internal`,
-  `heap_min` et `heap_largest`, et comparez avec le firmware amont (même
-  carte). `heap_min` ne doit pas baisser : la tâche démarre après le boot.
-- Le démarrage affiche `CHECKPOINT video_output=off`. Il n'y a pas
-  d'image : c'est normal.
+- Startup ends with `C5VRX5 … ready`. There is no `CHECKPOINT disabled` line.
+- With `T`: a `CHECKPOINT source=cn …` line. Note `heap_internal`, `heap_min` and
+  `heap_largest`, and compare with the upstream firmware (same board). `heap_min`
+  must not drop: the task starts after boot.
+- Startup prints `CHECKPOINT video_output=off`. There is no picture: that is
+  normal.
 
-## 2. Source du signal
+## 2. Signal source
 
-- Envoyez `K` puis `l` (trace). Avec le VTX allumé et proche,
-  `CP_TRACE … cn_db=` affiche des valeurs stables. Avec le VTX éteint,
-  vous lisez `cn_db=unknown` ou une valeur faible.
-- Dans `T`, `samples_valid` doit dominer `unknown` quand une vidéo est
-  reçue. **Si `unknown` domine avec une bonne image, signalez-le-moi** :
-  il faudra une autre source, par exemple le dBm de `receiver_level()`
-  mis à jour à 1 Hz.
-- Coupez la trace (`K` `l`) avant les mesures de qualité.
+- Send `K` then `l` (trace). With the VTX on and close, `CP_TRACE … cn_db=` shows
+  stable values. With the VTX off, you read `cn_db=unknown` or a low value.
+- In `T`, `samples_valid` must dominate `unknown` when video is received. **If
+  `unknown` dominates with a good picture, report it to me**: another source
+  would be needed, e.g. the dBm from `receiver_level()` updated at 1 Hz.
+- Stop the trace (`K` `l`) before the quality measurements.
 
-## 3. Détecteur (sans audio)
+## 3. Detector (no audio)
 
-| Essai | Attendu |
+| Test | Expected |
 | --- | --- |
-| Approcher le VTX de l'antenne puis l'éloigner, en environ 2 s | une ligne `PASS`, avec `delay_ms` < 1000 |
-| Même passage, 5 fois avec au moins 3 s d'écart | 5 lignes `PASS` |
-| VTX tenu immobile près de l'antenne pendant 30 s | une seule `PASS` (ou aucune) |
-| VTX éteint, ou loin, pendant 2 min | aucune `PASS` |
-| VTX à distance moyenne (pic sous `min_peak_db`) | aucune `PASS` |
-| `c` (canal suivant) pendant un passage | aucune `PASS` fantôme ; `semitones` change selon le canal |
-| `o` (menu) ou `s` (scan) pendant un passage | aucune `PASS` ; dans `T`, `unknown` augmente |
+| Move the VTX toward the antenna then away, over about 2 s | one `PASS` line, with `delay_ms` < 1000 |
+| Same pass, 5 times at least 3 s apart | 5 `PASS` lines |
+| VTX held still near the antenna for 30 s | a single `PASS` (or none) |
+| VTX off, or far, for 2 min | no `PASS` |
+| VTX at medium distance (peak below `min_peak_db`) | no `PASS` |
+| `c` (next channel) during a pass | no phantom `PASS`; `semitones` changes with the channel |
+| `o` (menu) or `s` (scan) during a pass | no `PASS`; in `T`, `unknown` rises |
 
-Ajustez avec `K` : `t`/`T` et `m`/`M` d'après les `peak_cn_db` mesurés,
-puis `d`/`D` pour la réactivité.
+Tune with `K`: `t`/`T` and `m`/`M` from the measured `peak_cn_db`, then `d`/`D`
+for responsiveness.
 
-## 4. Audio (après recâblage et build audio)
+## 4. Audio (after rewiring and an audio build)
 
-- `P` sur chaque canal, de R1 à R8 (`c` pour avancer) : la hauteur monte
-  de R1 à R8. `semitones` affiche −7, −5, −3, 0, +2, +5, +7, +9.
-- `K` `v`/`V` : le volume change. `p` coupe le son (`audio=muted` dans
-  `PASS`), puis `p` le rétablit.
-- À l'oscilloscope ou à la LED : SD passe à l'état haut environ 5 ms avant
-  le son et revient à l'état bas environ 50 ms après. Pas de clic au
-  début ni à la fin.
-- `P P P P` en rafale : au plus 3 sons (un en cours et deux en file) ;
-  `dropped` augmente dans `T`.
-- Pendant un son, `g` (OUTPUT, redémarrage du transport) : la vidéo
-  revient et le `P` suivant sonne. Un `AUDIO error=write` isolé et
-  `failed` +1 sont attendus.
+- `P` on each channel, R1 to R8 (`c` to advance): the pitch rises from R1 to R8.
+  `semitones` shows −7, −5, −3, 0, +2, +5, +7, +9.
+- `K` `v`/`V`: the volume changes. `p` mutes the sound (`audio=muted` in `PASS`),
+  then `p` restores it.
+- On a scope or the LED: SD goes high about 5 ms before the sound and returns low
+  about 50 ms after. No click at the start or end.
+- `P P P P` in a burst: at most 3 sounds (one playing and two queued); `dropped`
+  rises in `T`.
+- During a sound, `g` (OUTPUT, transport restart): the video returns and the next
+  `P` sounds. An isolated `AUDIO error=write` and `failed` +1 are expected.
 
-## 5. Qualité de réception, audio actif ou non
+## 5. Receive quality, audio active or not
 
-Avec un montage fixe (même VTX, canal, puissance, distance), sans toucher
-à rien pendant la mesure :
+With a fixed setup (same VTX, channel, power, distance), without touching
+anything during the measurement:
 
 ```sh
 python3 tools/checkpoint_bench.py PORT --seconds 120 --every 2 --out bench_audio
 ```
 
-Le script enregistre le flux `FIELD_DIAG` en trois phases : A1 sans son,
-B avec `P` toutes les 2 s, A2 sans son. Il les compare ensuite avec
+The script records the `FIELD_DIAG` stream in three phases: A1 with no sound, B
+with `P` every 2 s, A2 with no sound. It then compares them with
 `tools/field_diag_compare.py`.
 
-- A1 et A2 doivent concorder entre eux : c'est la dérive du montage.
-- B ne doit pas être moins bon que A1 et A2 sur `sync_evidence_ok_pct`,
-  `coverage_pct_median`, `cn_est_median_db`, `chain_fault_s` et
-  `dropouts`. Un écart de B qui sort de l'écart A1/A2 indique un effet de
-  l'audio.
-- Recommencez en limite de portée (atténuateur ou distance), là où une
-  dégradation serait la plus visible.
-- Faites une fois la même chose avec la trace `K` `l` active : elle
-  charge la console USB et n'est pas faite pour le vol.
+- A1 and A2 must agree with each other: that is the setup's drift.
+- B must not be worse than A1 and A2 on `sync_evidence_ok_pct`,
+  `coverage_pct_median`, `cn_est_median_db`, `chain_fault_s` and `dropouts`. A B
+  gap outside the A1/A2 gap indicates an effect of the audio.
+- Repeat at the edge of range (attenuator or distance), where any degradation
+  would be most visible.
+- Do the same once with the `K` `l` trace active: it loads the USB console and is
+  not meant for flight.
