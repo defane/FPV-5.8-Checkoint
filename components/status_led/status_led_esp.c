@@ -42,6 +42,13 @@ static void render(sled_rgb_t c)
 static void led_task(void *arg)
 {
     (void)arg;
+    /* Boot self-test: red, green, blue at a clearly visible level, so a new
+     * board's WS2812 wiring, GPIO and colour order are unmistakable (and not
+     * confused with a separate power LED). */
+    render((sled_rgb_t){ 100, 0, 0 });  vTaskDelay(pdMS_TO_TICKS(400));
+    render((sled_rgb_t){ 0, 100, 0 });  vTaskDelay(pdMS_TO_TICKS(400));
+    render((sled_rgb_t){ 0, 0, 100 });  vTaskDelay(pdMS_TO_TICKS(400));
+
     const TickType_t period = pdMS_TO_TICKS(CONFIG_STATUS_LED_TICK_MS);
     for (;;) {
         sled_set_base(&s_rt->core, s_rt->base);
