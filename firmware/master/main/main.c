@@ -10,6 +10,7 @@
 #include "esp_wifi.h"
 #include "nvs_flash.h"
 #include "sdkconfig.h"
+#include "status_led.h"
 #include <string.h>
 
 static const char *TAG = "c6";
@@ -44,6 +45,7 @@ void app_main(void) {
     }
     ESP_ERROR_CHECK(err);
 
+    status_led_start();  /* onboard WS2812 (GPIO8 on the C6-Zero): boot/pairing/healthy/pass */
     c6_store_init();
     wifi_ap_start();
     c6_hub_start();      /* ESP-NOW + timing + audio; before the link can report a pass */

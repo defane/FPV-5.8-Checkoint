@@ -159,8 +159,15 @@ The core and its checkpoint hooks exist (a bridge-link-alive green via
 `checkpoint_link_last_rx_ms()`, a white pass flash), but they are inert on the
 detector while the LED is disabled. Wired on the **node** (GPIO10: green when the
 master is alive, blue degraded, magenta pairing, red if the C5 link drops, white
-pass flash); **master** (GPIO8) follows. Optional bench mode maps C/N to the
-HEALTHY brightness.
+pass flash) and the **master** (GPIO8 on the C6-Zero; GPIO27 on the C5-as-master
+variant, free there since it runs no receiver — green running, blue when a paired
+gate drops, magenta pairing, white pass flash). The task runs a brief red→green→
+blue self-test at boot to make a new board's LED and colour order obvious.
+Optional bench mode maps C/N to the HEALTHY brightness.
+
+> Board note: the status LED needs an addressable WS2812. The Waveshare
+> C3/C5/C6-Zero boards have one; a bare ESP32-C3 SuperMini does **not** (only a
+> mono LED on GPIO8 + a power LED), so it can't show the colour scheme.
 
 ## Fleet (C6 master + C3 nodes)
 

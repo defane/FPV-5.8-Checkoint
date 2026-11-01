@@ -11,6 +11,7 @@
 #include "link_proto.h"
 #include "nvs.h"
 #include "sdkconfig.h"
+#include "status_led.h"
 #include <string.h>
 
 static const char *TAG = "c6_hub";
@@ -155,6 +156,7 @@ static void record_pass(uint8_t gate, uint8_t channel, int32_t peak_db_x10, uint
                           .at_ms = fleet_ms, .gate = gate };
     c6_store_add_pass(&p);
     audio_player_play(AUDIO_SOUND_COIN, audio_pitch_for_channel(channel));
+    status_led_pass();   /* white flash on any gate's pass */
 }
 
 static void on_msg(const uint8_t mac[6], const fp_msg_t *msg) {
@@ -200,11 +202,21 @@ static void beacon_task(void *arg) {
         if (m) espnow_link_send(espnow_link_broadcast_addr(), buf, m);
 
         const uint32_t t = now_ms();
+        bool offline = false;
         xSemaphoreTake(s_lock, portMAX_DELAY);
         for (unsigned i = 0; i < s_num_nodes; i++)
             if (s_nodes[i].online && t - s_nodes[i].last_seen_ms > NODE_LIVE_MS)
                 s_nodes[i].online = false;
+        for (unsigned i = 0; i < s_num_nodes; i++)
+            if (!s_nodes[i].online) offline = true;
+        const uint8_t num = s_num_nodes;
+        const bool pairing = s_pairing;
         xSemaphoreGive(s_lock);
+
+        /* Status LED: magenta while pairing with no gates yet, blue if a paired
+         * gate dropped offline, green otherwise. */
+        status_led_set_base(num == 0u ? (pairing ? SLED_PAIRING : SLED_HEALTHY)
+                                      : (offline ? SLED_DEGRADED : SLED_HEALTHY));
 
         vTaskDelay(pdMS_TO_TICKS(BEACON_MS));
     }
