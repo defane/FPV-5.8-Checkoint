@@ -10,3 +10,6 @@ CONFIG_FREERTOS_HZ=1000
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 # The web UI serves a single embedded page plus two small JSON endpoints.
 CONFIG_HTTPD_MAX_URI_LEN=128
+
+# Status LED: onboard WS2812 of the Waveshare C3-Zero is on GPIO10.
+CONFIG_STATUS_LED_GPIO=10

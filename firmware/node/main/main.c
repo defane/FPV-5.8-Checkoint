@@ -13,12 +13,13 @@
 #include "esp_wifi.h"
 #include "nvs_flash.h"
 #include "sdkconfig.h"
+#include "status_led.h"
 #include <string.h>
 
 static const char *TAG = "c3";
 
 /* Degraded-mode handlers: the local store feeds the local web. */
-static void deg_pass(const lp_event_t *e) { c3_store_add_event(e); }
+static void deg_pass(const lp_event_t *e) { status_led_pass(); c3_store_add_event(e); }
 static void deg_stats(const lp_stats_t *s) { c3_store_set_stats(s); }
 
 /* AP on the fleet channel (shared with the C6 AP and ESP-NOW). Always up: it
@@ -52,6 +53,7 @@ void app_main(void) {
     }
     ESP_ERROR_CHECK(err);
 
+    status_led_start();   /* onboard WS2812 (GPIO10): boot/pairing/healthy/degraded */
     c3_store_init();
     c3_fleet_init();
     wifi_ap_start();
@@ -64,6 +66,7 @@ void app_main(void) {
         ESP_LOGI(TAG, "relay mode: C6 reached (headless)");
     } else {
         ESP_LOGW(TAG, "degraded mode: C6 not reached; local AP + web");
+        c3_fleet_set_degraded();
         c3_link_set_handlers(deg_pass, deg_stats);
         c3_web_start();
     }

@@ -157,8 +157,10 @@ in `firmware/detector/sdkconfig.defaults`).
 
 The core and its checkpoint hooks exist (a bridge-link-alive green via
 `checkpoint_link_last_rx_ms()`, a white pass flash), but they are inert on the
-detector while the LED is disabled. To be wired on the **node** (GPIO10) and
-**master** (GPIO8). Optional bench mode maps C/N to the HEALTHY brightness.
+detector while the LED is disabled. Wired on the **node** (GPIO10: green when the
+master is alive, blue degraded, magenta pairing, red if the C5 link drops, white
+pass flash); **master** (GPIO8) follows. Optional bench mode maps C/N to the
+HEALTHY brightness.
 
 ## Fleet (C6 master + C3 nodes)
 

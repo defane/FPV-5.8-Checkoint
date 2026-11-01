@@ -1,7 +1,9 @@
 #include "c3_link.h"
+#include "c3_fleet.h"
 #include "driver/uart.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "status_led.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
@@ -17,6 +19,7 @@ static const char *TAG = "c3_link";
 static QueueHandle_t s_outq;        /* pre-encoded frames to send to the C5 */
 static void (*s_on_pass)(const lp_event_t *);
 static void (*s_on_stats)(const lp_stats_t *);
+static uint32_t s_last_c5_rx;       /* last valid frame from the C5 (ms) */
 
 typedef struct { uint8_t buf[LP_MAX_FRAME]; uint8_t len; } frame_t;
 
@@ -66,7 +69,10 @@ static void link_task(void *arg) {
         const int n = uart_read_bytes(LINK_UART, rx, sizeof rx, pdMS_TO_TICKS(LINK_READ_MS));
         for (int i = 0; i < n; i++) {
             lp_msg_t m;
-            if (lp_decoder_push(&dec, rx[i], &m)) handle_msg(&m);
+            if (lp_decoder_push(&dec, rx[i], &m)) {
+                s_last_c5_rx = (uint32_t)(esp_timer_get_time() / 1000);
+                handle_msg(&m);
+            }
         }
         frame_t f;
         while (xQueueReceive(s_outq, &f, 0) == pdTRUE)
@@ -79,6 +85,10 @@ static void link_task(void *arg) {
             last_hello = t;
             uart_write_bytes(LINK_UART, (const char *)hello, hn);
         }
+
+        /* Status LED: red if the C5 link went silent, else the fleet state. */
+        status_led_set_base((s_last_c5_rx != 0u && (uint32_t)(t - s_last_c5_rx) > 3000u)
+                            ? SLED_ERR_RECOV : c3_fleet_led_base(t));
     }
 }
 

@@ -9,6 +9,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "nvs.h"
+#include "status_led.h"
 #include <string.h>
 
 static const char *TAG = "c3_fleet";
@@ -20,6 +21,8 @@ static uint8_t   s_node_id, s_gate, s_channel;
 static uint32_t  s_nonce;
 static int64_t   s_offset_ms;      /* fleet_ms - local_ms, from beacons */
 static volatile bool s_master_seen;
+static volatile uint32_t s_master_last_ms;  /* last ESP-NOW message from the master */
+static volatile bool s_degraded;            /* fell back to local AP + web */
 static uint32_t  s_pass_seq;
 
 static uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
@@ -61,6 +64,7 @@ static void apply_config(const fp_config_t *c) {
 }
 
 static void on_msg(const uint8_t mac[6], const fp_msg_t *msg) {
+    s_master_last_ms = now_ms();   /* any fleet message = the master is alive */
     switch (msg->type) {
     case FP_MSG_TIME_BEACON:
         s_offset_ms = (int64_t)msg->time_beacon.fleet_ms - (int64_t)now_ms();
@@ -122,7 +126,20 @@ bool c3_fleet_try_online(uint32_t timeout_ms) {
     return s_master_seen;
 }
 
+void c3_fleet_set_degraded(void) { s_degraded = true; }
+
+/* Status LED base: blue degraded, magenta while (re)pairing, green when the
+ * master is alive (a fleet message within 5 s). */
+sled_base_t c3_fleet_led_base(uint32_t now) {
+    if (s_degraded) return SLED_DEGRADED;
+    if (!s_paired)  return SLED_PAIRING;
+    if (s_master_last_ms != 0u && (uint32_t)(now - s_master_last_ms) < 5000u)
+        return SLED_HEALTHY;
+    return SLED_PAIRING;
+}
+
 void c3_fleet_report_pass(const lp_event_t *e) {
+    status_led_pass();   /* flash on every C5 pass, even before we relay it */
     if (!s_paired) return;
     const fp_gate_pass_t gp = { .gate_index = s_gate, .channel = s_channel,
                                 .peak_db_x10 = e->peak_db_x10, .fleet_ms = fleet_ms(),
