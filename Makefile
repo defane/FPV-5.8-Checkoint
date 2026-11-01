@@ -20,10 +20,13 @@ export IDF_EXPORT
 FW_SH := tools/fw.sh
 
 .DEFAULT_GOAL := help
-.PHONY: help firmware flash monitor clean
+.PHONY: help firmware flash monitor variants clean
 
 help:
 	@$(FW_SH) help
+
+variants:
+	@$(FW_SH) variants
 
 firmware:
 	@$(FW_SH) build $(FIRMWARES)

@@ -19,17 +19,27 @@ set -eu
 cd "$(dirname "$0")/.." || exit 1
 
 IDF_EXPORT="${IDF_EXPORT:-$HOME/esp/esp-idf-v6.0.2/export.sh}"
+
+# Firmware variants, one FW= name each. A role's plain name (detector/node/
+# master) is its DEFAULT board; "<role>-<tag>" is a board variant. Each variant
+# builds in its own dir with its own sdkconfig, so they never clobber. To add a
+# variant: drop a resolve() case below (its own BUILDDIR, SDKCONFIG, CHIP and a
+# sdkconfig.<tag>.defaults in the role dir) and list it in FIRMWARES.
 FIRMWARES="detector node master master-c5"
 
-# resolve <name> -> sets DIR IDFARGS BUILDDIR BIN CHIP
+# resolve <name> -> sets DIR IDFARGS BUILDDIR BIN CHIP LABEL
 resolve() {
     case "$1" in
-        detector)  DIR=firmware/detector; IDFARGS=""; BUILDDIR=build;    BIN=detector-c5.bin; CHIP=esp32c5 ;;
-        node)      DIR=firmware/node;     IDFARGS=""; BUILDDIR=build;    BIN=node-c3.bin;     CHIP=esp32c3 ;;
-        master)    DIR=firmware/master;   IDFARGS=""; BUILDDIR=build;    BIN=master-c6.bin;   CHIP=esp32c6 ;;
+        detector)  DIR=firmware/detector; IDFARGS=""; BUILDDIR=build; BIN=detector-c5.bin; CHIP=esp32c5
+                   LABEL="RF detector  -- ESP32-C5-Zero (default)" ;;
+        node)      DIR=firmware/node;     IDFARGS=""; BUILDDIR=build; BIN=node-c3.bin;     CHIP=esp32c3
+                   LABEL="node bridge  -- ESP32-C3-Zero, WS2812 GPIO10 (default)" ;;
+        master)    DIR=firmware/master;   IDFARGS=""; BUILDDIR=build; BIN=master-c6.bin;   CHIP=esp32c6
+                   LABEL="fleet master -- ESP32-C6-Zero, WS2812 GPIO8 (default)" ;;
         master-c5) DIR=firmware/master; CHIP=esp32c5
                    IDFARGS="-DIDF_TARGET=esp32c5 -DSDKCONFIG=sdkconfig.c5 -DSDKCONFIG_DEFAULTS=sdkconfig.c5.defaults"
-                   BUILDDIR=build-c5; BIN=master-c5.bin ;;
+                   BUILDDIR=build-c5; BIN=master-c5.bin
+                   LABEL="fleet master -- ESP32-C5-Zero stand-in, WS2812 GPIO27" ;;
         "") echo "no firmware selected" >&2; return 2 ;;
         *)  echo "unknown firmware: '$1' (choose: $FIRMWARES)" >&2; return 2 ;;
     esac
@@ -143,6 +153,13 @@ case "$cmd" in
                firmware/master/build firmware/master/build-c5
         echo ">>> build dirs removed."
         ;;
+    variants|list)
+        echo "Firmware variants (FW=<name>):"
+        for fw in $FIRMWARES; do
+            resolve "$fw"
+            printf "  %-11s %s\n" "$fw" "$LABEL"
+        done
+        ;;
     help|-h|--help)
         cat <<EOF
 FPV 5.8 Checkpoint firmware helper (firmwares: $FIRMWARES)
@@ -150,15 +167,17 @@ FPV 5.8 Checkpoint firmware helper (firmwares: $FIRMWARES)
   tools/fw.sh build [name...]      build named firmwares (default: all)
   tools/fw.sh flash  [FW] [PORT]   flash one (menu if omitted)
   tools/fw.sh monitor [FW] [PORT]  serial monitor
+  tools/fw.sh variants             list the FW= names and their boards
   tools/fw.sh clean                remove all build dirs
 
-build needs ESP-IDF. flash/monitor use it when present, else fall back to
-esptool / a serial terminal on the already-built image.
+FW= names: a role (detector/node/master) is its default board; "<role>-<tag>"
+is a variant. build needs ESP-IDF; flash/monitor use it when present, else fall
+back to esptool / a serial terminal on the already-built image.
 Env: IDF_EXPORT=$IDF_EXPORT
 EOF
         ;;
     *)
-        echo "unknown command: '$cmd' (build|flash|monitor|clean|help)" >&2
+        echo "unknown command: '$cmd' (build|flash|monitor|variants|clean|help)" >&2
         exit 2
         ;;
 esac
