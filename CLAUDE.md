@@ -96,7 +96,7 @@ without video) and was abandoned. Audio is off until `coin.pcm` exists
 
 | GPIO | Owner | Notes |
 | --- | --- | --- |
-| 0, 1, 2, 3, 4, 5, 25, 27 | IQ loopback (MODEM_DIAG → PARLIO RX) | forbidden; GPIO-matrix loopback, no wiring |
+| 0, 1, 2, 3, 4, 5, 25, 27 | IQ loopback (MODEM_DIAG → PARLIO RX) | forbidden; GPIO-matrix loopback, no wiring; 27 is also the C5-Zero onboard WS2812, so that LED is unusable here |
 | 8, 9, 11, 12, 23, 24 | 6-bit video DAC (PARLIO TX) | **free with video off** (default here) |
 | 7, 10 | reserved 7th/8th DAC branches | free with video off; 7 is a strapping pin (never SD) |
 | 13, 14 | USB-Serial-JTAG (console, flashing) | forbidden |
@@ -104,7 +104,6 @@ without video) and was abandoned. Audio is off until `coin.pcm` exists
 | 26 | antenna switch (C5-Zero) | forbidden |
 | 28 | BOOT button | input, strapping |
 | 6, 8 | C5 ↔ C3 UART link | TX 6, RX 8 (C5-Zero header pins; 8 is the amp LRC, free on a fleet gate / video off; GPIO 15 is not broken out) |
-| 29 | status LED (WS2812, C5-Zero onboard) | driven by `status_led` over RMT; onboard, no wiring |
 
 GDMA: 3 AHB pairs. C5VRX uses 1 RX (PARLIO RX) and 1 TX (PARLIO TX; the TX
 BitScrambler is inline, no channel of its own). I2S gets a free TX channel,
@@ -138,10 +137,13 @@ change).
 
 ## Status LED
 
-Each board's onboard WS2812 shows state through `components/status_led` (a
-pure-C state→colour core + an RMT WS2812 driver, priority-1 task, ~15%
-brightness, started after the splash). Onboard GPIO: **29** (detector, C5-Zero),
-**10** (node, C3-Zero), **8** (master, C6-Zero).
+A board's onboard WS2812 shows state through `components/status_led` (a pure-C
+state→colour core + an RMT WS2812 driver, priority-1 task, ~15% brightness,
+started after the splash). Onboard GPIO: **10** (node, C3-Zero), **8** (master,
+C6-Zero). **The detector (C5-Zero) has no status LED**: its onboard WS2812 is on
+**GPIO27**, one of the receiver's IQ-loopback pins, so driving it would break the
+C/N chain (and in fact boot-loops). Disabled there (`CONFIG_STATUS_LED_ENABLE=n`
+in `firmware/detector/sdkconfig.defaults`).
 
 | State | LED |
 | --- | --- |
@@ -153,10 +155,10 @@ brightness, started after the splash). Onboard GPIO: **29** (detector, C5-Zero),
 | fatal error (init) | red solid |
 | a pass | brief white flash (even when the sound is off) |
 
-The detector goes green only while the bridge is talking to it: the C3 sends a
-periodic HELLO keepalive and the C5 counts the link alive within 3 s of the last
-frame (`checkpoint_link_last_rx_ms()`). Currently wired on the **detector**;
-node/master follow. Optional bench mode maps C/N to the HEALTHY brightness.
+The core and its checkpoint hooks exist (a bridge-link-alive green via
+`checkpoint_link_last_rx_ms()`, a white pass flash), but they are inert on the
+detector while the LED is disabled. To be wired on the **node** (GPIO10) and
+**master** (GPIO8). Optional bench mode maps C/N to the HEALTHY brightness.
 
 ## Fleet (C6 master + C3 nodes)
 
