@@ -202,7 +202,9 @@ schema: `docs/fleet.svg`.
 The root `Makefile` wraps the per-firmware commands: `make firmware` builds all
 four images, `make flash [FW=<name>] [PORT=<port>]` flashes one (interactive
 firmware/port menu when an arg is omitted), plus `make monitor` and `make
-clean`. The raw commands:
+clean`. flash/monitor fall back to esptool / a serial terminal on the
+already-built image when ESP-IDF is not installed (build it elsewhere, flash
+here). The raw commands:
 
 ```sh
 . ~/esp/esp-idf-v6.0.2/export.sh

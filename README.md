@@ -61,7 +61,10 @@ single-set wiring (C3, C5 and the amplifier).
 
 The root `Makefile` is the quick path: `make firmware` builds all four images,
 `make flash [FW=<name>] [PORT=<port>]` flashes one (interactive firmware/port
-menu if an arg is omitted), `make monitor`, `make clean`. The raw commands:
+menu if an arg is omitted), `make monitor`, `make clean`. flash/monitor fall
+back to esptool / a serial terminal on the already-built image when ESP-IDF is
+not installed, so you can build in one place and flash in another. The raw
+commands:
 
 ```sh
 . ~/esp/esp-idf-v6.0.2/export.sh
