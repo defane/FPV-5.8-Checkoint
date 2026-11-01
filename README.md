@@ -50,7 +50,7 @@ components/
 firmware/detector/  ESP32-C5 application (RF + detection; sound local or report-only)
 firmware/node/      ESP32-C3 node bridge (UART + ESP-NOW relay, degraded Wi-Fi web)
 firmware/master/    ESP32-C6 master (UART + ESP-NOW hub + speaker + admin web + timing)
-docs/            CHECKPOINT.md (feature notes + bench), wiring.svg
+docs/            CHECKPOINT.md (index) + detector/no-video-audio/fleet/status-led/bench, wiring.svg
 ```
 
 See **[docs/CHECKPOINT.md](docs/CHECKPOINT.md)** for the feature notes, the fleet

@@ -104,7 +104,7 @@ elapsed AND the level under `active_db - hysteresis_db`. The glue is
 (`K`+key, `components/c5vrx_rx/console.c`) and the C3 web UI (pushed over the
 link as `CONFIG_SET`, echoed as `CONFIG_STATE`), saved in NVS `checkpoint`
 (`checkpoint_prefs_t` — bump `PREFS_VERSION` on a layout change). Parameter
-table (defaults + console keys): **`docs/CHECKPOINT.md` → "Paramètres"**.
+table (defaults + console keys): **`docs/detector.md`**.
 
 ## Status LED
 
@@ -114,7 +114,7 @@ self-test; priority-1 task; ~15%). Onboard GPIO: node **10**, master **8**
 (C5-as-master **27**). **The detector has no status LED** — the C5-Zero WS2812 is
 on **GPIO27**, a receiver IQ-loopback pin, so it is disabled
 (`CONFIG_STATUS_LED_ENABLE=n`); a C3 SuperMini has no WS2812 either. Full scheme
-(colours per state and role): **`docs/CHECKPOINT.md` → "LED de statut"**.
+(colours per state and role): **`docs/status-led.md`**.
 
 ## Fleet (C6 master + C3 nodes)
 
@@ -141,7 +141,7 @@ C6 amp/UART pins are placeholders — check against the C6 board's strapping pin
 **Temporary C5-as-master**: run the master on a spare C5 (`make flash
 FW=master-wave-c5`; amp on 9/8/7/10, UART 4/5). Protocols in depth, pairing, web
 roles (spectator vs admin login), degraded mode and the C5-as-master build:
-`docs/CHECKPOINT.md` → "Flotte", `docs/fleet.svg`, `docs/wiring-c5c5.svg`.
+`docs/fleet.md`, `docs/fleet.svg`, `docs/wiring-c5c5.svg`.
 
 ## Build and tests
 
