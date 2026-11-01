@@ -59,9 +59,11 @@ single-set wiring (C3, C5 and the amplifier).
 
 ## Build
 
-The root `Makefile` is the quick path: `make firmware` builds all four images,
+The root `Makefile` is the quick path: `make firmware` builds every variant,
 `make flash [FW=<name>] [PORT=<port>]` flashes one (interactive firmware/port
-menu if an arg is omitted), `make monitor`, `make clean`. flash/monitor fall
+menu if an arg is omitted), `make monitor`, `make variants` (list the `FW=`
+names: `detector`/`node`/`master` defaults plus variants like
+`detector-xiao-c5`, `detector-wave-c5-lcd`, `master-wave-c5`), `make clean`. flash/monitor fall
 back to esptool / a serial terminal on the already-built image when ESP-IDF is
 not installed, so you can build in one place and flash in another. The raw
 commands:

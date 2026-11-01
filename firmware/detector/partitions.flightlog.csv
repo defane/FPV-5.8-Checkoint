@@ -1,0 +1,8 @@
+# Name,   Type, SubType, Offset,   Size,     Flags
+# 8 MB with the flight log (detector-xiao-c5: XIAO ESP32-C5HR8 + PSRAM). The
+# flightlog logger task fits because PSRAM frees internal SRAM; on a no-PSRAM
+# C5 use partitions.csv instead (no flightlog).
+nvs,      data, nvs,     0x9000,   0x6000,
+phy_init, data, phy,     0xf000,   0x1000,
+factory,  app,  factory, 0x10000,  0x300000,
+flightlog,data, 0x99,    0x310000, 0x180000,

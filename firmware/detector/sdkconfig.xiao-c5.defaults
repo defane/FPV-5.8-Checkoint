@@ -1,0 +1,8 @@
+# detector-xiao-c5 overlay (on sdkconfig.defaults + sdkconfig.psram.defaults):
+# Seeed XIAO ESP32-C5HR8 = 8 MB flash + in-package PSRAM. PSRAM frees internal
+# SRAM, so the flight-log task fits alongside the receiver and the flightlog
+# partition is back (unlike the no-PSRAM C5-Zero / C5-LCD default, which drops
+# it to let gain_fast start). The status LED stays off: the onboard WS2812 pin
+# is still a receiver IQ-loopback pin on any C5.
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.flightlog.csv"

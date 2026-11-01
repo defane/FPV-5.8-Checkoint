@@ -210,10 +210,13 @@ schema: `docs/fleet.svg`.
 
 ## Build and tests
 
-The root `Makefile` wraps the per-firmware commands: `make firmware` builds all
-four images, `make flash [FW=<name>] [PORT=<port>]` flashes one (interactive
-firmware/port menu when an arg is omitted), plus `make monitor` and `make
-clean`. flash/monitor fall back to esptool / a serial terminal on the
+The root `Makefile` wraps the per-firmware commands: `make firmware` builds every
+variant, `make flash [FW=<name>] [PORT=<port>]` flashes one (interactive
+firmware/port menu when an arg is omitted), plus `make monitor`, `make variants`
+(list the `FW=` names) and `make clean`. A `FW=` name is a role (`detector`/
+`node`/`master`, its default board) or a `<role>-<board>` variant
+(`detector-xiao-c5`, `detector-wave-c5-lcd`, `master-wave-c5`); each variant is an
+overlay on the role's `sdkconfig.defaults` and builds in its own dir. flash/monitor fall back to esptool / a serial terminal on the
 already-built image when ESP-IDF is not installed (build it elsewhere, flash
 here). The raw commands:
 

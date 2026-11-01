@@ -1,0 +1,7 @@
+# detector-wave-c5-lcd overlay (on sdkconfig.defaults):
+# Waveshare ESP32-C5-LCD-1.47 = 4 MB, no PSRAM. The RF detector does not use the
+# LCD, so the receiver config is identical to the default (C5-Zero): 4 MB, no
+# PSRAM, no flight log (same proven FPV-5.8-Detector settings). This overlay is
+# intentionally empty for now -- it gives the board its own FW= name and build
+# dir, and is where LCD-specific config would go (e.g. enable PSRAM if the board
+# has it, or drive a status screen on the display) without touching the default.

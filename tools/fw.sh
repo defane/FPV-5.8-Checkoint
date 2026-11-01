@@ -21,25 +21,42 @@ cd "$(dirname "$0")/.." || exit 1
 IDF_EXPORT="${IDF_EXPORT:-$HOME/esp/esp-idf-v6.0.2/export.sh}"
 
 # Firmware variants, one FW= name each. A role's plain name (detector/node/
-# master) is its DEFAULT board; "<role>-<tag>" is a board variant. Each variant
-# builds in its own dir with its own sdkconfig, so they never clobber. To add a
-# variant: drop a resolve() case below (its own BUILDDIR, SDKCONFIG, CHIP and a
-# sdkconfig.<tag>.defaults in the role dir) and list it in FIRMWARES.
-FIRMWARES="detector node master master-c5"
+# master) is its DEFAULT board; "<role>-<vendor>-<chip>[-form]" is a board
+# variant. Each variant builds in its own dir with its own sdkconfig, so they
+# never clobber. A variant's config is an OVERLAY: SDKCONFIG_DEFAULTS is a ";"-
+# separated list, sdkconfig.defaults first then the variant's own overlay, so
+# the base RAM/Wi-Fi/PHY tuning is never duplicated. To add a variant: drop a
+# resolve() case below + a sdkconfig.<tag>.defaults in the role dir, and list it
+# in FIRMWARES.
+FIRMWARES="detector detector-xiao-c5 detector-wave-c5-lcd node master master-wave-c5"
 
-# resolve <name> -> sets DIR IDFARGS BUILDDIR BIN CHIP LABEL
+# resolve <name> -> sets DIR CHIP SDKCFG DEFAULTS BUILDDIR BIN LABEL
 resolve() {
+    DIR=""; CHIP=""; SDKCFG=sdkconfig; DEFAULTS=sdkconfig.defaults; BUILDDIR=build; BIN=""; LABEL=""
     case "$1" in
-        detector)  DIR=firmware/detector; IDFARGS=""; BUILDDIR=build; BIN=detector-c5.bin; CHIP=esp32c5
-                   LABEL="RF detector  -- ESP32-C5-Zero (default)" ;;
-        node)      DIR=firmware/node;     IDFARGS=""; BUILDDIR=build; BIN=node-c3.bin;     CHIP=esp32c3
-                   LABEL="node bridge  -- ESP32-C3-Zero, WS2812 GPIO10 (default)" ;;
-        master)    DIR=firmware/master;   IDFARGS=""; BUILDDIR=build; BIN=master-c6.bin;   CHIP=esp32c6
-                   LABEL="fleet master -- ESP32-C6-Zero, WS2812 GPIO8 (default)" ;;
-        master-c5) DIR=firmware/master; CHIP=esp32c5
-                   IDFARGS="-DIDF_TARGET=esp32c5 -DSDKCONFIG=sdkconfig.c5 -DSDKCONFIG_DEFAULTS=sdkconfig.c5.defaults"
-                   BUILDDIR=build-c5; BIN=master-c5.bin
-                   LABEL="fleet master -- ESP32-C5-Zero stand-in, WS2812 GPIO27" ;;
+        detector)
+            DIR=firmware/detector; CHIP=esp32c5; BIN=detector-c5.bin
+            LABEL="RF detector  -- ESP32-C5-Zero / C5-LCD, 4 MB no-PSRAM (default)" ;;
+        detector-xiao-c5)
+            DIR=firmware/detector; CHIP=esp32c5; BIN=detector-c5.bin
+            SDKCFG=sdkconfig.xiao-c5; BUILDDIR=build-xiao-c5
+            DEFAULTS="sdkconfig.defaults;sdkconfig.psram.defaults;sdkconfig.xiao-c5.defaults"
+            LABEL="RF detector  -- XIAO ESP32-C5HR8, 8 MB + PSRAM, flight log on" ;;
+        detector-wave-c5-lcd)
+            DIR=firmware/detector; CHIP=esp32c5; BIN=detector-c5.bin
+            SDKCFG=sdkconfig.wave-c5-lcd; BUILDDIR=build-wave-c5-lcd
+            DEFAULTS="sdkconfig.defaults;sdkconfig.wave-c5-lcd.defaults"
+            LABEL="RF detector  -- Waveshare ESP32-C5-LCD-1.47, 4 MB no-PSRAM" ;;
+        node)
+            DIR=firmware/node; CHIP=esp32c3; BIN=node-c3.bin
+            LABEL="node bridge  -- ESP32-C3-Zero, WS2812 GPIO10 (default)" ;;
+        master)
+            DIR=firmware/master; CHIP=esp32c6; BIN=master-c6.bin
+            LABEL="fleet master -- ESP32-C6-Zero, WS2812 GPIO8 (default)" ;;
+        master-wave-c5)
+            DIR=firmware/master; CHIP=esp32c5; BIN=master-c5.bin
+            SDKCFG=sdkconfig.c5; BUILDDIR=build-c5; DEFAULTS=sdkconfig.c5.defaults
+            LABEL="fleet master -- ESP32-C5-Zero stand-in, WS2812 GPIO27" ;;
         "") echo "no firmware selected" >&2; return 2 ;;
         *)  echo "unknown firmware: '$1' (choose: $FIRMWARES)" >&2; return 2 ;;
     esac
@@ -126,8 +143,9 @@ case "$cmd" in
         idf_env
         for fw in "$@"; do
             resolve "$fw"
-            echo ">>> building $fw  ($DIR, idf args: ${IDFARGS:-none})"
-            ( cd "$DIR" && idf.py $IDFARGS -B "$BUILDDIR" build )
+            echo ">>> building $fw  ($DIR -> $BUILDDIR)"
+            ( cd "$DIR" && idf.py -DIDF_TARGET="$CHIP" -DSDKCONFIG="$SDKCFG" \
+                  -DSDKCONFIG_DEFAULTS="$DEFAULTS" -B "$BUILDDIR" build )
             echo ">>> $fw -> $DIR/$BUILDDIR/$BIN"
         done
         echo ">>> done."
@@ -141,7 +159,8 @@ case "$cmd" in
         [ -n "$port" ] || { echo "no port selected" >&2; exit 2; }
         if idf_available; then
             idf_env
-            ( cd "$DIR" && idf.py $IDFARGS -B "$BUILDDIR" -p "$port" "$cmd" )
+            ( cd "$DIR" && idf.py -DIDF_TARGET="$CHIP" -DSDKCONFIG="$SDKCFG" \
+                  -DSDKCONFIG_DEFAULTS="$DEFAULTS" -B "$BUILDDIR" -p "$port" "$cmd" )
         elif [ "$cmd" = flash ]; then
             esptool_flash "$DIR/$BUILDDIR" "$CHIP" "$port"
         else
@@ -149,15 +168,14 @@ case "$cmd" in
         fi
         ;;
     clean)
-        rm -rf firmware/detector/build firmware/node/build \
-               firmware/master/build firmware/master/build-c5
+        for fw in $FIRMWARES; do resolve "$fw"; rm -rf "$DIR/$BUILDDIR"; done
         echo ">>> build dirs removed."
         ;;
     variants|list)
         echo "Firmware variants (FW=<name>):"
         for fw in $FIRMWARES; do
             resolve "$fw"
-            printf "  %-11s %s\n" "$fw" "$LABEL"
+            printf "  %-21s %s\n" "$fw" "$LABEL"
         done
         ;;
     help|-h|--help)
