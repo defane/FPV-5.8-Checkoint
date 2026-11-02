@@ -61,22 +61,25 @@
     <div class="bar" style="margin-bottom:10px">Pairing: <b id="pair_state" class="off">closed</b>
       <button id="pair_toggle" class="admin-only">Toggle pairing</button></div>
     <table>
-      <thead><tr><th>Gate</th><th>Channel</th><th>Node</th><th>Link</th><th>C/N</th><th class="admin-only"></th></tr></thead>
+      <thead><tr><th>Gate</th><th>Channel</th><th>Node</th><th>Link</th><th>C/N</th><th>Seen</th><th class="admin-only"></th></tr></thead>
       <tbody id="nodes"><tr><td colspan="6" class="muted">no nodes paired</td></tr></tbody>
     </table>
     <p class="muted" style="margin:10px 0 0">Gate 0 is the master's own C5.</p>
   </div>
 
-  <h2>Local gate (0)</h2>
+  <h2>Master &amp; local gate (0)</h2>
   <div class="card row">
     <div class="stat"><b id="l_cn">—</b><span>C/N dB</span></div>
     <div class="stat"><b id="l_ch">—</b><span>channel</span></div>
     <div class="stat"><b id="l_passes">—</b><span>total passes</span></div>
+    <div class="stat"><b id="m_uptime">—</b><span>uptime</span></div>
+    <div class="stat"><b id="m_heap">—</b><span>free heap</span></div>
   </div>
 </main>
 <script>
 const $ = id => document.getElementById(id);
 const fmt = ms => ms ? (ms/1000).toFixed(3) + " s" : "—";
+const fmtUp = ms => { let s = ms/1000|0; return s<60 ? s+"s" : s<3600 ? (s/60|0)+"m"+(s%60)+"s" : (s/3600|0)+"h"+(s%3600/60|0)+"m"; };
 let admin = false, auth = null, editing = false;
 
 async function post(url, obj) {
@@ -111,6 +114,8 @@ async function poll() {
     $("l_ch").textContent = s.has_local ? L.channel : "—";
     $("l_passes").textContent = s.total_passes;
     if (s.volume != null) { $("vol_v").textContent = s.volume; if (document.activeElement !== $("vol")) $("vol").value = s.volume; }
+    if (s.uptime_ms != null) $("m_uptime").textContent = fmtUp(s.uptime_ms);
+    if (s.free_heap != null) $("m_heap").textContent = (s.free_heap/1024|0) + " KB";
 
     const st = s.standings || [];
     $("standings").innerHTML = st.length ? st.map(x => `
@@ -120,6 +125,8 @@ async function poll() {
 
     if (!editing) {
       const nodes = s.nodes || [];
+      const up = s.uptime_ms || 0;
+      const seen = n => n.online ? Math.max(0, (up - n.last_seen_ms)/1000 | 0) + "s" : "—";
       $("nodes").innerHTML = nodes.length ? nodes.map(n => admin ? `
         <tr data-id="${n.node_id}">
           <td><input type="number" min="1" max="15" value="${n.gate}" class="g"></td>
@@ -127,12 +134,14 @@ async function poll() {
           <td class="muted">${n.mac.slice(9)}</td>
           <td class="${n.online?'on':'off'}">${n.online?'online':'offline'}</td>
           <td>${n.cn_x10>-990?(n.cn_x10/10).toFixed(1):'—'}</td>
+          <td>${seen(n)}</td>
           <td class="admin-only"><button class="save">Save</button> <button class="ghost rm">✕</button></td>
         </tr>` : `
         <tr><td>${n.gate}</td><td>${n.channel}</td><td class="muted">${n.mac.slice(9)}</td>
           <td class="${n.online?'on':'off'}">${n.online?'online':'offline'}</td>
-          <td>${n.cn_x10>-990?(n.cn_x10/10).toFixed(1):'—'}</td></tr>`).join("")
-        : '<tr><td colspan="6" class="muted">no nodes paired</td></tr>';
+          <td>${n.cn_x10>-990?(n.cn_x10/10).toFixed(1):'—'}</td>
+          <td>${seen(n)}</td></tr>`).join("")
+        : '<tr><td colspan="7" class="muted">no nodes paired</td></tr>';
     }
   } catch (e) { $("gates").textContent = "offline"; }
 }

@@ -31,6 +31,8 @@ typedef struct {
     uint8_t       num_gates;
     uint8_t       num_nodes;
     uint8_t       volume;        /* centralized audio volume, 0..100 % */
+    uint32_t      uptime_ms;     /* master uptime */
+    uint32_t      free_heap;     /* master free internal heap, bytes */
     c6_node_t     nodes[C6_MAX_NODES];
     uint8_t       num_standings;
     c6_standing_t standings[RT_MAX_CHANNELS];

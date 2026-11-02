@@ -31,20 +31,24 @@ static esp_err_t get_state(httpd_req_t *req) {
     o += snprintf(body + o, sizeof body - o,
                   "{\"pairing\":%s,\"num_gates\":%u,\"has_local\":%s,"
                   "\"local\":{\"channel\":%u,\"cn_x10\":%ld,\"state\":%u,\"played\":%lu,"
-                  "\"dropped\":%lu,\"failed\":%lu},\"total_passes\":%lu,\"volume\":%u,",
+                  "\"dropped\":%lu,\"failed\":%lu},\"total_passes\":%lu,\"volume\":%u,"
+                  "\"uptime_ms\":%lu,\"free_heap\":%lu,",
                   f.pairing ? "true" : "false", f.num_gates, s.has_local ? "true" : "false",
                   s.local.channel, (long)s.local.cn_x10, s.local.state, (unsigned long)s.local.played,
                   (unsigned long)s.local.dropped, (unsigned long)s.local.failed,
-                  (unsigned long)s.total_passes, (unsigned)f.volume);
+                  (unsigned long)s.total_passes, (unsigned)f.volume,
+                  (unsigned long)f.uptime_ms, (unsigned long)f.free_heap);
 
     o += snprintf(body + o, sizeof body - o, "\"nodes\":[");
     for (unsigned i = 0; i < f.num_nodes && o < (int)sizeof body; i++) {
         const c6_node_t *n = &f.nodes[i];
         o += snprintf(body + o, sizeof body - o,
                       "%s{\"node_id\":%u,\"gate\":%u,\"channel\":%u,\"online\":%s,\"cn_x10\":%ld,"
+                      "\"state\":%u,\"last_seen_ms\":%lu,"
                       "\"mac\":\"%02x:%02x:%02x:%02x:%02x:%02x\"}",
                       i ? "," : "", n->node_id, n->gate_index, n->channel,
                       n->online ? "true" : "false", (long)n->cn_x10,
+                      n->state, (unsigned long)n->last_seen_ms,
                       n->mac[0], n->mac[1], n->mac[2], n->mac[3], n->mac[4], n->mac[5]);
     }
     o += snprintf(body + o, sizeof body - o, "],\"standings\":[");

@@ -3,6 +3,7 @@
 #include "audio_player.h"
 #include "espnow_link.h"
 #include "esp_log.h"
+#include "esp_system.h"
 #include "esp_timer.h"
 #include "fleet_proto.h"
 #include "freertos/FreeRTOS.h"
@@ -314,6 +315,8 @@ void c6_hub_snapshot(c6_fleet_t *out) {
     out->num_gates = num_gates();
     out->num_nodes = s_num_nodes;
     out->volume = (uint8_t)audio_player_volume();
+    out->uptime_ms = now_ms();
+    out->free_heap = esp_get_free_heap_size();
     for (unsigned i = 0; i < s_num_nodes; i++) out->nodes[i] = s_nodes[i];
     out->num_standings = s_rt.num_channels;
     for (unsigned i = 0; i < s_rt.num_channels; i++) {
