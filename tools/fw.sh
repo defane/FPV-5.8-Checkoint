@@ -62,7 +62,10 @@ resolve() {
     esac
     # Local, uncommitted overrides (gitignored): passwords, audio, etc. Applied
     # last in the SDKCONFIG_DEFAULTS chain, so they win over the committed ones.
-    [ -f "$DIR/sdkconfig.local.defaults" ] && DEFAULTS="$DEFAULTS;sdkconfig.local.defaults"
+    # (Use an `if`, not `&&`: under `set -e` a false test would abort resolve.)
+    if [ -f "$DIR/sdkconfig.local.defaults" ]; then
+        DEFAULTS="$DEFAULTS;sdkconfig.local.defaults"
+    fi
 }
 
 idf_available() { [ -f "$IDF_EXPORT" ]; }
