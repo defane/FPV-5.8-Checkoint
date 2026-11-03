@@ -8,7 +8,8 @@ passes. It scales to a multi-gate race-timing fleet.
 
 > **Derivative.** This project adapts the receive engine of
 > [C5VRX](https://github.com/Twotoz/C5VRX) — **C5VRX-5, by Twotoz and the C5VRX
-> contributors** (forked at upstream commit `6bc9e4b`). The upstream RF chain
+> contributors** (forked at upstream commit `6bc9e4b`, modified since
+> 2026-10-29). The upstream RF chain
 > (MODEM_DIAG → BitScrambler → PARLIO → AGC and its control/calibration) is
 > reused in the `components/c5vrx_rx` component, unchanged except for a 7-line
 > `CONFIG_C5VRX_VIDEO_OUTPUT=n` pin routing in `transport.c`. **Modified for this
@@ -23,8 +24,9 @@ passes. It scales to a multi-gate race-timing fleet.
 > C5↔C3/C6 platform around it.
 > Visit the [official C5VRX website](https://twotoz.github.io/C5VRX/) for the
 > original project; its Discord invite is available there. Licensed
-> **GPL-3.0-only** (see `LICENSE`); this is **not** an official C5VRX release
-> and is not endorsed by its authors.
+> **GPL-3.0-only** (see `LICENSE`), without any warranty (sections 15–17), like
+> C5VRX; the C3 and C6 web pages show this notice in their footer. This is
+> **not** an official C5VRX release and is not endorsed by its authors.
 
 ## What it is
 
