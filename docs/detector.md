@@ -6,8 +6,8 @@ Pass detection on the tuned channel (`components/pass_detector`, pure C).
   ratio (C/N) in dB, relative to a noise reference. It is read every 50 ms by a
   priority-1 task, below every receive task (control and gain_obs at 3,
   gain_fast at 4).
-- **No sample** while the menu, a scan, a calibration or a pause owns the
-  receiver, nor when the C/N is unknown (gain settling, no noise reference,
+- **No sample** while the boot splash window, a calibration or a pause owns
+  the receiver, nor when the C/N is unknown (gain settling, no noise reference,
   clipping). After `stale_ms` with no sample the channel returns to IDLE. A
   channel change resets the detector.
 - **Read-only:** no GPIO, DMA, channel change or gain write. The MODEM_DIAG,
@@ -17,7 +17,8 @@ Pass detection on the tuned channel (`components/pass_detector`, pure C).
   refractory period must have elapsed **and** the level must have dropped back
   under `active_db − hysteresis_db`.
 - **One line per pass:**
-  `PASS channel=R3 freq=5732 peak_cn_db=31.4 peak_ms=… at_ms=… delay_ms=… semitones=-3 audio=queued|muted|off_build|refused`.
+  `PASS channel=R3 freq=5732 peak_cn_db=31.4 peak_ms=… at_ms=… delay_ms=…`, and
+  sent over the UART link as an `EVENT_PASS` (the C6 master plays the sound).
 
 ## Parameters (console `K`, saved in NVS "checkpoint")
 
@@ -27,15 +28,13 @@ Pass detection on the tuned channel (`components/pass_detector`, pure C).
 | `active_db` (activity threshold, C/N) | 15 dB | `t`/`T` ±1 dB |
 | `hysteresis_db` | 3 dB | `h`/`H` ±0.5 dB |
 | `drop_db` (fall below the peak that marks a pass) | 3 dB | `d`/`D` ±0.5 dB |
-| `min_peak_db` (below it, the drone is too far: no sound) | 25 dB | `m`/`M` ±1 dB |
+| `min_peak_db` (below it, the drone is too far: no pass) | 25 dB | `m`/`M` ±1 dB |
 | `refractory_ms` | 1500 ms | `r`/`R` ±250 ms |
 | `stale_ms` | 1000 ms | (fixed) |
-| volume | 60 % | `v`/`V` ±10 % |
 
 Other keys: `K` then `l` (live C/N trace, 20 lines/s), `0` (defaults), `k`
 (show), `q` (close). The `K` window stays open 5 s after each key. At the top
-level: `P` plays the sound at the channel's pitch, `p` mutes/unmutes, `T` prints
-the `CHECKPOINT` line.
+level, `T` prints the `CHECKPOINT` line.
 
 **Setting `active_db`:** put it below the C/N of a drone passing the gate, but
 above the C/N of the same drone elsewhere on the track. Otherwise the channel

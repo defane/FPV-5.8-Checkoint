@@ -1,8 +1,9 @@
 # Bench procedure
 
-Hardware: the receiver, a VTX on a Raceband channel at fixed power, the video on
-a screen. Propulsion removed. Console: `python tools/flash.py PORT
---monitor-only --log run.log`.
+Hardware: the detector (C5), a VTX on a Raceband channel at fixed power.
+Propulsion removed. The detector has no picture and no sound: everything shows
+on the console (`python tools/flash.py PORT --monitor-only --log run.log`); the
+coin sound is the C6 master's ([fleet.md](fleet.md)).
 
 ## 1. Build, flash, startup
 
@@ -22,12 +23,12 @@ python tools/flash.py PORT --check
 
 - Send `K` then `l` (trace). With the VTX on and close, `CP_TRACE … cn_db=` shows
   stable values. With the VTX off, you read `cn_db=unknown` or a low value.
-- In `T`, `samples_valid` must dominate `unknown` when video is received. **If
-  `unknown` dominates with a good picture, report it to me**: another source
+- In `T`, `samples_valid` must dominate `unknown` with the VTX on and close.
+  **If `unknown` dominates with a strong VTX, report it to me**: another source
   would be needed, e.g. the dBm from `receiver_level()` updated at 1 Hz.
 - Stop the trace (`K` `l`) before the quality measurements.
 
-## 3. Detector (no audio)
+## 3. Detector
 
 | Test | Expected |
 | --- | --- |
@@ -36,43 +37,7 @@ python tools/flash.py PORT --check
 | VTX held still near the antenna for 30 s | a single `PASS` (or none) |
 | VTX off, or far, for 2 min | no `PASS` |
 | VTX at medium distance (peak below `min_peak_db`) | no `PASS` |
-| `c` (next channel) during a pass | no phantom `PASS`; `semitones` changes with the channel |
-| `o` (menu) or `s` (scan) during a pass | no `PASS`; in `T`, `unknown` rises |
+| `c` (next channel) during a pass | no phantom `PASS`; `channel=` follows the new channel |
 
 Tune with `K`: `t`/`T` and `m`/`M` from the measured `peak_cn_db`, then `d`/`D`
 for responsiveness.
-
-## 4. Audio (after rewiring and an audio build)
-
-- `P` on each channel, R1 to R8 (`c` to advance): the pitch rises from R1 to R8.
-  `semitones` shows −7, −5, −3, 0, +2, +5, +7, +9.
-- `K` `v`/`V`: the volume changes. `p` mutes the sound (`audio=muted` in `PASS`),
-  then `p` restores it.
-- On a scope or the LED: SD goes high about 5 ms before the sound and returns low
-  about 50 ms after. No click at the start or end.
-- `P P P P` in a burst: at most 3 sounds (one playing and two queued); `dropped`
-  rises in `T`.
-- During a sound, `g` (OUTPUT, transport restart): the video returns and the next
-  `P` sounds. An isolated `AUDIO error=write` and `failed` +1 are expected.
-
-## 5. Receive quality, audio active or not
-
-With a fixed setup (same VTX, channel, power, distance), without touching
-anything during the measurement:
-
-```sh
-python3 tools/checkpoint_bench.py PORT --seconds 120 --every 2 --out bench_audio
-```
-
-The script records the `FIELD_DIAG` stream in three phases: A1 with no sound, B
-with `P` every 2 s, A2 with no sound. It then compares them with
-`tools/field_diag_compare.py`.
-
-- A1 and A2 must agree with each other: that is the setup's drift.
-- B must not be worse than A1 and A2 on `sync_evidence_ok_pct`,
-  `coverage_pct_median`, `cn_est_median_db`, `chain_fault_s` and `dropouts`. A B
-  gap outside the A1/A2 gap indicates an effect of the audio.
-- Repeat at the edge of range (attenuator or distance), where any degradation
-  would be most visible.
-- Do the same once with the `K` `l` trace active: it loads the USB console and is
-  not meant for flight.

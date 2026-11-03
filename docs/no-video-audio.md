@@ -1,36 +1,33 @@
-# No video, optional audio
+# No video, no sound (detector)
+
+The detector (C5, `firmware/detector`) has no local output at all: no picture,
+no sound, no status LED. Every pass goes out over the UART link to its bridge (a
+C3 node or the C6 master), and the coin sound is played centrally by the C6
+master ([fleet.md](fleet.md)).
 
 ## No video output
 
-The project produces sound only: `firmware/detector/sdkconfig.defaults` sets
-`CONFIG_C5VRX_VIDEO_OUTPUT=n` (*C5VRX receiver* menu). The transport (PARLIO TX +
-BitScrambler) runs exactly as before, but its bits reach no pin (`s_dac_gpio` is
--1 in `components/c5vrx_rx/transport.c`). The I/Q capture, the C/N, the gain and
-`FIELD_DIAG` are unchanged. You lose the picture, the on-screen menu and the DAC
-test (`Z`). The six DAC pins (8, 9, 11, 12, 23 and 24) plus 7 and 10 become free
-for the amplifier. After changing `firmware/detector/sdkconfig.defaults`, delete
-`firmware/detector/sdkconfig` before rebuilding.
+`firmware/detector/sdkconfig.defaults` sets `CONFIG_C5VRX_VIDEO_OUTPUT=n`
+(*C5VRX receiver* menu). The transport (PARLIO TX + BitScrambler) runs exactly as
+before, but its bits reach no pin (`s_dac_gpio` is -1 in
+`components/c5vrx_rx/transport.c`). The I/Q capture, the C/N, the gain and
+`FIELD_DIAG` are unchanged. The on-screen menu, boot logo and DAC test are not
+part of this fork at all (`components/c5vrx_rx/menu_stub.c` keeps only the splash
+window and the TX ownership the receive chain relies on). After changing
+`firmware/detector/sdkconfig.defaults`, delete `firmware/detector/sdkconfig`
+before rebuilding.
 
-## Audio: disabled by default
+## No amplifier, no LED
 
-`CONFIG_AUDIO_PLAYER_ENABLE=n`. The first amplifier wiring (BCLK on GPIO3, LRC on
-GPIO4, DIN on GPIO5, SD on GPIO1) sat on the MODEM_DIAG → PARLIO I/Q loopback
-(`RF_IQ_GPIO_NUMS = {1, 0, 25, 2, 27, 5, 3, 4}` in `components/c5vrx_rx/rf.h`).
-Driving those pins would destroy reception. **Unwire the amplifier from them.**
+`components/checkpoint` only reports passes; it has no audio or LED code.
+`sdkconfig.defaults` still forces `CONFIG_AUDIO_PLAYER_ENABLE=n` and
+`CONFIG_STATUS_LED_ENABLE=n`, because the shared components directory builds
+those components into every firmware, the detector included.
 
-To enable audio after rewiring: `idf.py menuconfig` → *Checkpoint audio
-(MAX98357A I2S)*. Enable the option and enter the pins. The firmware refuses to
-start audio on a receiver pin and says so with a `CHECKPOINT audio=refused` line.
-With video off, the usable pins are 8, 9, 11, 12, 23 and 24, plus 7 and 10 (6 and
-8 carry the UART link to the C3). Chosen wiring (Kconfig defaults): **BCLK on
-GPIO9, LRC on GPIO8, DIN on GPIO7, SD on GPIO10**. SD is refused on GPIO7 (a
-strapping pin). The I/Q GPIOs (0, 1, 2, 3, 4, 5, 25 and 27) stay forbidden: the
-C/N is computed from those samples. `coin.pcm` is also required
-(`assets/README.md`).
-
-The I2S channel — and thus a GDMA TX channel — only exists while sounds play.
-`transport.c:quiet_interrupts()` turns off all three GDMA channels' interrupts on
-every transport restart (boot, menu exit, OUTPUT/profile/demodulator change,
-recovery). A permanent I2S channel would stay stuck; one recreated per burst of
-sounds re-arms its interrupts. If a restart lands during a sound, the sound is
-cut (`AUDIO error=write`, `failed` counter) and the next one plays normally.
+The only wires on a detector are its power and the crossed UART link to the
+bridge (**TX GPIO6, RX GPIO8**, common ground; [wiring-node.svg](wiring-node.svg)).
+Never wire anything to the MODEM_DIAG → PARLIO I/Q loopback
+(`RF_IQ_GPIO_NUMS = {1, 0, 25, 2, 27, 5, 3, 4}` in `components/c5vrx_rx/rf.h`):
+the C/N is computed from those samples, and driving them destroys reception.
+GPIO27 is also the C5-Zero's onboard WS2812, which is why the detector has no
+status LED.

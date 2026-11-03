@@ -82,11 +82,23 @@ permitted GPL reuse. Credit external sources used by C5VRX with the same care.
 
 ## Repository sources
 
-- `components/c5vrx_rx/` — the C5VRX-5 receive engine, reused unchanged from
-  upstream (RF/transport/gain/AGC/control/calibration/console).
+- `components/c5vrx_rx/` — the C5VRX-5 receive engine from upstream commit
+  `6bc9e4b` (RF/transport/gain/AGC/control/calibration/console), **pruned for the
+  video-off detector**: upstream `menu.c`, `menu_ui.c`, `menu_raster.c`,
+  `menu_font.h`, `menu_logo.h`, `dac_check.h`, `experimental.c`,
+  `experimental_phy.c`, `flightlog.c`, `sense_lab.c`, `sense_lab_logic.h` and
+  `calibration_bench.c` are removed; `menu_stub.c` and `pruned_stubs.c` (this
+  fork) stand in for the symbols the kept code calls, with the video-off
+  behaviour. Other modifications by this fork: `transport.c` (+7 lines:
+  `CONFIG_C5VRX_VIDEO_OUTPUT=n` routes `s_dac_gpio` to no pin), `console.c` (the
+  checkpoint `K`/`T` hooks and a reduced key table), `CMakeLists.txt`
+  (component packaging); added: `Kconfig.projbuild`, `checkpoint.h`,
+  `checkpoint_weak.c`. Every other engine file, `rf.c`, `receiver.c`, `gain.c`,
+  `agc.c` and `*.bsasm` included, is byte-identical to upstream `6bc9e4b:main/`.
 - `components/checkpoint/`, `components/pass_detector/`,
   `components/audio_player/`, `components/link_proto/` — the platform's own
-  code (pass detection, coin sound, the C5<->bridge UART protocol).
+  code (pass detection, the C6 master's coin sound, the C5<->bridge UART
+  protocol).
 - `components/fleet_proto/`, `components/race_timing/`, `components/espnow_link/`
   — the race-timing fleet: the C6<->C3 ESP-NOW protocol, the lap/sector engine,
   and the ESP-NOW transport.
@@ -95,9 +107,12 @@ permitted GPL reuse. Credit external sources used by C5VRX with the same care.
 - `test/` host tests, `tools/` console/log/build helpers, `docs/` the
   platform's feature notes (`docs/CHECKPOINT.md`) and wiring.
 
-The receive engine is upstream material reused unchanged; do not modify it
-without the operator's approval (the realtime invariants below still govern
-any change to it).
+The receive engine is upstream material; do not modify it further without the
+operator's approval (the realtime invariants below still govern any change to
+it). The invariants below describe upstream C5VRX-5: where they name the menu,
+the OSD, the flight log or a console key this fork removed, the matching code is
+a stub here (the splash flag and the menu's TX ownership are kept, and they
+still gate BOOT_PHASE and calibration exactly as described).
 
 ## C5VRX-5 at a glance
 
@@ -114,10 +129,11 @@ receiver invariants.
   `components/c5vrx_rx/calibration_internal.h`): task, boot and manual startup phase in
   `calibration.c`; sampling phase `calibration_sphase.c`; analog filter
   `calibration_filter.c`; DC tables, health and live DC servo
-  `calibration_dc.c`; bench-only console L / self-noise `calibration_bench.c`.
+  `calibration_dc.c` (upstream's bench-only console L / self-noise
+  `calibration_bench.c` is removed here).
 - Control loop, AFC and observers: `components/c5vrx_rx/control.c`, `components/c5vrx_rx/receiver.c`;
-  profiles `components/c5vrx_rx/profile.c`; FIELD_DIAG `components/c5vrx_rx/diag.c`; flight log
-  `components/c5vrx_rx/flightlog.c`; PHY access `components/c5vrx_rx/phy.c`.
+  profiles `components/c5vrx_rx/profile.c`; FIELD_DIAG `components/c5vrx_rx/diag.c`; PHY access
+  `components/c5vrx_rx/phy.c` (upstream's flight log `flightlog.c` is removed here).
 - Pure logic lives in headers (`*_logic.h`, `dc_servo.h`, `dco_slots.h`, ...)
   with host tests in `test/`; CI runs them before the firmware build.
 - Board status: runs and holds video; range is not yet measured.

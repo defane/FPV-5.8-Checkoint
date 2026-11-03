@@ -1,16 +1,26 @@
 # FPV 5.8 Checkpoint
 
-A **"a drone just passed"** platform: it detects a drone pass on the tuned
-5.8 GHz FPV channel and plays a coin sound, with a phone-friendly web UI to tune
-it and watch events. It runs as a two-ESP checkpoint (C5 + C3) and scales to a
-C6-mastered, multi-gate race-timing fleet.
+A **"a drone just passed"** platform: a C5 detects a drone pass on the tuned
+5.8 GHz FPV channel and a C6 master times it and plays a coin sound, with a
+phone-friendly web UI to tune it and watch events. Each gate is a C5 wired to a
+C3 (or to the C6); a C3 with no master in reach serves its own web page with the
+passes. It scales to a multi-gate race-timing fleet.
 
 > **Derivative.** This project adapts the receive engine of
 > [C5VRX](https://github.com/Twotoz/C5VRX) — **C5VRX-5, by Twotoz and the C5VRX
 > contributors** (forked at upstream commit `6bc9e4b`). The upstream RF chain
 > (MODEM_DIAG → BitScrambler → PARLIO → AGC and its control/calibration) is
-> reused **unchanged** as the `components/c5vrx_rx` component; this repository
-> adds the pass detector, the coin sound, and the C5↔C3 platform around it.
+> reused in the `components/c5vrx_rx` component, unchanged except for a 7-line
+> `CONFIG_C5VRX_VIDEO_OUTPUT=n` pin routing in `transport.c`. **Modified for this
+> video-off detector:** the component drops the upstream video menu/OSD/splash
+> (`menu.c`, `menu_ui.c`, `menu_raster.c` and their font, logo and DAC-test
+> headers), the field experiments (`experimental.c`, `experimental_phy.c`), the
+> flight log (`flightlog.c`) and the bench labs (`sense_lab.c`,
+> `calibration_bench.c`); `menu_stub.c` and `pruned_stubs.c` stand in for them
+> with the video-off behaviour, and `console.c` has the checkpoint hooks and a
+> reduced key table (`AGENTS.md` "Repository sources" lists every change). This
+> repository adds the pass detector, the coin sound (on the C6 master), and the
+> C5↔C3/C6 platform around it.
 > Visit the [official C5VRX website](https://twotoz.github.io/C5VRX/) for the
 > original project; its Discord invite is available there. Licensed
 > **GPL-3.0-only** (see `LICENSE`); this is **not** an official C5VRX release
@@ -19,27 +29,31 @@ C6-mastered, multi-gate race-timing fleet.
 ## What it is
 
 - **ESP32-C5** (`firmware/detector`, Waveshare ESP32-C5-Zero) — runs the full C5VRX
-  receive chain, detects a pass from the tuned channel's C/N, and plays a coin
-  sound on a MAX98357A I2S amplifier. Sound is the only local output: the video
-  DAC is off (`CONFIG_C5VRX_VIDEO_OUTPUT=n`), freeing its pins for the amplifier.
+  receive chain and detects a pass from the tuned channel's C/N, reported over a
+  UART link to its bridge. It has no local output: no picture
+  (`CONFIG_C5VRX_VIDEO_OUTPUT=n`), no amplifier and no status LED.
 - **ESP32-C3** (`firmware/node`) — a node bridge: UART to the C5, ESP-NOW uplink to
   the C6 master; if no master is reachable at boot it falls back to a local
-  Wi-Fi SoftAP + web (band selection, results).
+  Wi-Fi SoftAP + web (band selection, results, the C5's health and its
+  calibrate/reboot commands).
 - **ESP32-C6** (`firmware/master`) — the optional **race-timing master**: UART to its
   own C5, the centralized speaker, a Wi-Fi AP web, and an ESP-NOW hub that
-  aggregates the C3 nodes. Each gate is a C5; the C6 times laps per channel.
+  aggregates the C3 nodes. Each gate is a C5; the C6 times laps per channel,
+  shows every gate's health and runs its calibrations and reboots (production
+  has no USB console: [docs/fleet.md](docs/fleet.md#gate-health-and-remote-commands-no-console-in-production)).
 
 The web has **two roles**: **spectators** watch the live standings and status
 read-only (no login), while **admin** actions — pairing, gate order, channel
-assignment, reset, and (on a degraded C3) band selection — require a login
+assignment, reset, a gate's calibration or reboot, and (on a degraded C3) band
+selection — require a login
 (`CONFIG_*_ADMIN_USER` / `_PASSWORD`, sent as HTTP Basic and checked server-side).
 
 ## Layout
 
 ```
 components/
-  c5vrx_rx/      upstream C5VRX receive engine, reused unchanged as a component
-  checkpoint/    pass detection + coin sound + the C5<->bridge UART link
+  c5vrx_rx/      upstream C5VRX receive engine, pruned for a video-off detector (RF chain unchanged)
+  checkpoint/    pass detection + the C5<->bridge UART link
   pass_detector/ pure-C pass detector (host-tested)
   audio_player/  I2S coin-sound player (the C6 speaker in a fleet)
   link_proto/    pure-C C5<->bridge UART protocol (host-tested; incl. SET_CHANNEL)
@@ -47,15 +61,15 @@ components/
   race_timing/   pure-C lap/sector timing engine (host-tested)
   espnow_link/   ESP-NOW transport carrying fleet_proto (C6 + C3)
   status_led/    single-WS2812 status indicator (pure-C core host-tested)
-firmware/detector/  ESP32-C5 application (RF + detection; sound local or report-only)
+firmware/detector/  ESP32-C5 application (RF + detection, report-only)
 firmware/node/      ESP32-C3 node bridge (UART + ESP-NOW relay, degraded Wi-Fi web)
 firmware/master/    ESP32-C6 master (UART + ESP-NOW hub + speaker + admin web + timing)
-docs/            CHECKPOINT.md (index) + detector/no-video-audio/fleet/status-led/bench, wiring.svg
+docs/            CHECKPOINT.md (index) + detector/no-video-audio/fleet/status-led/bench, wiring-*.svg
 ```
 
 See **[docs/CHECKPOINT.md](docs/CHECKPOINT.md)** for the feature notes, the fleet
-and the bench procedure, and **[docs/wiring.svg](docs/wiring.svg)** for the
-single-set wiring (C3, C5 and the amplifier).
+and the bench procedure, and **[docs/wiring-node.svg](docs/wiring-node.svg)** for
+a gate's wiring (C3 + C5).
 
 ## Build
 
@@ -102,9 +116,8 @@ cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/status_led/include \
 - **Global schema** (elements + interactions): [docs/fleet.svg](docs/fleet.svg)
 - **Pin-level wiring, per set type:**
   - master **C6 + C5**: [docs/wiring-master.svg](docs/wiring-master.svg)
-  - node **C3 + C5**: [docs/wiring-node.svg](docs/wiring-node.svg)
+  - node **C3 + C5** (also a gate with no master: the C3 then serves the web): [docs/wiring-node.svg](docs/wiring-node.svg)
   - temporary **C5 + C5** (a spare C5 runs the master firmware until the C6 arrives): [docs/wiring-c5c5.svg](docs/wiring-c5c5.svg)
-  - standalone **C5** (detects + sounds locally, optional C3 web): [docs/wiring.svg](docs/wiring.svg)
 
 ## Pinout
 
@@ -118,8 +131,8 @@ is reserved on every board.
 | Function | GPIO | Notes |
 | --- | --- | --- |
 | Link UART TX → bridge RX | 6 | to a C3 (node) or the C6 (master) |
-| Link UART RX ← bridge TX | 8 | C5-Zero header pin (GPIO 15 is not broken out); the amp LRC, free on a fleet gate |
-| Amplifier BCLK / LRC / DIN / SD | 9 / 8 / 7 / 10 | only when the C5 sounds locally (standalone); off in a fleet |
+| Link UART RX ← bridge TX | 8 | C5-Zero header pin (GPIO 15 is not broken out) |
+| Amplifier / status LED | — | none on a detector: the C6 master plays the sound |
 | forbidden | 0-5, 25, 27 (IQ) · 13,14 (USB) · 16-22 (flash) · 26 (antenna) | receiver-owned |
 
 **ESP32-C3** (`firmware/node`, node bridge)
