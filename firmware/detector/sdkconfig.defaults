@@ -13,10 +13,11 @@ CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 CONFIG_FREERTOS_HZ=1000
 CONFIG_LOG_DEFAULT_LEVEL_WARN=y
 # Wi-Fi is only the RF front end (no traffic): its IRAM placement buys
-# nothing, and that SRAM is the menu's DMA descriptor heap. The promiscuous
-# filter is zero, so no frame is ever delivered: the minimum two static RX
-# buffers (1.6 KiB each), two management buffers and no A-MPDU sessions
-# return heap to the menu (2026-10-18: menu ESP_ERR_NO_MEM at 7 KiB free).
+# nothing, and that SRAM goes back to the heap. The promiscuous filter is
+# zero, so no frame is ever delivered: the minimum two static RX buffers
+# (1.6 KiB each), two management buffers and no A-MPDU sessions return heap
+# too. (Upstream tuned this for its menu's DMA descriptor heap, 2026-10-18;
+# the menu is pruned here but the RF front-end settings are kept as they are.)
 CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=2
 CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=8
 CONFIG_ESP_WIFI_RX_MGMT_BUF_NUM_DEF=2
@@ -43,15 +44,17 @@ CONFIG_RMT_RX_ISR_HANDLER_IN_IRAM=n
 # can select sdkconfig.psram.defaults on top of these defaults (README).
 CONFIG_SPIRAM=n
 
-# FPV 5.8 Checkpoint: sound only, no picture. The transport still runs with
-# its exact timing; the DAC pins are routed to nothing and free for the
-# amplifier (docs/CHECKPOINT.md). Delete sdkconfig after changing this.
+# FPV 5.8 Checkpoint: no picture. The transport still runs with its exact
+# timing; the DAC pins are routed to nothing (docs/no-video-audio.md). The
+# detector has no other local output either: no amplifier (the C6 master plays
+# the sound) and no status LED (the C5-Zero's WS2812 is on GPIO27, a receiver
+# IQ-loopback pin, RF_IQ_GPIO_NUMS in components/c5vrx_rx/rf.h; the chip has
+# no GPIO29 either, the Waveshare pinout's "GP29" is wrong). Passes go out over
+# the UART link. Delete sdkconfig after changing this.
 CONFIG_C5VRX_VIDEO_OUTPUT=n
 
-# Status LED: DISABLED on the detector. The C5-Zero's onboard WS2812 is wired to
-# GPIO27, which is one of the receiver's IQ-loopback pins (RF_IQ_GPIO_NUMS in
-# components/c5vrx_rx/rf.h) and is reserved for the C/N chain -- the receive
-# chain comes first, so the onboard LED cannot be driven here. (The chip has no
-# GPIO29 either; the Waveshare pinout's "GP29" is wrong.) The status LED lives
-# on the node (C3-Zero, GPIO10) and master (C6-Zero, GPIO8) instead.
+# The shared components dir (../../components) builds every component, also
+# status_led and audio_player that nothing here calls. Keep them off anyway, so
+# a stray call could never drive GPIO27 or an amplifier on a detector.
 CONFIG_STATUS_LED_ENABLE=n
+CONFIG_AUDIO_PLAYER_ENABLE=n

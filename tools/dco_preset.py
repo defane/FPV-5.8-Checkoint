@@ -2,8 +2,8 @@
 # C5VRX-5 by Twotoz and the C5VRX contributors: build main/dco_preset.h, the
 # filter and DC base map in the firmware, from measured boards.
 #
-# On each board, VTX off, run menu CALIBRATE / console F, then console C (or
-# the web "Download calibration report") and save the log. Then:
+# On each board, VTX off, run console F (upstream: also menu CALIBRATE), then
+# console C (or the web "Download calibration report") and save the log. Then:
 #
 #   python3 tools/dco_preset.py board1.log [board2.log ...] > main/dco_preset.h
 #   python3 tools/dco_preset.py --check main/dco_preset.h LOG [LOG ...]

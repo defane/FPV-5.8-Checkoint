@@ -1,20 +1,26 @@
-# C5VRX receive engine, consumable as a component. This is upstream C5VRX
-# (https://github.com/Twotoz/C5VRX) re-packaged unchanged: the MODEM_DIAG ->
-# BitScrambler -> PARLIO -> AGC chain, its control/calibration/diagnostics and
-# the serial console. The firmware application (firmware/detector) links this plus
-# the checkpoint component on top; nothing here is modified to add a feature.
+# C5VRX receive engine, consumable as a component: upstream C5VRX
+# (https://github.com/Twotoz/C5VRX, commit 6bc9e4b) pruned for the video-off
+# FPV 5.8 Checkpoint detector. The MODEM_DIAG -> BitScrambler -> PARLIO -> AGC
+# chain (rf, transport, receiver, gain, agc, *.bsasm) and its control/
+# calibration/diagnostics are upstream as-is, except transport.c's 7-line
+# CONFIG_C5VRX_VIDEO_OUTPUT=n pin routing; console.c carries the checkpoint
+# hooks and a reduced key table (AGENTS.md lists every change). Dropped: the
+# video menu/OSD/splash (menu.c, menu_ui.c, menu_raster.c), the field
+# experiments (experimental*.c), the flight log (flightlog.c) and the bench labs
+# (sense_lab.c, calibration_bench.c); menu_stub.c and pruned_stubs.c stand in
+# for the symbols the kept code still calls, with today's video-off behaviour.
+# This is no longer a full C5VRX: no on-screen menu, OSD or boot logo (with
+# CONFIG_C5VRX_VIDEO_OUTPUT=y the live video still reaches the DAC pins).
 #
 # checkpoint_weak.c provides weak no-op fallbacks for the checkpoint extension
-# seam (checkpoint.h) that console.c and the boot path call, so this component
-# builds and runs standalone as plain C5VRX. The checkpoint component supplies
-# the strong definitions that override them when linked.
+# seam (checkpoint.h) that console.c and the boot path call; the checkpoint
+# component supplies the strong definitions that override them when linked.
 idf_component_register(
     SRCS
         "rf.c" "phy.c" "arc_phy.c" "transport.c" "gain.c" "agc.c" "receiver.c"
         "control.c" "calibration.c" "calibration_sphase.c" "calibration_filter.c" "calibration_dc.c"
-        "calibration_bench.c" "menu.c" "menu_ui.c" "menu_raster.c" "analog_video_detect.c"
-        "experimental.c" "experimental_phy.c" "settings.c" "console.c" "profile.c" "diag.c" "flightlog.c" "sense_lab.c"
-        "checkpoint_weak.c"
+        "analog_video_detect.c" "settings.c" "console.c" "profile.c" "diag.c"
+        "menu_stub.c" "pruned_stubs.c" "checkpoint_weak.c"
     INCLUDE_DIRS "."
     REQUIRES esp_wifi esp_phy nvs_flash esp_event esp_netif esp_driver_parlio
              esp_driver_gpio esp_driver_bitscrambler esp_driver_usb_serial_jtag

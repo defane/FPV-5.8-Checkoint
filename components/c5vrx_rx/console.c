@@ -2,7 +2,6 @@
  * Polled, never paces the realtime path. */
 #include "receiver.h"
 #include "checkpoint.h"
-#include "sense_lab.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include "esp_app_desc.h"
@@ -47,9 +46,8 @@ static void status(void)
            gm == GAIN_MODE_AUTO ? "keel1" : gm == GAIN_MODE_LEVEL ? "level" : gm == GAIN_MODE_RSSI ? "rssi" : "manual",
            esp_timer_get_time() / 1000000, (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
            (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
-           /* Lowest free since boot: the boot peak (splash chain plus the
-            * receiver tasks) leaves ~21.9 KB with the PSRAM overlay (~2 KB
-            * without), which a reading now cannot show. */
+           /* Lowest free since boot: the boot peak (the receiver tasks
+            * starting), which a reading now cannot show. */
            (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL),
            (unsigned)heap_caps_get_free_size(MALLOC_CAP_DMA), (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA),
            (unsigned)heap_caps_get_free_size(MALLOC_CAP_RTCRAM),
@@ -99,20 +97,10 @@ static void snapshot(void)
 static void help(void)
 {
     printf("C5VRX-5 keys: T status, C calibration data dump (read only), D range/health report, M gain map (for a preset), R per-second FIELD_DIAG lines on/off,\n"
-           "  g OUTPUT 0.5x..5.0x in 0.5x steps (saved after application; restored at boot),\n"
            "  G RX gain LEVEL -> KEEL (KEEL-1) -> RSSI -> MAX -> fixed G78..G24 (models kept across reboots; MAX/fixed: next boot LEVEL),\n"
-           "  A live VTX profile switch on/off (continuous matching every 30 s; off = report only),\n"
-           "  m decoder U80P64-R1 <-> U85Q (verified restart, saved; video stops briefly),\n"
-           "  I IQ snapshot, o menu open/close, n/x menu next/select, c next channel, b next band, s scan,\n"
-           "  v video standard AUTO/NTSC/PAL, f analog filter AUTO/NARROW/NORMAL/WIDE (this boot; calibrated classes),\n"
-           "  e close menu (web menu direct controls),\n"
-           "  F calibrate current filter; B full RF optimization (ground only; video stops), L bench IQ lane comparison (video stops ~3 s),\n"
-           "  N bench: noise floor with the video output on vs off (VTX off; video stops ~0.3 s x4),\n"
-           "  Z DAC self-test (bench: test pattern, then one flat level per pin for a multimeter),\n"
-           "  ! one bench RX sampling-phase slip (T shows phase status),\n"
-           "  S + suite key: bench PHY sensitivity lab with the VTX ON (docs/PHY_SENSITIVITY_LAB.md),\n"
-           "  P checkpoint coin at this channel's pitch, p checkpoint sound off/on, K + key checkpoint detector settings,\n"
-           "  ` reboot to USB download (flashing)\n");
+           "  I IQ snapshot, c next channel, b next band, f analog filter AUTO/NARROW/NORMAL/WIDE (saved; calibrated classes),\n"
+           "  F calibrate current filter; B full RF optimization (ground only),\n"
+           "  K + key checkpoint detector settings, ` reboot to USB download (flashing)\n");
 }
 
 /* The USB reader runs above every receiver task: the download key and the
@@ -133,7 +121,7 @@ static void usb_reader_task(void *arg)
         }
         /* Heartbeat: shows the board is alive whatever the console does. */
         static int64_t beat;
-        if (esp_timer_get_time() - beat > 5000000 && !flightlog_dumping()) {
+        if (esp_timer_get_time() - beat > 5000000) {
             beat = esp_timer_get_time();
             printf("HB t_s=%lld stage=%s gain=%u menu=%u startup=%u busy=%u\n", beat / 1000000, s_boot_stage,
                    s_current_gain, s_menu_active, calibration_in_startup(), menu_status_active());
@@ -147,7 +135,6 @@ static void console_task(void *arg)
     (void)arg;
     for (;;) {
         uint8_t c;
-        static int64_t sense_until;   /* S waits 5 s for the suite key */
         static int64_t checkpoint_until;   /* K: 5 s per settings key, q closes */
         while (xQueueReceive(s_keys, &c, pdMS_TO_TICKS(100)) == pdTRUE) {
             if (checkpoint_until && esp_timer_get_time() < checkpoint_until) {
@@ -155,18 +142,8 @@ static void console_task(void *arg)
                 if (checkpoint_key((char)c)) { checkpoint_until = esp_timer_get_time() + 5000000; continue; }
             }
             checkpoint_until = 0;
-            if (sense_until && esp_timer_get_time() < sense_until && sense_lab_suite_valid((char)c)) {
-                sense_until = 0;
-                sense_lab_request((char)c);
-                printf("SENSLAB queued suite=%c (runs in the calibration task; keep the VTX and antennas still)\n", c);
-                continue;
-            }
-            sense_until = 0;
             switch (c) {
-            case 'S': sense_lab_help(); sense_until = esp_timer_get_time() + 5000000; break;
             case 'K': checkpoint_help(); checkpoint_until = esp_timer_get_time() + 5000000; break;
-            case 'P': checkpoint_play_test(); break;
-            case 'p': checkpoint_toggle_mute(); break;
             case 'T': status(); break;
             case 'I': snapshot(); break;
             case 'F': filter_request(); break;
@@ -175,12 +152,10 @@ static void console_task(void *arg)
             case 'D': diag_report(); break;
             case 'M': receiver_print_map(); break;
             case 'R': diag_toggle_stream(); break;
-            case 'L': lane_compare_request(); break;
-            case 'N': self_noise_request(); break;
-            case '!': rx_clock_slip(1); printf("SLIP bench: one RX sampling-phase slip (T SPHASE shows the new excess)\n"); break;
-            case 'Y': case 'W': case 'X': flightlog_console((char)c); break;
             case 'h': case '?': help(); break;
-            case 'o': case 'e': case 'v': case 'f': case 'n': case 'x': case 'c': case 'b': case 's': case 'g': case 'A': case 'U': case 'G': case 'Q': case 'Z': case 'm': {
+            /* Control-task commands (control.c command()); the menu, video
+             * standard, OUTPUT, decoder and scan keys went with the picture. */
+            case 'f': case 'c': case 'b': case 'G': {
                 int command = c;
                 if (s_commands) (void)xQueueSend(s_commands, &command, 0);
                 break;

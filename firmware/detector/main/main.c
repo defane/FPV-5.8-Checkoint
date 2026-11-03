@@ -18,10 +18,11 @@ void firmware_boot_timing(int64_t *radio_ms, int64_t *ready_ms)
     *radio_ms = s_boot_radio_ms; *ready_ms = s_boot_ready_ms;
 }
 
-/* The boot logo while the receiver tasks start and Direct Gain makes its
- * first decision (a hold, also without a carrier). The bar fills evenly
- * over SPLASH_MIN_MS; the logo stays longer, up to SPLASH_MAX_MS, only
- * while the gain has not held yet, so live video starts on a found gain. */
+/* The splash window while the receiver tasks start and Direct Gain makes
+ * its first decision (a hold, also without a carrier). Nothing is drawn
+ * (menu_stub.c): it owns TX so BOOT_PHASE can align the sampling phase,
+ * for at least SPLASH_MIN_MS and up to SPLASH_MAX_MS while the gain has not
+ * held yet, so the detector (checkpoint_start) starts on a found gain. */
 #define SPLASH_MIN_MS 3000
 #define SPLASH_MAX_MS 4000
 
@@ -62,8 +63,6 @@ void app_main(void)
     printf("BOOT_TIMING radio_ms=%lld\n", s_boot_radio_ms);
     s_boot_stage = "settings";
     settings_load();
-    s_boot_stage = "flightlog";
-    flightlog_start();
     /* Start at the first index of the highest RF stage; Direct Gain takes
      * over at once (table maximum without a carrier). */
     receiver_set_gain(arc_gain_highest_rf_stage_start(rf_gain_table()));

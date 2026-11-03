@@ -54,8 +54,9 @@ waiting for a boot or comparing the image.
 The check also reads the heap from T and warns when the largest free block
 is below --heap-warn (8192 bytes) or, on firmware that prints heap_min, when
 the lowest free heap since boot is below --heap-min-warn (1024 bytes). The
-boot peak (menu splash chain plus the receiver tasks) leaves about 2 KB on
-a working build, which a reading after the boot cannot show.
+boot peak is the receiver tasks starting, which a reading after the boot
+cannot show. (Upstream's menu splash chain left about 2 KB there; the
+checkpoint fork has no such chain, so expect far more: re-measure on a board.)
 
 Before flashing, every value set in sdkconfig.defaults is compared with the
 build's configuration. ESP-IDF never reapplies the defaults to an existing

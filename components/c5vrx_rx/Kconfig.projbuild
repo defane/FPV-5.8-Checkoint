@@ -5,9 +5,10 @@ menu "C5VRX receiver"
         default y
         help
             Off: the transport (PARLIO TX, BitScrambler) runs unchanged, at the
-            same timing, but its bits reach no pin. No picture, no menu on
-            screen, no DAC test; the IQ capture (MODEM_DIAG -> PARLIO RX) and
-            everything measured from it (C/N, gain, FIELD_DIAG) are unaffected.
-            The six DAC pins become free (checkpoint audio).
+            same timing, but its bits reach no pin: no picture. The IQ capture
+            (MODEM_DIAG -> PARLIO RX) and everything measured from it (C/N,
+            gain, FIELD_DIAG) are unaffected. The six DAC pins become free (the
+            detector's UART link uses GPIO 8). This fork has no on-screen menu,
+            OSD or boot logo either way (menu_stub.c).
 
 endmenu

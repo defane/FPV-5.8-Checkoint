@@ -41,7 +41,7 @@ resolve() {
             DIR=firmware/detector; CHIP=esp32c5; BIN=detector-c5.bin
             SDKCFG=sdkconfig.xiao-c5; BUILDDIR=build-xiao-c5
             DEFAULTS="sdkconfig.defaults;sdkconfig.psram.defaults;sdkconfig.xiao-c5.defaults"
-            LABEL="RF detector  -- XIAO ESP32-C5HR8, 8 MB + PSRAM, flight log on" ;;
+            LABEL="RF detector  -- XIAO ESP32-C5HR8, 8 MB + PSRAM" ;;
         detector-wave-c5-lcd)
             DIR=firmware/detector; CHIP=esp32c5; BIN=detector-c5.bin
             SDKCFG=sdkconfig.wave-c5-lcd; BUILDDIR=build-wave-c5-lcd
