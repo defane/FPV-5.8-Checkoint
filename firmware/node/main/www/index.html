@@ -19,11 +19,16 @@
   .stat span { color: #8b97a7; font-size: .8rem; }
   button { margin-top: 12px; background: #2f6feb; color: #fff; border: 0; border-radius: 8px; padding: 10px 16px; font-size: .95rem; cursor: pointer; }
   button:active { background: #255ac2; }
+  button:disabled { opacity: .45; cursor: default; }
+  button.danger { background: #b42318; }
+  button.danger:active { background: #8f1c13; }
   #events { list-style: none; padding: 0; margin: 0; font-variant-numeric: tabular-nums; }
   #events li { padding: 6px 0; border-top: 1px solid #2a313a; font-size: .9rem; }
   .muted { color: #8b97a7; }
   .pill { font-size: .8rem; padding: 2px 8px; border-radius: 999px; background: #2a313a; }
-  .pill.admin { background: #14532d; color: #86efac; }
+  .pill.admin, .pill.ok { background: #14532d; color: #86efac; }
+  .pill.warn { background: #713f12; color: #fde68a; }
+  .pill.busy { background: #1e3a8a; color: #93c5fd; }
   .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   input[type=text], input[type=password] { background: #0f1216; color: #e7ebf0; border: 1px solid #2a313a; border-radius: 6px; padding: 6px; }
   .admin-only { display: none; }
@@ -48,7 +53,26 @@
     <div class="stat"><b id="s_ch">—</b><span>channel</span></div>
     <div class="stat"><b id="s_state">—</b><span>state</span></div>
     <div class="stat"><b id="s_passes">—</b><span>passes</span></div>
-    <div class="stat"><b id="s_played">—</b><span>played</span></div>
+  </div>
+
+  <h2>C5 health</h2>
+  <div class="card">
+    <div class="bar"><span class="muted">Calibration</span><span id="h_cal" class="pill">—</span></div>
+    <div class="row" style="margin-top:10px">
+      <div class="stat"><b id="h_gain">—</b><span>gain</span></div>
+      <div class="stat"><b id="h_up">—</b><span>C5 uptime</span></div>
+      <div class="stat"><b id="h_heap">—</b><span>min free heap</span></div>
+      <div class="stat"><b id="h_faults">—</b><span>transport faults</span></div>
+    </div>
+    <div class="muted" style="margin-top:10px;font-size:.85rem;word-break:break-all">firmware <span id="h_fw" style="color:#e7ebf0">—</span></div>
+    <div class="admin-only">
+      <div class="bar">
+        <button data-cmd="cal_full">Full calibration (B)</button>
+        <button data-cmd="cal_quick">Quick calibration (F)</button>
+        <button data-cmd="reboot" class="danger">Reboot C5</button>
+      </div>
+      <span id="cmd_msg" class="muted"></span>
+    </div>
   </div>
 
   <div class="admin-only">
@@ -61,8 +85,6 @@
     <label>Minimum peak (dB) <input id="minpeak" type="number" step="0.5"></label>
     <label>Refractory (ms) <input id="refr" type="number" step="250" min="0"></label>
     <label>Stale (ms) <input id="stale" type="number" step="250" min="1"></label>
-    <label>Volume (%) <input id="vol" type="number" step="5" min="0" max="100"></label>
-    <label>Muted <input id="muted" type="checkbox"></label>
     <label>Band / RF channel index <input id="chan" type="number" min="0" max="47" placeholder="unchanged"></label>
     <button id="save">Apply &amp; save</button>
     <span id="msg" class="muted"></span>
@@ -77,7 +99,7 @@ const $ = id => document.getElementById(id);
 const CH = n => "R" + (n + 1);
 const STATES = ["IDLE", "RISING", "PEAK_PASSED", "COOLDOWN"];
 let dirty = false, auth = null, admin = false;
-["alpha","active","hyst","drop","minpeak","refr","stale","vol","muted"].forEach(
+["alpha","active","hyst","drop","minpeak","refr","stale"].forEach(
   id => $(id).addEventListener("input", () => { dirty = true; }));
 
 $("login_btn").addEventListener("click", () => {
@@ -102,25 +124,46 @@ function fillConfig(c) {
   $("minpeak").value= (c.min_peak_db_x10 / 10).toFixed(1);
   $("refr").value   = c.refractory_ms;
   $("stale").value  = c.stale_ms;
-  $("vol").value    = c.volume_pct;
-  $("muted").checked= !!c.muted;
+}
+
+function demote() {                  // the server forgot (or never had) our login
+  admin = false; document.body.classList.remove("is-admin");
+  $("role").textContent = "spectator"; $("role").className = "pill";
+}
+
+const upTime = s => s >= 3600 ? `${Math.floor(s / 3600)}h ${String(Math.floor(s / 60) % 60).padStart(2, "0")}m`
+                  : s >= 60 ? `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s` : `${s}s`;
+
+function fillHealth(s) {
+  const st = s.stats || {}, ok = s.has_stats;
+  const cal = !ok ? ["—", "pill"] : st.calibrating ? ["calibrating", "pill busy"]
+            : st.cal_needed ? ["calibration needed", "pill warn"] : ["OK", "pill ok"];
+  $("h_cal").textContent = cal[0]; $("h_cal").className = cal[1];
+  $("h_gain").textContent = ok ? st.gain : "—";
+  $("h_up").textContent = ok ? upTime(st.uptime_s) : "—";
+  $("h_heap").textContent = ok ? (st.heap_min / 1024).toFixed(1) + " KB" : "—";
+  $("h_faults").textContent = ok ? st.faults : "—";
+  $("h_fw").textContent = ok && st.fw ? st.fw : "—";
+  document.querySelectorAll('button[data-cmd^="cal_"]').forEach(b => { b.disabled = ok && st.calibrating; });
 }
 
 async function poll() {
   try {
     const s = await (await fetch("/api/state")).json();
-    $("link").textContent = s.has_stats ? "linked" : "no C5 yet";
+    // c5_alive: a C5 frame within 3 s; has_stats alone stays true after it goes silent
+    const lk = s.c5_alive ? ["linked", "pill ok"] : s.has_stats ? ["C5 silent", "pill warn"] : ["no C5 yet", "pill"];
+    $("link").textContent = lk[0]; $("link").className = lk[1];
     if (s.has_config) fillConfig(s.config);
     const st = s.stats || {};
     $("s_cn").textContent = (s.has_stats && st.cn_x10 > -990) ? (st.cn_x10 / 10).toFixed(1) : "—";
     $("s_ch").textContent = s.has_stats ? CH(st.channel) : "—";
     $("s_state").textContent = s.has_stats ? (STATES[st.state] || st.state) : "—";
     $("s_passes").textContent = s.total_events;
-    $("s_played").textContent = s.has_stats ? st.played : "—";
+    fillHealth(s);
     $("events").innerHTML = (s.events || []).map(e =>
       `<li>${CH(e.channel)} &middot; peak ${(e.peak_db_x10/10).toFixed(1)} dB &middot; <span class="muted">${e.at_ms} ms</span></li>`
     ).join("") || '<li class="muted">none yet</li>';
-  } catch (e) { $("link").textContent = "offline"; }
+  } catch (e) { $("link").textContent = "offline"; $("link").className = "pill"; }
 }
 
 $("save").addEventListener("click", async () => {
@@ -132,8 +175,6 @@ $("save").addEventListener("click", async () => {
     min_peak_db_x10: Math.round(parseFloat($("minpeak").value) * 10),
     refractory_ms: parseInt($("refr").value, 10),
     stale_ms: parseInt($("stale").value, 10),
-    volume_pct: parseInt($("vol").value, 10),
-    muted: $("muted").checked ? 1 : 0,
     channel: $("chan").value === "" ? -1 : parseInt($("chan").value, 10),
   };
   $("msg").textContent = "saving…";
@@ -141,17 +182,45 @@ $("save").addEventListener("click", async () => {
     const h = { "Content-Type": "application/json" };
     if (auth) h["Authorization"] = auth;
     const r = await fetch("/api/config", { method: "POST", headers: h, body: JSON.stringify(body) });
-    if (r.status === 401) {
-      admin = false; document.body.classList.remove("is-admin");
-      $("role").textContent = "spectator"; $("role").className = "pill";
-      $("msg").textContent = "login required";
-      return;
-    }
+    if (r.status === 401) { demote(); $("msg").textContent = "login required"; return; }
     dirty = false;
     $("msg").textContent = "saved";
     setTimeout(() => $("msg").textContent = "", 1500);
   } catch (e) { $("msg").textContent = "failed"; }
 });
+
+// Calibrate / reboot the C5 (nobody opens its USB console in production). A
+// calibration blinds the gate and wants every VTX off; the C3 refuses it while
+// the gate sees a strong carrier unless we force it, and refuses any command
+// while no C5 is linked ({ok:false, msg}).
+async function sendCommand(cmd, force) {
+  const h = { "Content-Type": "application/json" };
+  if (auth) h["Authorization"] = auth;
+  const r = await fetch("/api/command", { method: "POST", headers: h, body: JSON.stringify({ cmd, force }) });
+  if (r.status === 401) { demote(); return { ok: false, msg: "login required" }; }
+  return r.ok ? r.json() : { ok: false, msg: "failed (" + r.status + ")" };
+}
+
+const CMD_DONE = { cal_full: "full calibration started", cal_quick: "quick calibration started",
+                   reboot: "C5 rebooting" };
+document.querySelectorAll("button[data-cmd]").forEach(b => b.addEventListener("click", async () => {
+  const cmd = b.dataset.cmd;
+  if (!confirm(cmd === "reboot" ? "Reboot the C5? The gate stops detecting until it is back up."
+      : "All VTXs must be OFF. The gate stops detecting while it calibrates (minutes for a full one). Continue?"))
+    return;
+  $("cmd_msg").textContent = "sending…";
+  try {
+    let r = await sendCommand(cmd, 0);
+    if (r.vtx) {
+      if (!confirm(`The gate sees a strong signal (C/N ${(r.cn_x10 / 10).toFixed(1)} dB): a VTX may be on. Force the calibration?`)) {
+        $("cmd_msg").textContent = "cancelled"; return;
+      }
+      r = await sendCommand(cmd, 1);
+    }
+    $("cmd_msg").textContent = r.ok ? CMD_DONE[cmd] : (r.msg || "failed");
+    if (r.ok) setTimeout(() => $("cmd_msg").textContent = "", 4000);
+  } catch (e) { $("cmd_msg").textContent = "failed"; }
+}));
 
 poll();
 setInterval(poll, 1000);

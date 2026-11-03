@@ -1,7 +1,8 @@
 /* C3 fleet uplink: ESP-NOW to the C6 master. Pairs, applies the C6's CONFIG
- * (detector + channel retune) to the local C5, relays the C5's passes as
- * fleet-timed GATE_PASS and periodic NODE_STATUS, and tracks fleet time from
- * the master's beacons. Wi-Fi (STA) and espnow must be up before use. */
+ * (detector + channel retune) and COMMAND (calibrate, reboot) to the local C5,
+ * relays the C5's passes as fleet-timed GATE_PASS and its stats + health as
+ * periodic NODE_STATUS, and tracks fleet time from the master's beacons.
+ * Wi-Fi (STA) and espnow must be up before use. */
 #pragma once
 #include "esp_err.h"
 #include "link_proto.h"

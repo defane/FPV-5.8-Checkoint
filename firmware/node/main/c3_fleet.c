@@ -24,6 +24,7 @@ static volatile bool s_master_seen;
 static volatile uint32_t s_master_last_ms;  /* last ESP-NOW message from the master */
 static volatile bool s_degraded;            /* fell back to local AP + web */
 static uint32_t  s_pass_seq;
+static uint32_t  s_status_seq;
 
 static uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
 static uint32_t fleet_ms(void) { return (uint32_t)((int64_t)now_ms() + s_offset_ms); }
@@ -63,7 +64,8 @@ static void apply_config(const fp_config_t *c) {
     c3_link_set_channel(c->channel);    /* retune the C5 to the assigned channel */
 }
 
-static void on_msg(const uint8_t mac[6], const fp_msg_t *msg) {
+static void on_msg(const uint8_t mac[6], const fp_msg_t *msg, int8_t rssi) {
+    (void)rssi;                    /* the node shows no RSSI; the master tracks it */
     s_master_last_ms = now_ms();   /* any fleet message = the master is alive */
     switch (msg->type) {
     case FP_MSG_TIME_BEACON:
@@ -87,6 +89,16 @@ static void on_msg(const uint8_t mac[6], const fp_msg_t *msg) {
         apply_config(&msg->config);
         if (s_paired) save_nvs();
         s_master_seen = true;
+        break;
+    /* Calibrate/reboot: only from our master. Not keyed on gate_index: the
+     * master addresses us by MAC, and our saved gate can lag its record (a
+     * CONFIG sent while we were off is lost), which would drop it silently. */
+    case FP_MSG_COMMAND:
+        if (s_paired && memcmp(mac, s_c6, 6) == 0) {
+            ESP_LOGI(TAG, "master command %u (1=cal_full 2=cal_quick 3=reboot) -> C5",
+                     msg->command.cmd);
+            c3_link_send_command((lp_cmd_t)msg->command.cmd);
+        }
         break;
     default:
         break;
@@ -151,9 +163,12 @@ void c3_fleet_report_pass(const lp_event_t *e) {
 
 void c3_fleet_report_stats(const lp_stats_t *s) {
     if (!s_paired) return;
-    const fp_node_status_t ns = { .gate_index = s_gate, .channel = s_channel,
-                                  .cn_x10 = s->cn_x10, .state = s->state,
-                                  .passes = s->played, .flags = 0 };
+    fp_node_status_t ns = { .gate_index = s_gate, .channel = s_channel,
+                            .cn_x10 = s->cn_x10, .state = s->state,
+                            .passes = s->passes, .flags = s->flags, .seq = s_status_seq++,
+                            .gain = s->gain, .uptime_s = s->uptime_s,
+                            .heap_min = s->heap_min, .faults = s->faults };
+    strlcpy(ns.fw, s->fw, sizeof ns.fw);
     uint8_t buf[FP_MAX_FRAME];
     size_t n = fp_encode_node_status(buf, sizeof buf, &ns);
     if (n) espnow_link_send(s_c6, buf, n);

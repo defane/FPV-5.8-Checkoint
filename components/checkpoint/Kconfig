@@ -5,8 +5,9 @@ menu "Checkpoint C5<->C3 link"
         default y
         help
             Report pass events and stats to, and accept detector configuration
-            from, a second ESP (ESP32-C3) over UART. With it off, checkpoint
-            runs sound-only and the console is the only way to tune it.
+            from, the bridge (a C3 node or the C6 master) over UART. With it
+            off, passes appear only as PASS lines on the console, which is then
+            the only way to tune the detector (it has no local output).
 
     config CHECKPOINT_LINK_UART_NUM
         int "UART controller number"
@@ -22,12 +23,8 @@ menu "Checkpoint C5<->C3 link"
         default 6
         help
             GPIO 6 (TX) and 8 (RX) are receiver-free header pins on the
-            C5-Zero (GPIO 15 is not broken out). GPIO 8 is a video-DAC/amp
-            pin, free when video is off and the gate plays no local sound
-            (a fleet gate); it clashes with the amplifier LRC only in the
-            standalone sound mode -- there, set the RX to GPIO 11 instead
-            (the only free header RX with the amp on 7/8/9/10). See the GPIO
-            map in CLAUDE.md.
+            C5-Zero (GPIO 15 is not broken out). GPIO 8 is a video-DAC pin,
+            free with video off. See the GPIO map in CLAUDE.md.
 
     config CHECKPOINT_LINK_RX_GPIO
         int "Link UART RX GPIO (from the C3 TX)"

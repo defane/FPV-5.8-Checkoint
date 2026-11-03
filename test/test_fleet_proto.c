@@ -5,6 +5,7 @@
  */
 #include "fleet_proto.h"
 #include <stdio.h>
+#include <string.h>
 
 static int g_pass, g_fail;
 #define CHECK(cond, name)                                                     \
@@ -64,12 +65,34 @@ int main(void) {
     }
     {
         fp_node_status_t s = { .gate_index = 0, .channel = 36, .cn_x10 = LP_CN_UNKNOWN,
-                               .state = 2, .passes = 9, .flags = 1 };
+                               .state = 2, .passes = 9, .flags = LP_HEALTH_CAL_NEEDED,
+                               .seq = 0xDEADBEEF, .gain = 76, .uptime_s = 3600,
+                               .heap_min = 131072, .faults = 3, .fw = "5.0.12+abcdef123456" };
         size_t n = fp_encode_node_status(buf, sizeof buf, &s);
-        bool ok = n && fp_decode(buf, n, &m) && m.type == FP_MSG_NODE_STATUS &&
-                  m.node_status.cn_x10 == LP_CN_UNKNOWN && m.node_status.passes == 9 &&
-                  m.node_status.state == 2 && m.node_status.flags == 1;
-        CHECK(ok, "node_status roundtrip (negative cn)");
+        const fp_node_status_t *r = &m.node_status;
+        bool ok = n && n <= FP_MAX_FRAME && fp_decode(buf, n, &m) && m.type == FP_MSG_NODE_STATUS &&
+                  r->cn_x10 == LP_CN_UNKNOWN && r->passes == 9 && r->state == 2 &&
+                  r->flags == LP_HEALTH_CAL_NEEDED && r->seq == 0xDEADBEEF && r->gain == 76 &&
+                  r->uptime_s == 3600 && r->heap_min == 131072 && r->faults == 3 &&
+                  strcmp(r->fw, "5.0.12+abcdef123456") == 0;
+        CHECK(ok, "node_status roundtrip (negative cn, seq, C5 health, fw id)");
+
+        memset(s.fw, 'x', sizeof s.fw);
+        n = fp_encode_node_status(buf, sizeof buf, &s);
+        ok = n && fp_decode(buf, n, &m) && strlen(m.node_status.fw) == LP_FW_LEN - 1u;
+        CHECK(ok, "node_status fw id never unterminated");
+    }
+    {
+        fp_command_t c = { .gate_index = 3, .cmd = LP_CMD_CAL_FULL };
+        size_t n = fp_encode_command(buf, sizeof buf, &c);
+        bool ok = n && fp_decode(buf, n, &m) && m.type == FP_MSG_COMMAND &&
+                  m.command.gate_index == 3 && m.command.cmd == LP_CMD_CAL_FULL;
+        c.cmd = LP_CMD_REBOOT;
+        n = fp_encode_command(buf, sizeof buf, &c);
+        ok = ok && n && fp_decode(buf, n, &m) && m.command.cmd == LP_CMD_REBOOT;
+        CHECK(ok, "command roundtrip (cal_full, reboot)");
+        c.cmd = 0;
+        CHECK(fp_encode_command(buf, sizeof buf, &c) == 0, "encode_command refuses an unknown cmd");
     }
     {
         fp_heartbeat_t s = { .role = FP_ROLE_MASTER, .uptime_ms = 42 };

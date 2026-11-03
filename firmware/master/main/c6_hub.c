@@ -1,9 +1,11 @@
 #include "c6_hub.h"
+#include "c6_link.h"
 #include "c6_store.h"
 #include "audio_player.h"
 #include "espnow_link.h"
 #include "esp_log.h"
 #include "esp_system.h"
+#include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "fleet_proto.h"
 #include "freertos/FreeRTOS.h"
@@ -97,12 +99,10 @@ static void nodes_load(void) {
         if (nvs_get_blob(h, "nodes", rec, &len) == ESP_OK && len == count * sizeof(node_rec_t)) {
             s_num_nodes = count;
             for (unsigned i = 0; i < count; i++) {
+                /* Only the assignment persists: link counters and C5 health start zeroed. */
+                s_nodes[i] = (c6_node_t){ .node_id = rec[i].node_id, .gate_index = rec[i].gate_index,
+                                          .channel = rec[i].channel, .cn_x10 = LP_CN_UNKNOWN };
                 memcpy(s_nodes[i].mac, rec[i].mac, 6);
-                s_nodes[i].node_id = rec[i].node_id;
-                s_nodes[i].gate_index = rec[i].gate_index;
-                s_nodes[i].channel = rec[i].channel;
-                s_nodes[i].cn_x10 = LP_CN_UNKNOWN;
-                s_nodes[i].online = false;
             }
         }
     }
@@ -147,13 +147,11 @@ static void handle_pair(const uint8_t mac[6], const fp_pair_request_t *req) {
     if (!n) {
         if (!s_pairing || s_num_nodes >= C6_MAX_NODES) { xSemaphoreGive(s_lock); return; }
         n = &s_nodes[s_num_nodes];
+        /* Link counters and C5 health start zeroed; next free gate (gate 0 is the local C5). */
+        *n = (c6_node_t){ .node_id = s_num_nodes, .gate_index = num_gates(),
+                          .channel = req->seen_channel, .cn_x10 = LP_CN_UNKNOWN,
+                          .online = true, .last_seen_ms = now_ms() };
         memcpy(n->mac, mac, 6);
-        n->node_id = s_num_nodes;
-        n->gate_index = num_gates();                   /* next free gate (gate 0 is the local C5) */
-        n->channel = req->seen_channel;
-        n->cn_x10 = LP_CN_UNKNOWN;
-        n->online = true;
-        n->last_seen_ms = now_ms();
         s_num_nodes++;
         espnow_link_add_peer(mac);
         nodes_save();
@@ -177,7 +175,43 @@ static void record_pass(uint8_t gate, uint8_t channel, int32_t peak_db_x10, uint
     status_led_pass();   /* white flash on any gate's pass */
 }
 
-static void on_msg(const uint8_t mac[6], const fp_msg_t *msg) {
+/* Mark a known node live and fold in this frame's RSSI + receive count. Called
+ * under s_lock for every frame from a paired node, before any per-type work.
+ * True when it was offline (or not heard since our boot): it may have missed a
+ * reassignment or rebooted onto stale settings, so the caller re-sends its
+ * CONFIG once the lock is released. */
+static bool node_touch(c6_node_t *n, int8_t rssi) {
+    const bool back = !n->online;
+    n->last_seen_ms = now_ms();
+    n->online = true;
+    n->rssi = rssi;
+    n->rx_frames++;
+    return back;
+}
+
+/* NODE_STATUS carries a per-node monotonic seq; a gap is an inferred loss, and a
+ * seq going backwards means the node rebooted, so (re)sync the window. */
+static void status_track_loss(c6_node_t *n, uint32_t seq) {
+    if (!n->seq_init || seq < n->status_seq) {
+        n->seq_init = true; n->status_rx = 1; n->status_lost = 0;
+    } else {
+        n->status_rx++;
+        n->status_lost += (seq - n->status_seq) - 1u;
+    }
+    n->status_seq = seq;
+}
+
+/* The node's relayed C5 state and health (the decoder NUL-terminates fw). */
+static void node_take_status(c6_node_t *n, const fp_node_status_t *s) {
+    n->cn_x10 = s->cn_x10; n->state = s->state;
+    n->passes = s->passes; n->flags = s->flags; n->gain = s->gain;
+    n->c5_uptime_s = s->uptime_s; n->heap_min = s->heap_min; n->faults = s->faults;
+    memcpy(n->fw, s->fw, sizeof n->fw);
+}
+
+static void on_msg(const uint8_t mac[6], const fp_msg_t *msg, int8_t rssi) {
+    c6_node_t back = {0};      /* a node back online: its CONFIG goes out after the lock */
+    bool resync = false;
     switch (msg->type) {
     case FP_MSG_PAIR_REQUEST:
         handle_pair(mac, &msg->pair_request);
@@ -186,7 +220,7 @@ static void on_msg(const uint8_t mac[6], const fp_msg_t *msg) {
         xSemaphoreTake(s_lock, portMAX_DELAY);
         c6_node_t *n = find_by_mac(mac);
         uint8_t gate = n ? n->gate_index : msg->gate_pass.gate_index;
-        if (n) { n->last_seen_ms = now_ms(); n->online = true; }
+        if (n && node_touch(n, rssi)) { back = *n; resync = true; }
         xSemaphoreGive(s_lock);
         record_pass(gate, msg->gate_pass.channel, msg->gate_pass.peak_db_x10, msg->gate_pass.fleet_ms);
         break;
@@ -194,20 +228,26 @@ static void on_msg(const uint8_t mac[6], const fp_msg_t *msg) {
     case FP_MSG_NODE_STATUS: {
         xSemaphoreTake(s_lock, portMAX_DELAY);
         c6_node_t *n = find_by_mac(mac);
-        if (n) { n->cn_x10 = msg->node_status.cn_x10; n->state = msg->node_status.state;
-                 n->last_seen_ms = now_ms(); n->online = true; }
+        if (n) { node_take_status(n, &msg->node_status);
+                 if (node_touch(n, rssi)) { back = *n; resync = true; }
+                 status_track_loss(n, msg->node_status.seq); }
         xSemaphoreGive(s_lock);
         break;
     }
     case FP_MSG_HEARTBEAT: {
         xSemaphoreTake(s_lock, portMAX_DELAY);
         c6_node_t *n = find_by_mac(mac);
-        if (n) { n->last_seen_ms = now_ms(); n->online = true; }
+        if (n && node_touch(n, rssi)) { back = *n; resync = true; }
         xSemaphoreGive(s_lock);
         break;
     }
     default:
         break;
+    }
+    if (resync) {
+        ESP_LOGI(TAG, "node id=%u back online: re-sending gate=%u ch=%u", back.node_id,
+                 back.gate_index, back.channel);
+        send_config_to(&back);
     }
 }
 
@@ -309,6 +349,34 @@ void c6_hub_reset_race(void) {
     xSemaphoreGive(s_lock);
 }
 
+bool c6_hub_send_command(uint8_t gate_index, lp_cmd_t cmd) {
+    if (gate_index == 0u) {                    /* the master's own C5, over UART */
+        if (!c6_store_has_local()) return false;
+        c6_link_send_command(cmd);
+        return true;
+    }
+    /* Normally one node per gate; a gate the admin gave to two nodes reaches both. */
+    uint8_t macs[C6_MAX_NODES][6];
+    unsigned n = 0;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    for (unsigned i = 0; i < s_num_nodes; i++)
+        if (s_nodes[i].gate_index == gate_index && s_nodes[i].online) memcpy(macs[n++], s_nodes[i].mac, 6);
+    xSemaphoreGive(s_lock);
+    const fp_command_t c = { .gate_index = gate_index, .cmd = (uint8_t)cmd };
+    uint8_t buf[FP_MAX_FRAME];
+    const size_t m = fp_encode_command(buf, sizeof buf, &c);
+    bool sent = false;
+    for (unsigned i = 0; m && i < n; i++)
+        if (espnow_link_send(macs[i], buf, m) == ESP_OK) sent = true;
+    if (sent) ESP_LOGI(TAG, "command %d -> gate %u", (int)cmd, gate_index);
+    return sent;
+}
+
+/* Remote gates run the detector config the hub pushes (at pairing, on a save and
+ * each time a node comes back online), so its activity level is where a C/N says
+ * a VTX is on. Gate 0 uses its own C5's echoed active_db once known (c6_store). */
+int32_t c6_hub_vtx_threshold_x10(void) { return default_config().active_db_x10; }
+
 void c6_hub_snapshot(c6_fleet_t *out) {
     xSemaphoreTake(s_lock, portMAX_DELAY);
     out->pairing = s_pairing;
@@ -317,6 +385,7 @@ void c6_hub_snapshot(c6_fleet_t *out) {
     out->volume = (uint8_t)audio_player_volume();
     out->uptime_ms = now_ms();
     out->free_heap = esp_get_free_heap_size();
+    out->heap_total = heap_caps_get_total_size(MALLOC_CAP_INTERNAL);
     for (unsigned i = 0; i < s_num_nodes; i++) out->nodes[i] = s_nodes[i];
     out->num_standings = s_rt.num_channels;
     for (unsigned i = 0; i < s_rt.num_channels; i++) {

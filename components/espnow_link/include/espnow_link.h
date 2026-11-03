@@ -15,8 +15,9 @@
 extern "C" {
 #endif
 
-/* Called from a worker task for every valid received frame. mac is the sender. */
-typedef void (*espnow_rx_cb_t)(const uint8_t mac[6], const fp_msg_t *msg);
+/* Called from a worker task for every valid received frame. mac is the sender;
+ * rssi is the frame's ESP-NOW receive strength in dBm (0 if unavailable). */
+typedef void (*espnow_rx_cb_t)(const uint8_t mac[6], const fp_msg_t *msg, int8_t rssi);
 
 /* ifx = WIFI_IF_AP (C6) or WIFI_IF_STA (C3). channel must match the C6 AP. */
 esp_err_t espnow_link_start(wifi_interface_t ifx, uint8_t channel, espnow_rx_cb_t on_msg);

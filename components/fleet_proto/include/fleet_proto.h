@@ -22,7 +22,7 @@
 extern "C" {
 #endif
 
-#define FP_VERSION      1u
+#define FP_VERSION      2u   /* 2: NODE_STATUS seq + health, COMMAND */
 #define FP_MAX_PAYLOAD  64u
 #define FP_MAX_FRAME    (4u + FP_MAX_PAYLOAD)   /* VER+TYPE + payload + CRC16(2) */
 
@@ -32,8 +32,9 @@ typedef enum {
     FP_MSG_TIME_BEACON  = 3,  /* master -> all:   fleet time for offset estimation */
     FP_MSG_CONFIG       = 4,  /* master -> node:  gate/channel/enable + detector cfg */
     FP_MSG_GATE_PASS    = 5,  /* node  -> master: a pass at this gate (fleet-timed) */
-    FP_MSG_NODE_STATUS  = 6,  /* node  -> master: periodic C/N, state, counters */
+    FP_MSG_NODE_STATUS  = 6,  /* node  -> master: periodic C/N, state, counters, C5 health */
     FP_MSG_HEARTBEAT    = 7,  /* either:          keepalive */
+    FP_MSG_COMMAND      = 8,  /* master -> node:  forward an lp_cmd_t to the node's C5 */
 } fp_type_t;
 
 typedef enum { FP_ROLE_NODE = 1, FP_ROLE_MASTER = 2 } fp_role_t;
@@ -71,14 +72,27 @@ typedef struct {
     uint32_t seq;             /* per-node pass counter (dedup across retries) */
 } fp_gate_pass_t;
 
+/* The node's C5 STATS (link_proto lp_stats_t) relayed, plus the fleet's own
+ * gate/seq. */
 typedef struct {
     uint8_t  gate_index;
     uint8_t  channel;
     int32_t  cn_x10;          /* LP_CN_UNKNOWN when none */
     uint8_t  state;           /* pd_state_t */
-    uint32_t passes;
-    uint8_t  flags;
+    uint32_t passes;          /* passes the C5 detected since its boot */
+    uint8_t  flags;           /* LP_HEALTH_* of the C5 */
+    uint32_t seq;             /* per-node status counter; master infers loss from gaps */
+    uint8_t  gain;            /* C5 RX gain index */
+    uint32_t uptime_s;        /* C5 uptime */
+    uint32_t heap_min;        /* C5 lowest free internal heap since boot, bytes */
+    uint32_t faults;          /* C5 transport fault counters */
+    char     fw[LP_FW_LEN];   /* C5 firmware id; always NUL-terminated after a decode */
 } fp_node_status_t;
+
+typedef struct {
+    uint8_t  gate_index;      /* the gate it is meant for (a node ignores another's) */
+    uint8_t  cmd;             /* lp_cmd_t */
+} fp_command_t;
 
 typedef struct {
     uint8_t  role;            /* fp_role_t */
@@ -95,6 +109,7 @@ typedef struct {
         fp_gate_pass_t    gate_pass;
         fp_node_status_t  node_status;
         fp_heartbeat_t    heartbeat;
+        fp_command_t      command;
     };
 } fp_msg_t;
 
@@ -107,6 +122,7 @@ size_t fp_encode_config(uint8_t *buf, size_t cap, const fp_config_t *m);
 size_t fp_encode_gate_pass(uint8_t *buf, size_t cap, const fp_gate_pass_t *m);
 size_t fp_encode_node_status(uint8_t *buf, size_t cap, const fp_node_status_t *m);
 size_t fp_encode_heartbeat(uint8_t *buf, size_t cap, const fp_heartbeat_t *m);
+size_t fp_encode_command(uint8_t *buf, size_t cap, const fp_command_t *m);   /* 0 for an unknown cmd */
 
 /* Decode one received datagram. True and fills *out on a valid frame. */
 bool fp_decode(const uint8_t *buf, size_t n, fp_msg_t *out);

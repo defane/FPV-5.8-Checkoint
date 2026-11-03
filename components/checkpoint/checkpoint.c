@@ -1,41 +1,47 @@
-/* Checkpoint pass detection and coin sound (checkpoint.h).
+/* Checkpoint pass detection (checkpoint.h).
  *
  * A priority-1 task (under control/gain_obs at 3 and gain_fast at 4) reads
  * the C/N every 50 ms, feeds components/pass_detector with the tuned
  * channel's number in its band (R1..R8 -> 0..7) and, on a pass, prints a
- * PASS line and asks components/audio_player for the coin at that
- * channel's pitch. No sample while the receiver is not live (menu, scan,
- * calibration, paused) or the C/N is unknown (gain settling, no noise
- * reference, clipping): the detector then ages the channel out.
+ * PASS line and reports it over the UART link (checkpoint_link.c). No sample
+ * while the receiver is not live (splash, calibration, paused) or the C/N is
+ * unknown (gain settling, no noise reference, clipping): the detector then
+ * ages the channel out.
  *
- * Console (console.c): P plays the coin at the tuned channel's pitch, p
- * mutes/unmutes, K then one key per change tunes the detector and volume
- * (checkpoint_help). Settings are kept in NVS "checkpoint".
+ * The detector has no local output: no amplifier (the coin sound is played
+ * centrally by the C6 master) and no status LED (the C5's onboard WS2812 sits
+ * on a receiver IQ-loopback pin). Console (console.c): K then one key per
+ * change tunes the detector (checkpoint_help). Settings are kept in NVS
+ * "checkpoint".
  *
- * Checkpoint builds turn the video output off (CONFIG_C5VRX_VIDEO_OUTPUT=n,
- * sdkconfig.defaults): the six DAC pins are then free for the amplifier. */
+ * In production nobody opens this C5's USB console, so the bridge (a C3 node,
+ * or the C6 master for its own gate) gets the console's T as health in STATS
+ * and its B, F and a reset as link COMMANDs. Apart from those and SET_CHANNEL
+ * (a retune, saved in the engine's settings like a console retune) the
+ * checkpoint only reads the receiver. */
 #include "checkpoint.h"
 #include "receiver.h"
 #include <stdio.h>
 #include <stdlib.h>
-#include "audio_player.h"
 #include "checkpoint_link.h"
 #include "cn_estimate.h"
+#include "esp_heap_caps.h"
+#include "esp_system.h"
 #include "esp_timer.h"
 #include "pass_detector.h"
 #include "rf.h"
 #include "sdkconfig.h"
-#include "status_led.h"
 
 #define CHECKPOINT_TICK_MS   50u
 #define CHECKPOINT_PRIORITY  1u     /* below every receiver task */
 #define CHECKPOINT_STACK     3072u
-#define CHECKPOINT_LINK_ALIVE_MS 3000u  /* bridge counts as present within this */
 
-/* NVS "checkpoint"; a new layout gets a new version (old blobs ignored). */
+/* NVS "checkpoint"; a new layout gets a new version (old blobs ignored). The
+ * three bytes after the version held the volume and mute of the removed local
+ * sound: kept as padding, so saved detector settings still load. */
 #define PREFS_VERSION 1u
 typedef struct {
-    uint8_t version, volume, muted, reserved;
+    uint8_t version, reserved[3];
     pd_config_t det;
 } checkpoint_prefs_t;
 
@@ -50,73 +56,9 @@ typedef struct {
 } checkpoint_t;
 
 static checkpoint_t *s_cp;
-static bool s_audio_refused;
 static portMUX_TYPE s_wanted_lock = portMUX_INITIALIZER_UNLOCKED;
 
 static uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
-
-#if CONFIG_AUDIO_PLAYER_ENABLE
-#ifdef CONFIG_AUDIO_PLAYER_ALLOW_RESERVED_DAC_PINS
-#define RESERVED_DAC_PINS_ALLOWED 1
-#else
-#define RESERVED_DAC_PINS_ALLOWED 0
-#endif
-#if CONFIG_C5VRX_VIDEO_OUTPUT
-#define VIDEO_OUTPUT 1
-#else
-#define VIDEO_OUTPUT 0   /* the DAC pins are routed to nothing (transport.c) */
-#endif
-
-/* The receiver owns these pins (rf.h, transport.c, board); an amplifier on
- * one of them would corrupt the IQ or the video. */
-static const char *pin_owner(int gpio)
-{
-    static const int iq[8] = RF_IQ_GPIO_NUMS;
-    static const int dac[6] = {23, 24, 11, 12, 8, 9};   /* transport.c s_dac_gpio */
-    for (unsigned k = 0; k < 8u; ++k) if (iq[k] == gpio) return "IQ loopback";
-    if (VIDEO_OUTPUT) for (unsigned k = 0; k < 6u; ++k) if (dac[k] == gpio) return "video DAC";
-    if (VIDEO_OUTPUT && (gpio == 7 || gpio == 10) && !RESERVED_DAC_PINS_ALLOWED) return "reserved DAC branch";
-    if (gpio == 13 || gpio == 14) return "USB";
-    if (gpio >= 16 && gpio <= 22) return "flash";
-    if (gpio == 26) return "antenna switch";
-    if (gpio == 28) return "BOOT button";
-    return NULL;
-}
-
-static void audio_start(void)
-{
-    const audio_player_config_t cfg = {
-        .bclk_gpio = CONFIG_AUDIO_PLAYER_BCLK_GPIO, .ws_gpio = CONFIG_AUDIO_PLAYER_WS_GPIO,
-        .dout_gpio = CONFIG_AUDIO_PLAYER_DOUT_GPIO, .sd_gpio = CONFIG_AUDIO_PLAYER_SD_GPIO,
-        .task_priority = CHECKPOINT_PRIORITY,
-    };
-    const int pins[4] = {cfg.bclk_gpio, cfg.ws_gpio, cfg.dout_gpio, cfg.sd_gpio};
-    static const char *const names[4] = {"BCLK", "LRC", "DIN", "SD"};
-    for (unsigned k = 0; k < 4u; ++k) {
-        const char *owner = pin_owner(pins[k]);
-        if (!owner && k == 3u && pins[k] == 7) owner = "strapping pin (the amplifier pulls SD low at boot)";
-        for (unsigned j = 0; !owner && j < k; ++j) if (pins[j] >= 0 && pins[j] == pins[k]) owner = names[j];
-        if (owner) {
-            printf("CHECKPOINT audio=refused pin=%s gpio=%d owner=\"%s\" (menuconfig: Checkpoint audio)\n", names[k],
-                   pins[k], owner);
-            s_audio_refused = true;
-            return;
-        }
-    }
-    const esp_err_t err = audio_player_start(&cfg);
-    if (err != ESP_OK) {
-        printf("CHECKPOINT audio=failed %s\n", esp_err_to_name(err));
-        s_audio_refused = true;
-    }
-}
-#else
-static void audio_start(void) {}
-#endif
-
-static const char *audio_state(void)
-{
-    return audio_player_ready() ? (audio_player_muted() ? "muted" : "on") : s_audio_refused ? "refused" : "off_build";
-}
 
 static void on_pass(checkpoint_t *cp, const pd_event_t *e)
 {
@@ -125,13 +67,10 @@ static void on_pass(checkpoint_t *cp, const pd_event_t *e)
     cp->last = *e;
     cp->last_name = ch->name;
     cp->has_last = true;
-    const bool queued = audio_player_play(AUDIO_SOUND_COIN, audio_pitch_for_channel(e->channel));
-    printf("PASS channel=%s freq=%u peak_cn_db=%.1f peak_ms=%lu at_ms=%lu delay_ms=%lu semitones=%+d audio=%s\n",
+    printf("PASS channel=%s freq=%u peak_cn_db=%.1f peak_ms=%lu at_ms=%lu delay_ms=%lu\n",
            ch->name, ch->freq_mhz, e->peak_db, (unsigned long)e->peak_ms, (unsigned long)e->at_ms,
-           (unsigned long)(e->at_ms - e->peak_ms), audio_pentatonic_semitones[e->channel % 8u],
-           queued ? "queued" : audio_state());
+           (unsigned long)(e->at_ms - e->peak_ms));
     checkpoint_link_report_pass(e);
-    status_led_pass();  /* brief white flash, even when the sound is off */
 }
 
 /* A live receiver sample, in dB; false when there is none. */
@@ -152,12 +91,6 @@ static void checkpoint_task(void *arg)
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(CHECKPOINT_TICK_MS));
         const uint32_t now = now_ms();
-        /* Status LED: green when the bridge is talking to us, blue otherwise. */
-        {
-            const uint32_t last = checkpoint_link_last_rx_ms();
-            const bool link_up = last != 0u && (uint32_t)(now - last) < CHECKPOINT_LINK_ALIVE_MS;
-            status_led_set_base(link_up ? SLED_HEALTHY : SLED_DEGRADED);
-        }
         const size_t index = rf_channel_index();
         /* Retune, scan or calibration: whatever was in progress is not a pass. */
         if (s_control_epoch != seen_epoch || index != seen_index) {
@@ -195,30 +128,23 @@ static void checkpoint_task(void *arg)
 void checkpoint_start(void)
 {
     if (s_cp) return;
-    status_led_start();   /* shows BOOT; the task below flips it to the link state */
     checkpoint_t *cp = calloc(1, sizeof(*cp));
-    if (!cp) { status_led_set_base(SLED_ERR_FATAL); printf("CHECKPOINT disabled: no memory\n"); return; }
+    if (!cp) { printf("CHECKPOINT disabled: no memory\n"); return; }
     checkpoint_prefs_t prefs;
     const bool saved = blob_load("checkpoint", &prefs, sizeof(prefs)) && prefs.version == PREFS_VERSION &&
                        pd_config_valid(&prefs.det);
     const pd_config_t cfg = saved ? prefs.det : pd_config_default();
     pd_init(&cp->det, &cfg);
     cp->wanted = cp->det.cfg;
-    if (saved) {
-        audio_player_set_volume(prefs.volume);
-        audio_player_set_muted(prefs.muted != 0);
-    }
-    audio_start();
     if (xTaskCreate(checkpoint_task, "checkpoint", CHECKPOINT_STACK, cp, CHECKPOINT_PRIORITY, NULL) != pdPASS) {
         free(cp);
-        status_led_set_base(SLED_ERR_FATAL);
         printf("CHECKPOINT disabled: no memory for the task\n");
         return;
     }
     s_cp = cp;
     checkpoint_link_start();
 #if !CONFIG_C5VRX_VIDEO_OUTPUT
-    printf("CHECKPOINT video_output=off (CONFIG_C5VRX_VIDEO_OUTPUT=n): sound only, DAC pins free\n");
+    printf("CHECKPOINT video_output=off (CONFIG_C5VRX_VIDEO_OUTPUT=n): no local output\n");
 #endif
 }
 
@@ -228,15 +154,11 @@ void checkpoint_print(void)
     if (!cp) { printf("CHECKPOINT off\n"); return; }
     const pd_config_t *c = &cp->det.cfg;
     const unsigned slot = (unsigned)(rf_channel_index() % 8u);
-    const audio_player_stats_t a = audio_player_stats();
     printf("CHECKPOINT source=cn state=%s smooth_db=%.1f peak_db=%.1f samples_valid=%lu unknown=%lu passes=%lu "
-           "alpha=%.2f active_db=%.1f hyst_db=%.1f drop_db=%.1f min_peak_db=%.1f refractory_ms=%lu stale_ms=%lu "
-           "audio=%s volume=%u played=%lu dropped=%lu muted=%lu failed=%lu\n",
+           "alpha=%.2f active_db=%.1f hyst_db=%.1f drop_db=%.1f min_peak_db=%.1f refractory_ms=%lu stale_ms=%lu\n",
            pd_state_name(cp->det.ch[slot].state), cp->det.ch[slot].smooth, cp->det.ch[slot].peak,
            (unsigned long)cp->valid, (unsigned long)cp->unknown, (unsigned long)cp->passes, c->alpha, c->active_db,
-           c->hysteresis_db, c->drop_db, c->min_peak_db, (unsigned long)c->refractory_ms, (unsigned long)c->stale_ms,
-           audio_state(), audio_player_volume(), (unsigned long)a.played, (unsigned long)a.dropped,
-           (unsigned long)a.muted, (unsigned long)a.failed);
+           c->hysteresis_db, c->drop_db, c->min_peak_db, (unsigned long)c->refractory_ms, (unsigned long)c->stale_ms);
     if (cp->has_last)
         printf("CHECKPOINT last_pass channel=%s peak_cn_db=%.1f at_ms=%lu\n", cp->last_name,
                cp->last.peak_db, (unsigned long)cp->last.at_ms);
@@ -244,8 +166,7 @@ void checkpoint_print(void)
 
 static void prefs_save(const checkpoint_t *cp)
 {
-    const checkpoint_prefs_t p = {.version = PREFS_VERSION, .volume = (uint8_t)audio_player_volume(),
-                                  .muted = audio_player_muted(), .det = cp->wanted};
+    const checkpoint_prefs_t p = {.version = PREFS_VERSION, .det = cp->wanted};
     if (!blob_store("checkpoint", &p, sizeof(p))) printf("CHECKPOINT warning: settings not saved (NVS)\n");
 }
 
@@ -275,6 +196,8 @@ static void lp_to_config(const lp_config_t *o, pd_config_t *c)
     c->stale_ms      = o->stale_ms;
 }
 
+/* volume_pct/muted belong to the bridge-side speaker (link_proto keeps them);
+ * this detector has none, so it ignores them and reports no sound. */
 bool checkpoint_link_apply_config(const lp_config_t *o)
 {
     checkpoint_t *cp = s_cp;
@@ -282,8 +205,6 @@ bool checkpoint_link_apply_config(const lp_config_t *o)
     pd_config_t c;
     lp_to_config(o, &c);
     if (!pd_config_valid(&c)) return false;
-    audio_player_set_volume(o->volume_pct);     /* audio_player clamps above 100 % */
-    audio_player_set_muted(o->muted != 0);
     taskENTER_CRITICAL(&s_wanted_lock);
     cp->wanted = c;
     cp->wanted_dirty = true;
@@ -297,40 +218,54 @@ void checkpoint_link_get_config(lp_config_t *out)
     const checkpoint_t *cp = s_cp;
     pd_config_t c = cp ? cp->wanted : pd_config_default();
     config_to_lp(&c, out);
-    out->volume_pct = (uint8_t)audio_player_volume();
-    out->muted = audio_player_muted() ? 1u : 0u;
+    out->volume_pct = 0;
+    out->muted = 0;
 }
 
+/* What T would show, as reads only (no print, no allocation, no receiver write). */
 void checkpoint_link_get_stats(lp_stats_t *out)
 {
     const checkpoint_t *cp = s_cp;
-    const audio_player_stats_t a = audio_player_stats();
-    out->played = a.played;
-    out->dropped = a.dropped;
-    out->muted = a.muted;
-    out->failed = a.failed;
     const int x10 = receiver_obs_cn_x10();
-    out->cn_x10 = (x10 == CN_UNKNOWN_X10) ? LP_CN_UNKNOWN : x10;
     const unsigned slot = (unsigned)(rf_channel_index() % 8u);
-    out->channel = (uint8_t)slot;
-    out->state = cp ? (uint8_t)cp->det.ch[slot].state : 0u;
+    *out = (lp_stats_t){
+        .cn_x10   = (x10 == CN_UNKNOWN_X10) ? LP_CN_UNKNOWN : x10,
+        .channel  = (uint8_t)slot,
+        .state    = cp ? (uint8_t)cp->det.ch[slot].state : 0u,
+        .flags    = (uint8_t)((calibration_dc_needed(NULL, 0) ? LP_HEALTH_CAL_NEEDED : 0u) |
+                              (calibration_in_startup() ? LP_HEALTH_CALIBRATING : 0u)),
+        .gain     = s_current_gain,
+        .passes   = cp ? cp->passes : 0u,
+        .uptime_s = (uint32_t)(esp_timer_get_time() / 1000000),
+        .heap_min = (uint32_t)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL),   /* the boot peak */
+        .faults   = transport_fault_count(),
+    };
+    snprintf(out->fw, sizeof(out->fw), "%s", firmware_id());   /* truncated to LP_FW_LEN, NUL-terminated */
 }
 
-void checkpoint_play_test(void)
+/* The console's B / F / reset, from the bridge's web (which asked for the VTXs
+ * off). filter_request* only raise the calibration task's flags and refuse
+ * while one runs ("COMMAND B refused=busy"); the gate is blind until it ends. */
+void checkpoint_link_command(uint8_t cmd)
 {
-    const fpv_channel_t *ch = rf_channel();
-    const unsigned slot = (unsigned)(rf_channel_index() % 8u);
-    const bool queued = audio_player_play(AUDIO_SOUND_COIN, audio_pitch_for_channel(slot));
-    printf("CHECKPOINT play channel=%s semitones=%+d volume=%u audio=%s\n", ch->name,
-           audio_pentatonic_semitones[slot], audio_player_volume(), queued ? "queued" : audio_state());
-}
-
-void checkpoint_toggle_mute(void)
-{
-    audio_player_set_muted(!audio_player_muted());
-    if (s_cp) prefs_save(s_cp);
-    printf("CHECKPOINT sound %s (saved)%s\n", audio_player_muted() ? "MUTED" : "ON",
-           audio_player_ready() ? "" : "; this build has no audio output, PASS lines only");
+    switch (cmd) {
+    case LP_CMD_CAL_FULL:
+        printf("CHECKPOINT command=cal_full from=link\n");
+        filter_request_full();
+        break;
+    case LP_CMD_CAL_QUICK:
+        printf("CHECKPOINT command=cal_quick from=link\n");
+        filter_request();
+        break;
+    case LP_CMD_REBOOT:
+        printf("CHECKPOINT command=reboot from=link\n");
+        fflush(stdout);
+        vTaskDelay(pdMS_TO_TICKS(50));   /* let the line out over USB */
+        esp_restart();
+    default:
+        printf("CHECKPOINT command=%u refused=unknown from=link\n", cmd);
+        break;
+    }
 }
 
 void checkpoint_help(void)
@@ -338,8 +273,7 @@ void checkpoint_help(void)
     printf("CHECKPOINT K + key (lower = down, upper = up; K stays open 5 s after each key, q closes):\n"
            "  a/A smoothing alpha -/+0.05   t/T activity threshold -/+1 dB   h/H hysteresis -/+0.5 dB\n"
            "  d/D pass drop -/+0.5 dB        m/M minimum peak -/+1 dB         r/R refractory -/+250 ms\n"
-           "  v/V volume -/+10 %%            l live C/N trace on/off (20 lines/s)   0 defaults   k show\n"
-           "  Top level: P play the coin at this channel's pitch, p sound off/on.\n");
+           "  l live C/N trace on/off (20 lines/s)   0 defaults   k show\n");
     checkpoint_print();
 }
 
@@ -350,7 +284,6 @@ bool checkpoint_key(char key)
     checkpoint_t *cp = s_cp;
     if (!cp) return false;   /* checkpoint_help already said "CHECKPOINT off" */
     pd_config_t c = cp->wanted;
-    int volume = (int)audio_player_volume();
     switch (key) {
     case 'a': case 'A': c.alpha = clampf(c.alpha + (key == 'A' ? 0.05f : -0.05f), 0.05f, 1.0f); break;
     case 't': case 'T': c.active_db += key == 'T' ? 1.0f : -1.0f; break;
@@ -362,12 +295,11 @@ bool checkpoint_key(char key)
         c.refractory_ms = (uint32_t)(ms < 0 ? 0 : ms > 30000 ? 30000 : ms);
         break;
     }
-    case 'v': case 'V': volume += key == 'V' ? 10 : -10; break;
     case 'l':
         cp->trace = !cp->trace;
         printf("CHECKPOINT trace %s\n", cp->trace ? "ON" : "OFF");
         return true;
-    case '0': c = pd_config_default(); volume = AUDIO_VOLUME_DEFAULT; break;
+    case '0': c = pd_config_default(); break;
     case 'k': case '?': checkpoint_print(); return true;
     default: return false;
     }
@@ -376,14 +308,13 @@ bool checkpoint_key(char key)
                c.min_peak_db, c.active_db);
         return true;
     }
-    audio_player_set_volume((unsigned)(volume < 0 ? 0 : volume));
     taskENTER_CRITICAL(&s_wanted_lock);
     cp->wanted = c;
     cp->wanted_dirty = true;
     taskEXIT_CRITICAL(&s_wanted_lock);
     prefs_save(cp);
     printf("CHECKPOINT set alpha=%.2f active_db=%.1f hyst_db=%.1f drop_db=%.1f min_peak_db=%.1f refractory_ms=%lu "
-           "volume=%u (saved)\n", c.alpha, c.active_db, c.hysteresis_db, c.drop_db, c.min_peak_db,
-           (unsigned long)c.refractory_ms, audio_player_volume());
+           "(saved)\n", c.alpha, c.active_db, c.hysteresis_db, c.drop_db, c.min_peak_db,
+           (unsigned long)c.refractory_ms);
     return true;
 }

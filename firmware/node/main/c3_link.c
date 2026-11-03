@@ -1,5 +1,6 @@
 #include "c3_link.h"
 #include "c3_fleet.h"
+#include "c3_store.h"
 #include "driver/uart.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -14,14 +15,23 @@
 #define LINK_RX_BUF   256u
 #define LINK_READ_MS  100u
 #define OUTQ_DEPTH    4u
+#define C5_SILENT_MS  3000u   /* 3 STATS periods without a frame: the C5 is absent */
 
 static const char *TAG = "c3_link";
 static QueueHandle_t s_outq;        /* pre-encoded frames to send to the C5 */
 static void (*s_on_pass)(const lp_event_t *);
 static void (*s_on_stats)(const lp_stats_t *);
-static uint32_t s_last_c5_rx;       /* last valid frame from the C5 (ms) */
+static volatile uint32_t s_last_c5_rx;   /* last valid frame from the C5 (ms), 0 = never;
+                                          * written by the link task, read by the web */
 
 typedef struct { uint8_t buf[LP_MAX_FRAME]; uint8_t len; } frame_t;
+
+static uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
+
+bool c3_link_c5_alive(void) {
+    const uint32_t last = s_last_c5_rx;
+    return last != 0u && (uint32_t)(now_ms() - last) <= C5_SILENT_MS;
+}
 
 static void enqueue(const uint8_t *b, size_t n) {
     if (!n || !s_outq) return;
@@ -47,11 +57,23 @@ void c3_link_set_channel(uint8_t rf_index) {
     enqueue(b, lp_encode_set_channel(b, sizeof b, rf_index));
 }
 
+void c3_link_send_command(lp_cmd_t cmd) {
+    uint8_t b[LP_MAX_FRAME];
+    enqueue(b, lp_encode_command(b, sizeof b, cmd));   /* 0 (nothing sent) for an unknown cmd */
+}
+
 static void handle_msg(const lp_msg_t *m) {
+    uint8_t b[LP_MAX_FRAME];
     switch (m->type) {
     case LP_MSG_EVENT_PASS: if (s_on_pass) s_on_pass(&m->event); break;
     case LP_MSG_STATS:      if (s_on_stats) s_on_stats(&m->stats); break;
-    default: break;   /* CONFIG_STATE echo etc.: not consumed here */
+    /* The C5's real config (answer to CONFIG_REQ / our HELLO, echo of a
+     * CONFIG_SET): the degraded web's form and VTX guard follow it. RAM only
+     * (the C5 keeps its own prefs) and never pushed back to the C5. */
+    case LP_MSG_CONFIG_STATE: c3_store_set_config(&m->config, false); break;
+    /* The C5 (re)booted after our HELLO went out: ask it for its config. */
+    case LP_MSG_HELLO:        enqueue(b, lp_encode_config_req(b, sizeof b)); break;
+    default: break;
     }
 }
 
@@ -62,7 +84,6 @@ static void link_task(void *arg) {
     uint8_t hello[LP_MAX_FRAME];
     size_t hn = lp_encode_hello(hello, sizeof hello, LP_ROLE_C3);
     if (hn) uart_write_bytes(LINK_UART, (const char *)hello, hn);
-    uint32_t last_hello = (uint32_t)(esp_timer_get_time() / 1000);
 
     for (;;) {
         uint8_t rx[64];
@@ -70,7 +91,7 @@ static void link_task(void *arg) {
         for (int i = 0; i < n; i++) {
             lp_msg_t m;
             if (lp_decoder_push(&dec, rx[i], &m)) {
-                s_last_c5_rx = (uint32_t)(esp_timer_get_time() / 1000);
+                s_last_c5_rx = now_ms();
                 handle_msg(&m);
             }
         }
@@ -78,16 +99,10 @@ static void link_task(void *arg) {
         while (xQueueReceive(s_outq, &f, 0) == pdTRUE)
             uart_write_bytes(LINK_UART, (const char *)f.buf, f.len);
 
-        /* Periodic HELLO keepalive: lets the C5 sense the link is alive and
-         * light its status LED green (the C3 is otherwise silent on the UART). */
-        const uint32_t t = (uint32_t)(esp_timer_get_time() / 1000);
-        if (hn && (uint32_t)(t - last_hello) >= 1000u) {
-            last_hello = t;
-            uart_write_bytes(LINK_UART, (const char *)hello, hn);
-        }
-
-        /* Status LED: red if the C5 link went silent, else the fleet state. */
-        status_led_set_base((s_last_c5_rx != 0u && (uint32_t)(t - s_last_c5_rx) > 3000u)
+        /* Status LED: red if the C5 link went silent (its STATS stopped),
+         * else the fleet state. The C5 has no LED, so no keepalive is sent. */
+        const uint32_t t = now_ms();
+        status_led_set_base((s_last_c5_rx != 0u && (uint32_t)(t - s_last_c5_rx) > C5_SILENT_MS)
                             ? SLED_ERR_RECOV : c3_fleet_led_base(t));
     }
 }

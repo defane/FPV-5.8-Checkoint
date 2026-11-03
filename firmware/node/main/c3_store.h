@@ -10,7 +10,7 @@
 
 typedef struct {
     lp_config_t config;
-    bool        has_config;     /* false until adopted from the C5 or set by the user */
+    bool        has_config;     /* false until adopted from the C5 (CONFIG_STATE) or set by the user */
     lp_stats_t  stats;
     bool        has_stats;
     uint32_t    total_events;

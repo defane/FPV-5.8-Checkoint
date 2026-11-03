@@ -40,8 +40,13 @@ uint16_t lp_crc16(const uint8_t *data, size_t len) {
 #define LP_LEN_REQ     0u
 #define LP_LEN_CONFIG  30u
 #define LP_LEN_EVENT   9u
-#define LP_LEN_STATS   22u
+#define LP_LEN_STATS   (24u + LP_FW_LEN)   /* = LP_MAX_PAYLOAD */
 #define LP_LEN_SETCH   1u
+#define LP_LEN_CMD     1u
+
+static bool cmd_known(uint8_t c) {
+    return c == LP_CMD_CAL_FULL || c == LP_CMD_CAL_QUICK || c == LP_CMD_REBOOT;
+}
 
 static void put_config(uint8_t *p, const lp_config_t *c) {
     put_i32(p + 0,  c->alpha_milli);
@@ -111,18 +116,30 @@ size_t lp_encode_event(uint8_t *buf, size_t cap, const lp_event_t *e) {
 
 size_t lp_encode_stats(uint8_t *buf, size_t cap, const lp_stats_t *s) {
     uint8_t pl[LP_LEN_STATS];
-    put_u32(pl + 0,  s->played);
-    put_u32(pl + 4,  s->dropped);
-    put_u32(pl + 8,  s->muted);
-    put_u32(pl + 12, s->failed);
-    put_i32(pl + 16, s->cn_x10);
-    pl[20] = s->channel;
-    pl[21] = s->state;
+    put_i32(pl + 0,  s->cn_x10);
+    pl[4] = s->channel;
+    pl[5] = s->state;
+    pl[6] = s->flags;
+    pl[7] = s->gain;
+    put_u32(pl + 8,  s->passes);
+    put_u32(pl + 12, s->uptime_s);
+    put_u32(pl + 16, s->heap_min);
+    put_u32(pl + 20, s->faults);
+    /* NUL-padded, never unterminated: the last byte is always 0. */
+    unsigned i = 0;
+    for (; i + 1u < LP_FW_LEN && s->fw[i]; i++) pl[24 + i] = (uint8_t)s->fw[i];
+    for (; i < LP_FW_LEN; i++) pl[24 + i] = 0;
     return frame(buf, cap, LP_MSG_STATS, pl, LP_LEN_STATS);
 }
 
 size_t lp_encode_set_channel(uint8_t *buf, size_t cap, uint8_t rf_index) {
     return frame(buf, cap, LP_MSG_SET_CHANNEL, &rf_index, LP_LEN_SETCH);
+}
+
+size_t lp_encode_command(uint8_t *buf, size_t cap, lp_cmd_t cmd) {
+    const uint8_t pl = (uint8_t)cmd;
+    if (!cmd_known(pl)) return 0;
+    return frame(buf, cap, LP_MSG_COMMAND, &pl, LP_LEN_CMD);
 }
 
 /* ---- streaming decoder ----
@@ -168,18 +185,27 @@ static bool decode_payload(uint8_t type, uint8_t len, const uint8_t *p,
     case LP_MSG_STATS:
         if (len != LP_LEN_STATS) return false;
         out->type = LP_MSG_STATS;
-        out->stats.played  = get_u32(p + 0);
-        out->stats.dropped = get_u32(p + 4);
-        out->stats.muted   = get_u32(p + 8);
-        out->stats.failed  = get_u32(p + 12);
-        out->stats.cn_x10  = get_i32(p + 16);
-        out->stats.channel = p[20];
-        out->stats.state   = p[21];
+        out->stats.cn_x10   = get_i32(p + 0);
+        out->stats.channel  = p[4];
+        out->stats.state    = p[5];
+        out->stats.flags    = p[6];
+        out->stats.gain     = p[7];
+        out->stats.passes   = get_u32(p + 8);
+        out->stats.uptime_s = get_u32(p + 12);
+        out->stats.heap_min = get_u32(p + 16);
+        out->stats.faults   = get_u32(p + 20);
+        for (unsigned i = 0; i < LP_FW_LEN; i++) out->stats.fw[i] = (char)p[24 + i];
+        out->stats.fw[LP_FW_LEN - 1u] = '\0';   /* a peer may not have terminated it */
         return true;
     case LP_MSG_SET_CHANNEL:
         if (len != LP_LEN_SETCH) return false;
         out->type = LP_MSG_SET_CHANNEL;
         out->channel_index = p[0];
+        return true;
+    case LP_MSG_COMMAND:
+        if (len != LP_LEN_CMD || !cmd_known(p[0])) return false;
+        out->type = LP_MSG_COMMAND;
+        out->command = p[0];
         return true;
     default:
         return false; /* unknown type: drop */

@@ -22,7 +22,11 @@
   .row { display: flex; gap: 18px; flex-wrap: wrap; }
   .stat { flex: 1 1 100px; } .stat b { display: block; font-size: 1.3rem; } .stat span { color: #8b97a7; font-size: .78rem; }
   .pill { font-size: .78rem; padding: 2px 8px; border-radius: 999px; background: #2a313a; }
-  .pill.admin { background: #14532d; color: #86efac; }
+  .pill.admin, .pill.ok { background: #14532d; color: #86efac; }
+  .pill.bad { background: #5c1d14; color: #fca5a5; } .pill.busy { background: #4a3a0a; color: #fcd34d; }
+  .bad { color: #f87171; } .scroll { overflow-x: auto; } td.acts { white-space: nowrap; }
+  button.sm { padding: 4px 8px; font-size: .78rem; }
+  button:disabled { opacity: .4; cursor: default; }
   .on { color: #2ecc71; } .off { color: #8b97a7; } .muted { color: #8b97a7; }
   .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .admin-only { display: none; }
@@ -57,12 +61,14 @@
   </div>
 
   <h2>Gates / nodes</h2>
-  <div class="card">
+  <div class="card scroll">
     <div class="bar" style="margin-bottom:10px">Pairing: <b id="pair_state" class="off">closed</b>
-      <button id="pair_toggle" class="admin-only">Toggle pairing</button></div>
+      <button id="pair_toggle" class="admin-only">Toggle pairing</button>
+      <button id="cal_all" class="admin-only warn" title="Full calibration (console B) on every reachable gate">Calibrate all gates (B)</button>
+      <span id="cmd_msg" class="muted"></span></div>
     <table>
-      <thead><tr><th>Gate</th><th>Channel</th><th>Node</th><th>Link</th><th>C/N</th><th>Seen</th><th class="admin-only"></th></tr></thead>
-      <tbody id="nodes"><tr><td colspan="6" class="muted">no nodes paired</td></tr></tbody>
+      <thead><tr><th>Gate</th><th>Channel</th><th>Node</th><th>Link</th><th>Detector</th><th>C/N</th><th title="C5 calibration state and transport faults (hover for firmware, uptime, heap)">Health</th><th>RSSI</th><th>Loss</th><th>Seen</th><th class="admin-only"></th></tr></thead>
+      <tbody id="nodes"><tr><td colspan="11" class="muted">no nodes paired</td></tr></tbody>
     </table>
     <p class="muted" style="margin:10px 0 0">Gate 0 is the master's own C5.</p>
   </div>
@@ -71,15 +77,43 @@
   <div class="card row">
     <div class="stat"><b id="l_cn">—</b><span>C/N dB</span></div>
     <div class="stat"><b id="l_ch">—</b><span>channel</span></div>
+    <div class="stat"><b id="l_state">—</b><span>detector</span></div>
+    <div class="stat"><b id="l_health">—</b><span>C5 health</span></div>
     <div class="stat"><b id="l_passes">—</b><span>total passes</span></div>
     <div class="stat"><b id="m_uptime">—</b><span>uptime</span></div>
-    <div class="stat"><b id="m_heap">—</b><span>free heap</span></div>
+    <div class="stat"><b id="m_heap">—</b><span>free RAM</span></div>
+    <div id="l_info" class="muted" style="flex-basis:100%; font-size:.8rem">local C5 not seen</div>
+    <div id="local_cmds" class="bar admin-only" style="flex-basis:100%">Gate 0 C5:
+      <button class="ghost sm cmd" data-cmd="cal_full" data-gate="0" title="Full calibration (console B), VTXs off">Cal B</button>
+      <button class="ghost sm cmd" data-cmd="cal_quick" data-gate="0" title="Quick calibration of the current filter (console F)">Cal F</button>
+      <button class="ghost sm cmd" data-cmd="reboot" data-gate="0">Reboot</button></div>
   </div>
 </main>
 <script>
 const $ = id => document.getElementById(id);
 const fmt = ms => ms ? (ms/1000).toFixed(3) + " s" : "—";
 const fmtUp = ms => { let s = ms/1000|0; return s<60 ? s+"s" : s<3600 ? (s/60|0)+"m"+(s%60)+"s" : (s/3600|0)+"h"+(s%3600/60|0)+"m"; };
+const ST = ["idle", "rising", "peak", "cooldown"];       // pd_state_t order
+const stName = v => ST[v] ?? "—";
+const cnTxt = x => x > -990 ? (x/10).toFixed(1) : "—";
+const rssiTxt = r => r ? r + " dBm" : "—";               // 0 = no frame yet
+const lossTxt = n => { const t = (n.status_rx||0) + (n.status_lost||0);
+  return t ? Math.round(100*(n.status_lost||0)/t) + "%" : "—"; };
+const lossTitle = n => `${n.status_rx||0} status rx, ${n.status_lost||0} lost · ${n.rx_frames||0} frames total`;
+// C5 health (local or a node's): calibration badge, transport faults, details on hover
+const calBadge = h => h.calibrating ? '<span class="pill busy">calibrating</span>'
+  : h.cal_needed ? '<span class="pill bad" title="Run Cal B with every VTX off">cal needed</span>'
+  : '<span class="pill ok">OK</span>';
+const faultsTxt = h => h.faults ? ` <span class="bad">${h.faults} faults</span>` : "";
+const healthInfo = h => `fw ${h.fw || "?"} · C5 up ${fmtUp((h.c5_uptime_s||0)*1000)} · heap min ${((h.heap_min||0)/1024).toFixed(1)} KB · gain ${h.gain} · ${h.passes} passes · ${h.faults} transport faults`;
+const healthTd = n => n.fw ? `<td title="${healthInfo(n)}">${calBadge(n)}${faultsTxt(n)}</td>`
+  : '<td class="muted" title="no C5 status yet">—</td>';
+const CMD = { cal_full: "Cal B", cal_quick: "Cal F", reboot: "Reboot" };
+// Cal B / Cal F are off while that C5 calibrates: it would refuse (the master skips it as busy).
+const cmdBtns = busy => { const d = busy ? " disabled" : "";
+  return `<button class="ghost sm cmd" data-cmd="cal_full"${d} title="Full calibration (console B), VTXs off">Cal B</button>
+  <button class="ghost sm cmd" data-cmd="cal_quick"${d} title="Quick calibration of the current filter (console F)">Cal F</button>
+  <button class="ghost sm cmd" data-cmd="reboot">Reboot</button>`; };
 let admin = false, auth = null, editing = false;
 
 async function post(url, obj) {
@@ -110,12 +144,22 @@ async function poll() {
     $("pair_state").textContent = s.pairing ? "OPEN" : "closed";
     $("pair_state").className = s.pairing ? "on" : "off";
     const L = s.local || {};
-    $("l_cn").textContent = (s.has_local && L.cn_x10 > -990) ? (L.cn_x10/10).toFixed(1) : "—";
+    $("l_cn").textContent = s.has_local ? cnTxt(L.cn_x10) : "—";
     $("l_ch").textContent = s.has_local ? L.channel : "—";
+    $("l_state").textContent = s.has_local ? stName(L.state) : "—";
+    $("l_health").innerHTML = s.has_local ? calBadge(L) + faultsTxt(L) : "—";
+    $("l_info").textContent = s.has_local ? healthInfo(L) : "local C5 not linked (no report for 3 s)";
+    document.querySelectorAll('#local_cmds button[data-cmd^="cal_"]').forEach(b => { b.disabled = !!(s.has_local && L.calibrating); });
     $("l_passes").textContent = s.total_passes;
     if (s.volume != null) { $("vol_v").textContent = s.volume; if (document.activeElement !== $("vol")) $("vol").value = s.volume; }
     if (s.uptime_ms != null) $("m_uptime").textContent = fmtUp(s.uptime_ms);
-    if (s.free_heap != null) $("m_heap").textContent = (s.free_heap/1024|0) + " KB";
+    if (s.free_heap != null) {
+      const kb = s.free_heap/1024|0;
+      if (s.heap_total > 0) {
+        $("m_heap").textContent = Math.round(100*s.free_heap/s.heap_total) + "%";
+        $("m_heap").title = kb + " KB free of " + (s.heap_total/1024|0) + " KB";
+      } else { $("m_heap").textContent = kb + " KB"; }
+    }
 
     const st = s.standings || [];
     $("standings").innerHTML = st.length ? st.map(x => `
@@ -128,20 +172,28 @@ async function poll() {
       const up = s.uptime_ms || 0;
       const seen = n => n.online ? Math.max(0, (up - n.last_seen_ms)/1000 | 0) + "s" : "—";
       $("nodes").innerHTML = nodes.length ? nodes.map(n => admin ? `
-        <tr data-id="${n.node_id}">
+        <tr data-id="${n.node_id}" data-gate="${n.gate}">
           <td><input type="number" min="1" max="15" value="${n.gate}" class="g"></td>
           <td><input type="number" min="0" max="47" value="${n.channel}" class="c"></td>
           <td class="muted">${n.mac.slice(9)}</td>
           <td class="${n.online?'on':'off'}">${n.online?'online':'offline'}</td>
-          <td>${n.cn_x10>-990?(n.cn_x10/10).toFixed(1):'—'}</td>
+          <td>${stName(n.state)}</td>
+          <td>${cnTxt(n.cn_x10)}</td>
+          ${healthTd(n)}
+          <td>${rssiTxt(n.rssi)}</td>
+          <td title="${lossTitle(n)}">${lossTxt(n)}</td>
           <td>${seen(n)}</td>
-          <td class="admin-only"><button class="save">Save</button> <button class="ghost rm">✕</button></td>
+          <td class="admin-only acts"><button class="save">Save</button> <button class="ghost rm">✕</button> ${cmdBtns(n.online && n.calibrating)}</td>
         </tr>` : `
         <tr><td>${n.gate}</td><td>${n.channel}</td><td class="muted">${n.mac.slice(9)}</td>
           <td class="${n.online?'on':'off'}">${n.online?'online':'offline'}</td>
-          <td>${n.cn_x10>-990?(n.cn_x10/10).toFixed(1):'—'}</td>
+          <td>${stName(n.state)}</td>
+          <td>${cnTxt(n.cn_x10)}</td>
+          ${healthTd(n)}
+          <td>${rssiTxt(n.rssi)}</td>
+          <td title="${lossTitle(n)}">${lossTxt(n)}</td>
           <td>${seen(n)}</td></tr>`).join("")
-        : '<tr><td colspan="7" class="muted">no nodes paired</td></tr>';
+        : '<tr><td colspan="11" class="muted">no nodes paired</td></tr>';
     }
   } catch (e) { $("gates").textContent = "offline"; }
 }
@@ -150,6 +202,38 @@ $("pair_toggle").addEventListener("click", async () => {
   await post("/api/pairing", { open: $("pair_state").textContent !== "OPEN" ? 1 : 0 }); poll();
 });
 $("reset").addEventListener("click", async () => { await post("/api/reset", {}); poll(); });
+
+// Calibrate/reboot a gate's C5 (gate -1 = every reachable gate). The master holds a
+// calibration when a target sees a strong signal (a VTX probably on) until forced.
+async function sendCmd(gate, cmd, force) {
+  try {
+    const r = await post("/api/command", { gate, cmd, force });
+    return r.ok ? await r.json() : { error: r.status === 401 ? "admin login needed" : "refused (" + r.status + ")" };
+  } catch (e) { return { error: "master not answering" }; }
+}
+async function command(gate, cmd) {
+  if (!confirm(cmd === "reboot" ? `Reboot the C5 of gate ${gate}? It stops detecting until it is back up.`
+      : "All VTXs must be OFF. The gate(s) stop detecting while calibrating (minutes for a full one). Continue?")) return;
+  let r = await sendCmd(gate, cmd, 0);
+  if (r.vtx && r.vtx.length) {
+    const g = r.vtx.map(v => `${v.gate} (C/N ${cnTxt(v.cn_x10)} dB)`).join(", ");
+    if (!confirm(`Strong signal on gate(s) ${g}: a VTX may be on. Force?`)) return;
+    r = await sendCmd(gate, cmd, 1);
+  }
+  const sent = r.sent || [], failed = r.failed || [], busy = r.busy || [];
+  const msg = CMD[cmd] + ": " + (r.error || (sent.length ? "sent to gate(s) " + sent.join(", ") : "no gate reached")
+    + (busy.length ? " · skipped, already calibrating: " + busy.join(", ") : "")
+    + (failed.length ? " · not reached (offline or no C5): " + failed.join(", ") : ""));
+  const bad = r.error || failed.length || busy.length || !sent.length;
+  $("cmd_msg").textContent = msg;
+  $("cmd_msg").className = bad ? "bad" : "muted";
+  if (bad) alert(msg);
+}
+$("cal_all").addEventListener("click", async () => { await command(-1, "cal_full"); poll(); });
+$("local_cmds").addEventListener("click", async e => {
+  const b = e.target.closest("button.cmd"); if (!b || !admin) return;
+  await command(+b.dataset.gate, b.dataset.cmd); poll();
+});
 $("vol").addEventListener("input", () => { $("vol_v").textContent = $("vol").value; });
 $("vol").addEventListener("change", async () => { await post("/api/volume", { volume: +$("vol").value }); });
 document.addEventListener("focusin", e => { if (e.target.closest("#nodes")) editing = true; });
@@ -161,6 +245,9 @@ $("nodes").addEventListener("click", async e => {
     editing = false; poll();
   } else if (e.target.classList.contains("rm")) {
     await post("/api/node_remove", { node_id: id }); editing = false; poll();
+  } else if (e.target.classList.contains("cmd")) {   // the saved gate, not the edited input
+    try { await command(+tr.dataset.gate, e.target.dataset.cmd); } finally { editing = false; }
+    poll();
   }
 });
 poll(); setInterval(poll, 1000);

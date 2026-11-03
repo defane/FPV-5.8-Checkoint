@@ -1,51 +1,12 @@
-menu "Checkpoint audio (MAX98357A I2S)"
+menu "Coin sound (MAX98357A I2S)"
 
     config AUDIO_PLAYER_ENABLE
-        bool "Play the checkpoint sound on an I2S amplifier"
+        bool "Play the coin sound on an I2S amplifier"
         default n
         help
-            Off by default: the amplifier pins must not be receiver pins.
-            Default pins (checkpoint wiring, video output off): BCLK GPIO9,
-            LRC GPIO8, DIN GPIO7, SD GPIO10.
-            GPIO 0, 1, 2, 3, 4, 5, 25 and 27 carry the MODEM_DIAG -> PARLIO IQ
-            loopback, 8, 9, 11, 12, 23 and 24 the video DAC, 7 and 10 are
-            reserved DAC branches, 13/14 USB, 16-22 flash, 26 the antenna
-            switch and 28 BOOT; the firmware refuses to start the audio on any
-            of them. Needs components/audio_player/sounds/coin.pcm
-            (tools/coin_sound.py).
-
-    config AUDIO_PLAYER_ALLOW_RESERVED_DAC_PINS
-        bool "Allow GPIO 7 and 10 (reserved seventh/eighth DAC branches)"
-        depends on AUDIO_PLAYER_ENABLE
-        default n
-        help
-            The six-bit firmware does not drive GPIO 7 and 10; C5VRX keeps them
-            for future DAC branches. Only GPIO 6 and 15 are otherwise free, one
-            pin short of BCLK + LRC + DIN. GPIO 7 is a strapping pin: never put
-            SD (amplifier pull-down) on it.
-
-    config AUDIO_PLAYER_BCLK_GPIO
-        int "BCLK GPIO"
-        depends on AUDIO_PLAYER_ENABLE
-        range -1 28
-        default 9
-
-    config AUDIO_PLAYER_WS_GPIO
-        int "LRC (WS) GPIO"
-        depends on AUDIO_PLAYER_ENABLE
-        range -1 28
-        default 8
-
-    config AUDIO_PLAYER_DOUT_GPIO
-        int "DIN (data out) GPIO"
-        depends on AUDIO_PLAYER_ENABLE
-        range -1 28
-        default 7
-
-    config AUDIO_PLAYER_SD_GPIO
-        int "SD (amplifier enable) GPIO, -1 if SD is wired high"
-        depends on AUDIO_PLAYER_ENABLE
-        range -1 28
-        default 10
+            The centralized speaker of the race-timing master (firmware/master;
+            its amplifier pins are CONFIG_C6_AUDIO_*). Off by default. Needs
+            components/audio_player/sounds/coin.pcm (tools/coin_sound.py). A
+            detector (C5) has no amplifier and keeps this off.
 
 endmenu

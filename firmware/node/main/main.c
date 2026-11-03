@@ -1,8 +1,9 @@
 /* Checkpoint C3 node bridge: UART to the local C5 + ESP-NOW uplink to the C6
  * master. At boot it probes the C6; if reached it runs as a headless relay
- * (forwarding passes, applying the C6's config/channel). If the C6 is not
- * reached within the timeout it falls back to a degraded local service: its
- * own Wi-Fi AP + web for band selection and results. */
+ * (forwarding passes and the C5's health, applying the C6's config/channel and
+ * commands). If the C6 is not reached within the timeout it falls back to a
+ * degraded local service: its own Wi-Fi AP + web for band selection, results,
+ * the C5's health and its calibrate/reboot commands. */
 #include "c3_fleet.h"
 #include "c3_link.h"
 #include "c3_store.h"

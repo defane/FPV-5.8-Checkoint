@@ -1,10 +1,14 @@
-/* checkpoint_link: the C5 side of the C5<->C3 UART link (link_proto).
+/* checkpoint_link: the C5 side of the C5<->bridge UART link (link_proto).
  *
  * A single priority-1 task owns the UART. It announces itself (HELLO), sends
- * STATS periodically and an EVENT_PASS for every detected pass, and applies
- * CONFIG_SET / answers CONFIG_REQ from the C3. Pass events reach it through a
- * small queue (checkpoint_link_report_pass, called from the detector task), so
- * every UART write happens from this one task and never races. */
+ * STATS (live C/N and health) periodically and an EVENT_PASS for every
+ * detected pass, and serves the bridge (a C3 node, or the C6 master for its
+ * own gate): applies CONFIG_SET / answers CONFIG_REQ, retunes on SET_CHANNEL
+ * (saved, so a reboot comes back on the assigned channel) and runs a COMMAND
+ * (a calibration like the console's B/F, or a reboot), as nobody opens the
+ * C5's USB console in production. Pass events reach it through a small queue
+ * (checkpoint_link_report_pass, called from the detector task), so every UART
+ * write happens from this one task and never races. */
 #include "checkpoint_link.h"
 #include "sdkconfig.h"
 #include <stdio.h>
@@ -16,6 +20,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
+#include "receiver.h"   /* settings_save and the busy flags a retune waits for */
 #include "rf.h"   /* rf_set_channel: operator-approved retune on a link command */
 
 #define LINK_UART       ((uart_port_t)CONFIG_CHECKPOINT_LINK_UART_NUM)
@@ -26,7 +31,6 @@
 #define LINK_READ_MS    100u
 
 static QueueHandle_t s_evq;     /* pd_event_t from the detector task */
-static volatile uint32_t s_last_rx_ms;  /* last valid frame decoded from the bridge */
 
 static uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
 
@@ -48,7 +52,27 @@ static void send_stats(void) {
     send_frame(buf, lp_encode_stats(buf, sizeof buf, &s));
 }
 
-static void handle_msg(const lp_msg_t *m) {
+/* The channel the bridge assigned (SET_CHANNEL; -1 = none) waits while a
+ * calibration, a scan or a pause owns the receiver, as the console's c/b do:
+ * a sweep would retune away from it, and settings_save() stores whichever
+ * channel is tuned when it runs. Saved like a console retune, so a reboot
+ * (LP_CMD_REBOOT, power) comes back on it; settings_save writes NVS only on a
+ * change, and this task already writes NVS (CONFIG_SET). */
+static void apply_channel(int *pending) {
+    if (*pending < 0 || calibration_in_startup() || s_scan_active || receiver_paused()) return;
+    const size_t index = (size_t)*pending;
+    *pending = -1;
+    /* Already there (a bridge re-sends its config on a reconnect): no retune,
+     * it would reset the AFC offset mid-race. */
+    if (index != rf_channel_index() && rf_set_channel(index) != ESP_OK) {
+        printf("CHECKPOINT channel=%u refused=retune from=link\n", (unsigned)index);
+        return;
+    }
+    settings_save();
+    printf("CHECKPOINT channel=%s from=link (saved)\n", rf_channel()->name);
+}
+
+static void handle_msg(const lp_msg_t *m, int *pending_channel) {
     switch (m->type) {
     case LP_MSG_CONFIG_SET:
         (void)checkpoint_link_apply_config(&m->config);
@@ -59,7 +83,10 @@ static void handle_msg(const lp_msg_t *m) {
         send_config_state();
         break;
     case LP_MSG_SET_CHANNEL:    /* the master assigns this gate's channel: retune */
-        (void)rf_set_channel(m->channel_index);
+        *pending_channel = m->channel_index;   /* the latest wins */
+        break;
+    case LP_MSG_COMMAND:        /* calibrate or reboot: the bridge's web confirmed it */
+        checkpoint_link_command(m->command);
         break;
     default:
         break;                  /* C5 does not consume STATE/EVENT/STATS */
@@ -75,13 +102,15 @@ static void link_task(void *arg) {
     send_frame(hello, lp_encode_hello(hello, sizeof hello, LP_ROLE_C5));
 
     uint32_t last_stats = now_ms();
+    int pending_channel = -1;
     for (;;) {
         uint8_t rx[64];
         const int n = uart_read_bytes(LINK_UART, rx, sizeof rx, pdMS_TO_TICKS(LINK_READ_MS));
         for (int i = 0; i < n; i++) {
             lp_msg_t m;
-            if (lp_decoder_push(&dec, rx[i], &m)) { s_last_rx_ms = now_ms(); handle_msg(&m); }
+            if (lp_decoder_push(&dec, rx[i], &m)) handle_msg(&m, &pending_channel);
         }
+        apply_channel(&pending_channel);
 
         pd_event_t e;
         while (xQueueReceive(s_evq, &e, 0) == pdTRUE) {
@@ -141,12 +170,9 @@ void checkpoint_link_report_pass(const pd_event_t *e) {
     if (s_evq) (void)xQueueSend(s_evq, e, 0);   /* non-blocking; drop if full */
 }
 
-uint32_t checkpoint_link_last_rx_ms(void) { return s_last_rx_ms; }
-
 #else  /* !CONFIG_CHECKPOINT_LINK_ENABLE */
 
 void checkpoint_link_start(void) {}
 void checkpoint_link_report_pass(const pd_event_t *e) { (void)e; }
-uint32_t checkpoint_link_last_rx_ms(void) { return 0; }
 
 #endif

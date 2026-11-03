@@ -96,14 +96,36 @@ int main(void) {
                   got[0].event.at_ms == 123456u;
         CHECK(ok, "event_pass roundtrip");
 
-        lp_stats_t s = { .played = 7, .dropped = 1, .muted = 2, .failed = 0,
-                         .cn_x10 = LP_CN_UNKNOWN, .channel = 3, .state = 2 };
+        lp_stats_t s = { .cn_x10 = LP_CN_UNKNOWN, .channel = 3, .state = 2,
+                         .flags = LP_HEALTH_CAL_NEEDED | LP_HEALTH_CALIBRATING, .gain = 83,
+                         .passes = 41, .uptime_s = 86400, .heap_min = 123456,
+                         .faults = 0xFFFFFFFEu, .fw = "5.0.0-dev+3201b7196ece" };
         n = lp_encode_stats(buf, sizeof buf, &s);
         g = run(buf, n, got, 4);
-        ok = g == 1 && got[0].type == LP_MSG_STATS &&
-             got[0].stats.played == 7 && got[0].stats.cn_x10 == LP_CN_UNKNOWN &&
-             got[0].stats.channel == 3 && got[0].stats.state == 2;
-        CHECK(ok, "stats roundtrip (negative cn preserved)");
+        const lp_stats_t *r = &got[0].stats;
+        ok = g == 1 && got[0].type == LP_MSG_STATS && n == LP_MAX_FRAME &&
+             r->cn_x10 == LP_CN_UNKNOWN && r->channel == 3 && r->state == 2 &&
+             r->flags == (LP_HEALTH_CAL_NEEDED | LP_HEALTH_CALIBRATING) && r->gain == 83 &&
+             r->passes == 41 && r->uptime_s == 86400 && r->heap_min == 123456 &&
+             r->faults == 0xFFFFFFFEu && strcmp(r->fw, "5.0.0-dev+3201b7196ece") == 0;
+        CHECK(ok, "stats roundtrip (health, negative cn, fw id, full payload)");
+
+        /* A fw id filling the whole field is truncated to stay NUL-terminated. */
+        memset(s.fw, 'x', sizeof s.fw);
+        n = lp_encode_stats(buf, sizeof buf, &s);
+        g = run(buf, n, got, 4);
+        ok = g == 1 && strlen(got[0].stats.fw) == LP_FW_LEN - 1u;
+        CHECK(ok, "stats fw id never unterminated (encoder)");
+
+        /* A peer that sends 24 non-NUL bytes cannot unterminate it either. */
+        n = lp_encode_stats(buf, sizeof buf, &s);
+        buf[4 + 24 + LP_FW_LEN - 1u] = 'y';                       /* last fw byte */
+        const uint16_t crc = lp_crc16(&buf[1], 3u + buf[3]);
+        buf[n - 2] = (uint8_t)(crc & 0xFFu);
+        buf[n - 1] = (uint8_t)(crc >> 8);
+        g = run(buf, n, got, 4);
+        ok = g == 1 && got[0].stats.fw[LP_FW_LEN - 1u] == '\0';
+        CHECK(ok, "stats fw id never unterminated (decoder)");
     }
 
     /* SET_CHANNEL roundtrip. */
@@ -112,6 +134,39 @@ int main(void) {
         int g = run(buf, n, got, 4);
         CHECK(g == 1 && got[0].type == LP_MSG_SET_CHANNEL && got[0].channel_index == 27,
               "set_channel roundtrip");
+    }
+
+    /* COMMAND: every known command roundtrips; an unknown one is neither
+     * encoded nor decoded. */
+    {
+        const lp_cmd_t cmds[] = { LP_CMD_CAL_FULL, LP_CMD_CAL_QUICK, LP_CMD_REBOOT };
+        bool ok = true;
+        for (unsigned k = 0; k < sizeof cmds / sizeof cmds[0]; k++) {
+            size_t n = lp_encode_command(buf, sizeof buf, cmds[k]);
+            int g = run(buf, n, got, 4);
+            ok = ok && n && g == 1 && got[0].type == LP_MSG_COMMAND && got[0].command == cmds[k];
+        }
+        CHECK(ok, "command roundtrip (cal_full, cal_quick, reboot)");
+        CHECK(lp_encode_command(buf, sizeof buf, (lp_cmd_t)0) == 0 &&
+              lp_encode_command(buf, sizeof buf, (lp_cmd_t)9) == 0, "encode_command refuses an unknown cmd");
+
+        size_t n = lp_encode_command(buf, sizeof buf, LP_CMD_REBOOT);
+        buf[4] = 9;                                                /* forge an unknown op */
+        const uint16_t crc = lp_crc16(&buf[1], 3u + buf[3]);
+        buf[n - 2] = (uint8_t)(crc & 0xFFu);
+        buf[n - 1] = (uint8_t)(crc >> 8);
+        CHECK(run(buf, n, got, 4) == 0, "unknown command dropped by the decoder");
+    }
+
+    /* A version-1 frame (pre-health STATS) is rejected outright, not misread. */
+    {
+        lp_stats_t s = { .cn_x10 = 100 };
+        size_t n = lp_encode_stats(buf, sizeof buf, &s);
+        buf[1] = 1;
+        const uint16_t crc = lp_crc16(&buf[1], 3u + buf[3]);
+        buf[n - 2] = (uint8_t)(crc & 0xFFu);
+        buf[n - 1] = (uint8_t)(crc >> 8);
+        CHECK(run(buf, n, got, 4) == 0, "version-1 frame rejected");
     }
 
     /* Encoding into a buffer one byte too small fails cleanly. */

@@ -16,13 +16,14 @@ static uint8_t          s_channel;
 static espnow_rx_cb_t   s_on_msg;
 static QueueHandle_t    s_rxq;
 
-typedef struct { uint8_t mac[6]; fp_msg_t msg; } rx_item_t;
+typedef struct { uint8_t mac[6]; fp_msg_t msg; int8_t rssi; } rx_item_t;
 
 static void recv_cb(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
     if (len <= 0) return;
     rx_item_t it;
     if (!fp_decode(data, (size_t)len, &it.msg)) return;   /* drop foreign/corrupt */
     memcpy(it.mac, info->src_addr, 6);
+    it.rssi = (info->rx_ctrl) ? (int8_t)info->rx_ctrl->rssi : 0;
     if (s_rxq) (void)xQueueSend(s_rxq, &it, 0);           /* drop if full */
 }
 
@@ -31,7 +32,7 @@ static void worker(void *arg) {
     rx_item_t it;
     for (;;) {
         if (xQueueReceive(s_rxq, &it, portMAX_DELAY) == pdTRUE && s_on_msg)
-            s_on_msg(it.mac, &it.msg);
+            s_on_msg(it.mac, &it.msg, it.rssi);
     }
 }
 

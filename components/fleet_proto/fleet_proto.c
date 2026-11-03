@@ -92,15 +92,38 @@ size_t fp_encode_gate_pass(uint8_t *buf, size_t cap, const fp_gate_pass_t *m) {
     put_u32(pl + 10, m->seq);
     return frame(buf, cap, FP_MSG_GATE_PASS, pl, sizeof pl);
 }
+#define NODE_STATUS_LEN (29u + LP_FW_LEN)   /* 53 <= FP_MAX_PAYLOAD */
+
 size_t fp_encode_node_status(uint8_t *buf, size_t cap, const fp_node_status_t *m) {
-    uint8_t pl[12];
+    uint8_t pl[NODE_STATUS_LEN];
     pl[0] = m->gate_index;
     pl[1] = m->channel;
     put_i32(pl + 2, m->cn_x10);
     pl[6] = m->state;
     put_u32(pl + 7, m->passes);
     pl[11] = m->flags;
+    put_u32(pl + 12, m->seq);
+    pl[16] = m->gain;
+    put_u32(pl + 17, m->uptime_s);
+    put_u32(pl + 21, m->heap_min);
+    put_u32(pl + 25, m->faults);
+    /* NUL-padded, never unterminated: the last byte is always 0. */
+    unsigned i = 0;
+    for (; i + 1u < LP_FW_LEN && m->fw[i]; i++) pl[29 + i] = (uint8_t)m->fw[i];
+    for (; i < LP_FW_LEN; i++) pl[29 + i] = 0;
     return frame(buf, cap, FP_MSG_NODE_STATUS, pl, sizeof pl);
+}
+
+/* The commands link_proto forwards to a C5 (lp_encode_command validates). */
+static bool cmd_known(uint8_t c) {
+    uint8_t tmp[LP_MAX_FRAME];
+    return lp_encode_command(tmp, sizeof tmp, (lp_cmd_t)c) != 0;
+}
+
+size_t fp_encode_command(uint8_t *buf, size_t cap, const fp_command_t *m) {
+    if (!cmd_known(m->cmd)) return 0;
+    const uint8_t pl[2] = { m->gate_index, m->cmd };
+    return frame(buf, cap, FP_MSG_COMMAND, pl, sizeof pl);
 }
 size_t fp_encode_heartbeat(uint8_t *buf, size_t cap, const fp_heartbeat_t *m) {
     uint8_t pl[5];
@@ -156,13 +179,25 @@ bool fp_decode(const uint8_t *buf, size_t n, fp_msg_t *out) {
         out->gate_pass.seq = get_u32(p + 10);
         return true;
     case FP_MSG_NODE_STATUS:
-        if (len != 12) return false;
+        if (len != NODE_STATUS_LEN) return false;
         out->node_status.gate_index = p[0];
         out->node_status.channel = p[1];
         out->node_status.cn_x10 = get_i32(p + 2);
         out->node_status.state = p[6];
         out->node_status.passes = get_u32(p + 7);
         out->node_status.flags = p[11];
+        out->node_status.seq = get_u32(p + 12);
+        out->node_status.gain = p[16];
+        out->node_status.uptime_s = get_u32(p + 17);
+        out->node_status.heap_min = get_u32(p + 21);
+        out->node_status.faults = get_u32(p + 25);
+        for (unsigned i = 0; i < LP_FW_LEN; i++) out->node_status.fw[i] = (char)p[29 + i];
+        out->node_status.fw[LP_FW_LEN - 1u] = '\0';   /* a peer may not have terminated it */
+        return true;
+    case FP_MSG_COMMAND:
+        if (len != 2 || !cmd_known(p[1])) return false;
+        out->command.gate_index = p[0];
+        out->command.cmd = p[1];
         return true;
     case FP_MSG_HEARTBEAT:
         if (len != 5) return false;
