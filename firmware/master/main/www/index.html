@@ -59,7 +59,7 @@
       <input id="p" type="password" placeholder="password" autocomplete="current-password" autofocus>
       <div class="bar" style="margin-top:12px"><span id="login_msg" class="muted"></span>
         <button type="button" id="login_cancel" class="ghost" style="margin-left:auto">Cancel</button>
-        <button>Unlock</button></div>
+        <button id="unlock">Unlock</button></div>
     </form>
   </dialog>
 
@@ -103,6 +103,7 @@
   </div>
 </main>
 <footer class="muted" style="padding:0 16px 20px;text-align:center;font-size:.75rem">FPV 5.8 Checkpoint, based on C5VRX by Twotoz and the C5VRX contributors · GPL-3.0-only, without any warranty · license and source: <a class="muted" href="https://github.com/defane/FPV-5.8-Checkoint">github.com/defane/FPV-5.8-Checkoint</a></footer>
+<script src="/auth.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 const fmt = ms => ms ? (ms/1000).toFixed(3) + " s" : "—";
@@ -128,19 +129,17 @@ const cmdBtns = busy => { const d = busy ? " disabled" : "";
   return `<button class="ghost sm cmd" data-cmd="cal_full"${d} title="Full calibration (console B), VTXs off">Cal B</button>
   <button class="ghost sm cmd" data-cmd="cal_quick"${d} title="Quick calibration of the current filter (console F)">Cal F</button>
   <button class="ghost sm cmd" data-cmd="reboot">Reboot</button>`; };
-let admin = false, auth = null, editing = false;
+let admin = false, editing = false;
 
-async function post(url, obj) {
-  const h = { "Content-Type": "application/json" };
-  if (auth) h["Authorization"] = auth;
-  const r = await fetch(url, { method: "POST", headers: h, body: JSON.stringify(obj) });
+async function post(url, obj) {     // signed (auth.js): the password never goes out
+  const r = await AdminAuth.request("POST", url, JSON.stringify(obj));
   if (r.status === 401) setAdmin(false);
   return r;
 }
 
-function setAdmin(on) {             // back to spectator forgets the password
+function setAdmin(on) {             // back to spectator forgets the key
   admin = on; editing = false;
-  if (!on) auth = null;
+  if (!on) AdminAuth.logout();
   document.body.classList.toggle("is-admin", on);
   $("role").setAttribute("aria-checked", on);
   $("role_txt").textContent = on ? "admin" : "spectator";
@@ -151,17 +150,25 @@ $("role").addEventListener("click", () => {
   $("p").value = ""; $("login_msg").textContent = "";
   $("login").showModal();
 });
+// One login at a time (the key derivation takes a moment); closing the dialog
+// (Cancel, Esc) abandons a login still running, and its result is ignored.
+let attempt = 0, pending = false;
 $("login_cancel").addEventListener("click", () => $("login").close());
-$("login").addEventListener("close", () => { $("p").value = ""; });   // unlock, Cancel or Esc
+$("login").addEventListener("close", () => {
+  $("p").value = "";
+  if (pending) { pending = false; attempt++; AdminAuth.logout(); $("unlock").disabled = false; }
+});
 $("login_form").addEventListener("submit", async e => {
   e.preventDefault();
-  // password only: HTTP Basic with an empty user-id, UTF-8 so any password survives btoa()
-  const a = "Basic " + btoa(String.fromCharCode(...new TextEncoder().encode(":" + $("p").value)));
-  try {
-    const r = await fetch("/api/auth", { headers: { "Authorization": a } });
-    if (r.ok) { auth = a; setAdmin(true); $("login").close(); poll(); }
-    else { $("login_msg").textContent = "wrong password"; $("p").select(); }
-  } catch (_) { $("login_msg").textContent = "offline"; }
+  if (pending) return;
+  const my = ++attempt;
+  pending = true; $("unlock").disabled = true; $("login_msg").textContent = "checking…";
+  let ok = false, msg = "wrong password";
+  try { ok = await AdminAuth.login($("p").value); } catch (_) { msg = "offline"; }
+  if (my !== attempt || !$("login").open) return;   // abandoned (its close event may still be queued)
+  pending = false; $("unlock").disabled = false;
+  if (ok) { setAdmin(true); $("login").close(); poll(); }
+  else { $("login_msg").textContent = msg; $("p").select(); }
 });
 
 async function poll() {
@@ -236,7 +243,9 @@ async function sendCmd(gate, cmd, force) {
   try {
     const r = await post("/api/command", { gate, cmd, force });
     return r.ok ? await r.json() : { error: r.status === 401 ? "admin password needed" : "refused (" + r.status + ")" };
-  } catch (e) { return { error: "master not answering" }; }
+  } catch (e) {   // back to spectator meanwhile: nothing to report
+    return { error: /logged out|not logged in/.test(e.message) ? "logged out" : "master not answering" };
+  }
 }
 async function command(gate, cmd) {
   if (!confirm(cmd === "reboot" ? `Reboot the C5 of gate ${gate}? It stops detecting until it is back up.`
@@ -251,6 +260,7 @@ async function command(gate, cmd) {
   const msg = CMD[cmd] + ": " + (r.error || (sent.length ? "sent to gate(s) " + sent.join(", ") : "no gate reached")
     + (busy.length ? " · skipped, already calibrating: " + busy.join(", ") : "")
     + (failed.length ? " · not reached (offline or no C5): " + failed.join(", ") : ""));
+  if (r.error === "logged out") { $("cmd_msg").textContent = ""; return; }
   const bad = r.error || failed.length || busy.length || !sent.length;
   $("cmd_msg").textContent = msg;
   $("cmd_msg").className = bad ? "bad" : "muted";
@@ -267,11 +277,16 @@ document.addEventListener("focusin", e => { if (e.target.closest("#nodes")) edit
 $("nodes").addEventListener("click", async e => {
   const tr = e.target.closest("tr"); if (!tr || !admin) return;
   const id = +tr.dataset.id;
-  if (e.target.classList.contains("save")) {
-    await post("/api/node", { node_id: id, gate: +tr.querySelector(".g").value, channel: +tr.querySelector(".c").value });
-    editing = false; poll();
+  if (e.target.classList.contains("save")) {   // a failed save must not freeze the table (editing)
+    try { await post("/api/node", { node_id: id, gate: +tr.querySelector(".g").value, channel: +tr.querySelector(".c").value }); }
+    catch (_) { $("cmd_msg").textContent = "save failed: master not answering"; }
+    finally { editing = false; }
+    poll();
   } else if (e.target.classList.contains("rm")) {
-    await post("/api/node_remove", { node_id: id }); editing = false; poll();
+    try { await post("/api/node_remove", { node_id: id }); }
+    catch (_) { $("cmd_msg").textContent = "remove failed: master not answering"; }
+    finally { editing = false; }
+    poll();
   } else if (e.target.classList.contains("cmd")) {   // the saved gate, not the edited input
     try { await command(+tr.dataset.gate, e.target.dataset.cmd); } finally { editing = false; }
     poll();

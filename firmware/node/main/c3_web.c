@@ -4,10 +4,8 @@
 #include "c3_store.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
-#include "mbedtls/base64.h"
-#include "mbedtls/platform_util.h"
-#include "psa/crypto.h"
 #include "sdkconfig.h"
+#include "web_auth_esp.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -115,76 +113,26 @@ static bool json_s(const char *body, const char *key, char *out, size_t cap)
     return true;
 }
 
-/* Read the whole POST body into buf[cap] as a C string; on failure reply 400. */
-static bool recv_body(httpd_req_t *req, char *buf, size_t cap)
-{
-    const int total = req->content_len;
-    if (total <= 0 || total >= (int)cap) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad length");
-        return false;
-    }
-    int got = 0;
-    while (got < total) {
-        const int r = httpd_req_recv(req, buf + got, total - got);
-        if (r <= 0) { httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "recv"); return false; }
-        got += r;
-    }
-    buf[got] = '\0';
-    return true;
-}
-
-/* ---- admin auth (spectators read results; config and commands need the password) ---- */
-/* The firmware holds only ADMIN_HASH = SHA-256(ADMIN_SALT ":" password), 32 bytes
- * whatever the password, generated at build time from CONFIG_C3_ADMIN_PASSWORD
- * (main/CMakeLists.txt, which also caps it at ADMIN_PASSWORD_MAX bytes). A request
- * carries "Basic base64(':' password)": decoded after the salt, hashed, compared.
- * 128 bytes make a 178-byte header, well inside the 1 KiB request-header budget
- * (CONFIG_HTTPD_MAX_REQ_HDR_LEN) next to a phone browser's other headers. */
-#define B64_LEN(n) (4 * (((n) + 2) / 3))
-static const uint8_t s_admin_hash[PSA_HASH_LENGTH(PSA_ALG_SHA_256)] = ADMIN_HASH;
-
-static bool password_ok(httpd_req_t *req)
-{
-    /* One spare byte: ESP-IDF truncates a value exactly the buffer's size and still
-     * returns ESP_OK; a truncated header only decodes to a wrong password. */
-    char hdr[sizeof "Basic " + B64_LEN(1 + ADMIN_PASSWORD_MAX) + 1];
-    uint8_t in[sizeof ADMIN_SALT - 1 + 1 + ADMIN_PASSWORD_MAX];   /* salt ":" password */
-    const size_t salt = sizeof ADMIN_SALT - 1;
-    size_t n = 0;
-    memcpy(in, ADMIN_SALT, salt);
-    const bool ok =
-        httpd_req_get_hdr_value_str(req, "Authorization", hdr, sizeof hdr) == ESP_OK &&
-        strncmp(hdr, "Basic ", 6) == 0 &&
-        mbedtls_base64_decode(in + salt, sizeof in - salt, &n, (const unsigned char *)hdr + 6,
-                              strlen(hdr + 6)) == 0 &&
-        n > 0 && in[salt] == ':' &&
-        psa_hash_compare(PSA_ALG_SHA_256, in, salt + n, s_admin_hash, sizeof s_admin_hash)
-            == PSA_SUCCESS;                                       /* constant-time compare */
-    mbedtls_platform_zeroize(hdr, sizeof hdr);
-    mbedtls_platform_zeroize(in, sizeof in);
-    return ok;
-}
-
-static bool require_admin(httpd_req_t *req)
-{
-    if (ADMIN_AUTH_OPEN || password_ok(req)) return true;   /* open: empty password */
-    httpd_resp_set_status(req, "401 Unauthorized");
-    httpd_resp_set_type(req, "application/json");
-    return httpd_resp_sendstr(req, "{\"ok\":false,\"auth\":true}"), false;
-}
+/* ---- admin auth (spectators read results; config and commands are signed) ---- */
+/* Every admin request is signed in the page with K = PBKDF2(password, ADMIN_SALT,
+ * ADMIN_ITERATIONS), the only form of the password the firmware holds (admin_hash.h,
+ * generated at build time by web_auth_admin_key()); components/web_auth checks the signature,
+ * the session and its replay counter. web_auth_request() also reads the body:
+ * on false its 400/401 is already sent. */
+static const uint8_t s_admin_key[] = ADMIN_KEY;
 
 static esp_err_t get_auth(httpd_req_t *req)
 {
-    if (!require_admin(req)) return ESP_OK;
+    char buf[8];
+    if (!web_auth_request(req, buf, sizeof buf)) return ESP_OK;
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_sendstr(req, "{\"admin\":true}");
 }
 
 static esp_err_t post_config(httpd_req_t *req)
 {
-    if (!require_admin(req)) return ESP_OK;
     char buf[512];
-    if (!recv_body(req, buf, sizeof buf)) return ESP_FAIL;
+    if (!web_auth_request(req, buf, sizeof buf)) return ESP_OK;
 
     lp_config_t cur;
     (void)c3_store_get_config(&cur);           /* start from current, override given keys */
@@ -219,9 +167,8 @@ static esp_err_t post_config(httpd_req_t *req)
  * forced or not, while no C5 is linked: nothing would run it. */
 static esp_err_t post_command(httpd_req_t *req)
 {
-    if (!require_admin(req)) return ESP_OK;
     char buf[96], name[16];
-    if (!recv_body(req, buf, sizeof buf)) return ESP_FAIL;
+    if (!web_auth_request(req, buf, sizeof buf)) return ESP_OK;
     if (!json_s(buf, "cmd", name, sizeof name)) name[0] = '\0';
     lp_cmd_t cmd;
     if (strcmp(name, "cal_full") == 0)       cmd = LP_CMD_CAL_FULL;
@@ -250,9 +197,11 @@ static esp_err_t post_command(httpd_req_t *req)
 
 void c3_web_start(void)
 {
+    web_auth_init(s_admin_key, ADMIN_SALT, ADMIN_ITERATIONS, ADMIN_AUTH_OPEN);
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.lru_purge_enable = true;
     cfg.max_uri_handlers = 10;
+    cfg.stack_size = 6144;       /* the signature's PSA HMAC under the handlers: ~3.5 KB of the 4 KB default */
     httpd_handle_t srv = NULL;
     if (httpd_start(&srv, &cfg) != ESP_OK) { ESP_LOGE(TAG, "httpd start failed"); return; }
 
@@ -266,5 +215,6 @@ void c3_web_start(void)
     httpd_register_uri_handler(srv, &authu);
     httpd_register_uri_handler(srv, &conf);
     httpd_register_uri_handler(srv, &cmd);
+    web_auth_register(srv);   /* POST /api/session, GET /auth.js */
     ESP_LOGI(TAG, "web UI on http://192.168.4.1/");
 }

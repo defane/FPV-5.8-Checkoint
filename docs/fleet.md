@@ -41,12 +41,40 @@ with no change on the gate side.
   login); **admin** actions (pairing, gate order, channel, reset, volume, a
   gate's calibration or reboot; detector tuning and band selection on a degraded
   C3) need the admin password (`CONFIG_*_ADMIN_PASSWORD`, no
-  username): the header's spectator/admin toggle opens a password dialog, the
-  password goes out as an HTTP Basic header with an empty user and is checked on
-  the ESP; toggling back to spectator forgets it. An empty password disables
-  admin auth. The firmware never holds the password, only its salted SHA-256
-  (generated at build time; 128 bytes max, a longer one fails the build). It
-  still crosses the Wi-Fi in clear (plain HTTP): anyone on the AP can sniff it.
+  username, any length): the header's spectator/admin toggle opens a password
+  dialog; toggling back to spectator forgets it. An empty password disables
+  admin auth. See "Signed admin requests" below.
+- **Signed admin requests** (`components/web_auth`): the password never crosses
+  the Wi-Fi and the firmware never holds it. The build turns it into
+  K = PBKDF2-HMAC-SHA256(password, salt, 200000), 32 bytes in `admin_hash.h`,
+  with a salt `fpv58-checkpoint/<c3|c6>/<16 hex>` random at each configure
+  (`components/web_auth/project_include.cmake`, `admin_key.py`). At login the page
+  opens a session (`POST /api/session`: a random 128-bit id from the hardware RNG,
+  plus the salt and the iterations) and derives the same K from the typed password
+  (`/auth.js`, pure-JS SHA-256/HMAC/PBKDF2, since browsers keep `crypto.subtle` for
+  HTTPS: about 0.1 s on a desktop, 0.3–1 s on a phone, once per login, the dialog
+  showing "checking…"; the ESP never runs the derivation). Every admin request
+  then carries `X-Auth-Session`,
+  `X-Auth-Seq` (1, 2, 3… per session) and `X-Auth-Sig` = HMAC-SHA256(K, sid `\n`
+  seq `\n` method `\n` path `\n` body). The ESP accepts each seq once and only in
+  increasing order, so a captured request replayed, or one with a changed body or
+  path, is refused. Sessions live in RAM (4, least recently used evicted): after
+  an ESP reboot the page reopens one with K, without asking for the password
+  again. The page sends one request at a time and gives up on each HTTP exchange
+  after 10 s (one that must reopen its session can take up to 30 s). On logout,
+  or when the login dialog is closed during a login, queued requests are dropped;
+  one already sent may still have run on the ESP and its reply reaches its
+  caller, but nothing started before the logout is re-signed or retried after
+  it, and a late refusal no longer logs the next login out. Limits:
+  - a listener on the AP (it shares one Wi-Fi password with every spectator, or
+    is open) who captures a single signed request, and every login sends one, can
+    test password guesses offline; PBKDF2 makes each guess cost 200000 HMACs, but
+    a short or common password still falls: use a long random one (the default
+    `checkpoint` is public);
+  - plain HTTP still lets an *active* attacker on the AP serve a modified page
+    that reads the password as it is typed (only HTTPS prevents that);
+  - anyone with the `.bin` holds K and can sign without the password;
+  - anyone on the AP can force sessions to be reopened.
 - **Constraint:** the C6 and C3 APs **and** ESP-NOW share the **same Wi-Fi
   channel** (`CONFIG_*_AP_CHANNEL` / `CONFIG_C6_AP_CHANNEL`).
 - **Limit:** the time base (ESP-NOW beacons) aims for ~10 ms; not a sub-ms photo

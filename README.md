@@ -49,9 +49,11 @@ read-only (no login), while **admin** actions — pairing, gate order, channel
 assignment, reset, volume, a gate's calibration or reboot, and (on a degraded
 C3) detector tuning and band selection — require the admin password
 (`CONFIG_*_ADMIN_PASSWORD`, no username): the spectator/admin toggle in the
-header opens a password dialog; the password is sent as HTTP Basic with an
-empty user and checked server-side against its salted SHA-256, the only form
-the firmware holds (128 bytes max).
+header opens a password dialog. The password never crosses the Wi-Fi: the page
+signs each admin request (HMAC-SHA256, per-session counter against replays)
+with a key derived from it (PBKDF2), the only form the firmware holds. A sniffed
+request still allows offline guessing, so choose a long random password
+([docs/fleet.md](docs/fleet.md), `components/web_auth`).
 
 ## Layout
 
@@ -66,6 +68,7 @@ components/
   race_timing/   pure-C lap/sector timing engine (host-tested)
   espnow_link/   ESP-NOW transport carrying fleet_proto (C6 + C3)
   status_led/    single-WS2812 status indicator (pure-C core host-tested)
+  web_auth/      signed admin requests for the C3/C6 web (pure-C core + auth.js host-tested)
 firmware/detector/  ESP32-C5 application (RF + detection, report-only)
 firmware/node/      ESP32-C3 node bridge (UART + ESP-NOW relay, degraded Wi-Fi web)
 firmware/master/    ESP32-C6 master (UART + ESP-NOW hub + speaker + admin web + timing)
@@ -114,6 +117,9 @@ cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/race_timing/include \
    test_race_timing.c ../components/race_timing/race_timing.c -o /tmp/t && /tmp/t
 cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/status_led/include \
    test_status_led.c ../components/status_led/status_led.c -o /tmp/t && /tmp/t
+cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/web_auth/include \
+   test_web_auth.c ../components/web_auth/web_auth.c -o /tmp/t && /tmp/t
+node test_web_auth.mjs   # the page side (auth.js), Node 18+
 ```
 
 ## Architecture

@@ -61,7 +61,7 @@
       <input id="p" type="password" placeholder="password" autocomplete="current-password" autofocus>
       <div class="bar" style="margin-top:12px"><span id="login_msg" class="muted"></span>
         <button type="button" id="login_cancel" class="ghost" style="margin-left:auto">Cancel</button>
-        <button>Unlock</button></div>
+        <button id="unlock">Unlock</button></div>
     </form>
   </dialog>
 
@@ -113,17 +113,18 @@
   <ul id="events" class="card"></ul>
 </main>
 <footer class="muted" style="padding:0 16px 20px;text-align:center;font-size:.75rem">FPV 5.8 Checkpoint, based on C5VRX by Twotoz and the C5VRX contributors · GPL-3.0-only, without any warranty · license and source: <a class="muted" href="https://github.com/defane/FPV-5.8-Checkoint">github.com/defane/FPV-5.8-Checkoint</a></footer>
+<script src="/auth.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 const CH = n => "R" + (n + 1);
 const STATES = ["IDLE", "RISING", "PEAK_PASSED", "COOLDOWN"];
-let dirty = false, auth = null, admin = false;
+let dirty = false, admin = false;
 ["alpha","active","hyst","drop","minpeak","refr","stale"].forEach(
   id => $(id).addEventListener("input", () => { dirty = true; }));
 
-function setAdmin(on) {             // back to spectator forgets the password and unsaved detector edits
+function setAdmin(on) {             // back to spectator forgets the key and unsaved detector edits
   admin = on;
-  if (!on) { auth = null; dirty = false; }
+  if (!on) { AdminAuth.logout(); dirty = false; }
   document.body.classList.toggle("is-admin", on);
   $("role").setAttribute("aria-checked", on);
   $("role_txt").textContent = on ? "admin" : "spectator";
@@ -134,17 +135,26 @@ $("role").addEventListener("click", () => {
   $("p").value = ""; $("login_msg").textContent = "";
   $("login").showModal();
 });
+// One login at a time (the key derivation takes a moment); closing the dialog
+// (Cancel, Esc) abandons a login still running, and its result is ignored.
+// Signed requests (auth.js): the password never goes out.
+let attempt = 0, pending = false;
 $("login_cancel").addEventListener("click", () => $("login").close());
-$("login").addEventListener("close", () => { $("p").value = ""; });   // unlock, Cancel or Esc
+$("login").addEventListener("close", () => {
+  $("p").value = "";
+  if (pending) { pending = false; attempt++; AdminAuth.logout(); $("unlock").disabled = false; }
+});
 $("login_form").addEventListener("submit", async e => {
   e.preventDefault();
-  // password only: HTTP Basic with an empty user-id, UTF-8 so any password survives btoa()
-  const a = "Basic " + btoa(String.fromCharCode(...new TextEncoder().encode(":" + $("p").value)));
-  try {
-    const r = await fetch("/api/auth", { headers: { "Authorization": a } });
-    if (r.ok) { auth = a; setAdmin(true); $("login").close(); }
-    else { $("login_msg").textContent = "wrong password"; $("p").select(); }
-  } catch (_) { $("login_msg").textContent = "offline"; }
+  if (pending) return;
+  const my = ++attempt;
+  pending = true; $("unlock").disabled = true; $("login_msg").textContent = "checking…";
+  let ok = false, msg = "wrong password";
+  try { ok = await AdminAuth.login($("p").value); } catch (_) { msg = "offline"; }
+  if (my !== attempt || !$("login").open) return;   // abandoned (its close event may still be queued)
+  pending = false; $("unlock").disabled = false;
+  if (ok) { setAdmin(true); $("login").close(); }
+  else { $("login_msg").textContent = msg; $("p").select(); }
 });
 
 function fillConfig(c) {
@@ -206,10 +216,9 @@ $("save").addEventListener("click", async () => {
   };
   $("msg").textContent = "saving…";
   try {
-    const h = { "Content-Type": "application/json" };
-    if (auth) h["Authorization"] = auth;
-    const r = await fetch("/api/config", { method: "POST", headers: h, body: JSON.stringify(body) });
+    const r = await AdminAuth.request("POST", "/api/config", JSON.stringify(body));
     if (r.status === 401) { setAdmin(false); $("msg").textContent = "password required"; return; }
+    if (!r.ok) { $("msg").textContent = "failed (" + r.status + ")"; return; }
     dirty = false;
     $("msg").textContent = "saved";
     setTimeout(() => $("msg").textContent = "", 1500);
@@ -221,9 +230,7 @@ $("save").addEventListener("click", async () => {
 // the gate sees a strong carrier unless we force it, and refuses any command
 // while no C5 is linked ({ok:false, msg}).
 async function sendCommand(cmd, force) {
-  const h = { "Content-Type": "application/json" };
-  if (auth) h["Authorization"] = auth;
-  const r = await fetch("/api/command", { method: "POST", headers: h, body: JSON.stringify({ cmd, force }) });
+  const r = await AdminAuth.request("POST", "/api/command", JSON.stringify({ cmd, force }));
   if (r.status === 401) { setAdmin(false); return { ok: false, msg: "password required" }; }
   return r.ok ? r.json() : { ok: false, msg: "failed (" + r.status + ")" };
 }

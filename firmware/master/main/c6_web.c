@@ -4,10 +4,8 @@
 #include "c6_store.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
-#include "mbedtls/base64.h"
-#include "mbedtls/platform_util.h"
-#include "psa/crypto.h"
 #include "sdkconfig.h"
+#include "web_auth_esp.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -143,80 +141,36 @@ static bool json_s(const char *body, const char *key, char *out, size_t cap) {
     return *p == '"';
 }
 
-static bool read_body(httpd_req_t *req, char *buf, size_t cap) {
-    int total = req->content_len;
-    if (total <= 0 || total >= (int)cap) return false;
-    int got = 0;
-    while (got < total) {
-        int r = httpd_req_recv(req, buf + got, total - got);
-        if (r <= 0) return false;
-        got += r;
-    }
-    buf[got] = '\0';
-    return true;
-}
-
 static esp_err_t ok_json(httpd_req_t *req, bool ok) {
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_sendstr(req, ok ? "{\"ok\":true}" : "{\"ok\":false}");
 }
 
-/* ---- admin auth (spectators are read-only; admin actions need the password) ---- */
-/* The firmware holds only ADMIN_HASH = SHA-256(ADMIN_SALT ":" password), 32 bytes
- * whatever the password, generated at build time from CONFIG_C6_ADMIN_PASSWORD
- * (main/CMakeLists.txt, which also caps it at ADMIN_PASSWORD_MAX bytes). A request
- * carries "Basic base64(':' password)": decoded after the salt, hashed, compared.
- * 128 bytes make a 178-byte header, well inside the 1 KiB request-header budget
- * (CONFIG_HTTPD_MAX_REQ_HDR_LEN) next to a phone browser's other headers. */
-#define B64_LEN(n) (4 * (((n) + 2) / 3))
-static const uint8_t s_admin_hash[PSA_HASH_LENGTH(PSA_ALG_SHA_256)] = ADMIN_HASH;
-
-static bool password_ok(httpd_req_t *req) {
-    /* One spare byte: ESP-IDF truncates a value exactly the buffer's size and still
-     * returns ESP_OK; a truncated header only decodes to a wrong password. */
-    char hdr[sizeof "Basic " + B64_LEN(1 + ADMIN_PASSWORD_MAX) + 1];
-    uint8_t in[sizeof ADMIN_SALT - 1 + 1 + ADMIN_PASSWORD_MAX];   /* salt ":" password */
-    const size_t salt = sizeof ADMIN_SALT - 1;
-    size_t n = 0;
-    memcpy(in, ADMIN_SALT, salt);
-    const bool ok =
-        httpd_req_get_hdr_value_str(req, "Authorization", hdr, sizeof hdr) == ESP_OK &&
-        strncmp(hdr, "Basic ", 6) == 0 &&
-        mbedtls_base64_decode(in + salt, sizeof in - salt, &n, (const unsigned char *)hdr + 6,
-                              strlen(hdr + 6)) == 0 &&
-        n > 0 && in[salt] == ':' &&
-        psa_hash_compare(PSA_ALG_SHA_256, in, salt + n, s_admin_hash, sizeof s_admin_hash)
-            == PSA_SUCCESS;                                       /* constant-time compare */
-    mbedtls_platform_zeroize(hdr, sizeof hdr);
-    mbedtls_platform_zeroize(in, sizeof in);
-    return ok;
-}
-
-static bool require_admin(httpd_req_t *req) {
-    if (ADMIN_AUTH_OPEN || password_ok(req)) return true;   /* open: empty password */
-    httpd_resp_set_status(req, "401 Unauthorized");
-    httpd_resp_set_type(req, "application/json");
-    return httpd_resp_sendstr(req, "{\"ok\":false,\"auth\":true}"), false;
-}
+/* ---- admin auth (spectators are read-only; admin actions are signed) ---- */
+/* Every admin request is signed in the page with K = PBKDF2(password, ADMIN_SALT,
+ * ADMIN_ITERATIONS), the only form of the password the firmware holds (admin_hash.h,
+ * generated at build time by web_auth_admin_key()); components/web_auth checks the signature,
+ * the session and its replay counter. web_auth_request() also reads the body:
+ * on false its 400/401 is already sent. */
+static const uint8_t s_admin_key[] = ADMIN_KEY;
 
 static esp_err_t get_auth(httpd_req_t *req) {
-    if (!require_admin(req)) return ESP_OK;   /* 401 already sent */
+    char buf[8];
+    if (!web_auth_request(req, buf, sizeof buf)) return ESP_OK;
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_sendstr(req, "{\"admin\":true}");
 }
 
 static esp_err_t post_pairing(httpd_req_t *req) {
-    if (!require_admin(req)) return ESP_OK;
     char buf[128];
-    if (!read_body(req, buf, sizeof buf)) { httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "body"); return ESP_FAIL; }
+    if (!web_auth_request(req, buf, sizeof buf)) return ESP_OK;
     c6_hub_set_pairing(json_i(buf, "open", 0) != 0);
     return ok_json(req, true);
 }
 
 static esp_err_t post_node(httpd_req_t *req) {
-    if (!require_admin(req)) return ESP_OK;
     char buf[128];
-    if (!read_body(req, buf, sizeof buf)) { httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "body"); return ESP_FAIL; }
+    if (!web_auth_request(req, buf, sizeof buf)) return ESP_OK;
     bool ok = c6_hub_set_node((uint8_t)json_i(buf, "node_id", -1),
                               (uint8_t)json_i(buf, "gate", 0),
                               (uint8_t)json_i(buf, "channel", 0));
@@ -224,22 +178,21 @@ static esp_err_t post_node(httpd_req_t *req) {
 }
 
 static esp_err_t post_node_remove(httpd_req_t *req) {
-    if (!require_admin(req)) return ESP_OK;
     char buf[128];
-    if (!read_body(req, buf, sizeof buf)) { httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "body"); return ESP_FAIL; }
+    if (!web_auth_request(req, buf, sizeof buf)) return ESP_OK;
     return ok_json(req, c6_hub_remove_node((uint8_t)json_i(buf, "node_id", -1)));
 }
 
 static esp_err_t post_reset(httpd_req_t *req) {
-    if (!require_admin(req)) return ESP_OK;
+    char buf[16];   /* "{}": signed like any body */
+    if (!web_auth_request(req, buf, sizeof buf)) return ESP_OK;
     c6_hub_reset_race();
     return ok_json(req, true);
 }
 
 static esp_err_t post_volume(httpd_req_t *req) {
-    if (!require_admin(req)) return ESP_OK;
     char buf[128];
-    if (!read_body(req, buf, sizeof buf)) { httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "body"); return ESP_FAIL; }
+    if (!web_auth_request(req, buf, sizeof buf)) return ESP_OK;
     c6_hub_set_volume((uint8_t)json_i(buf, "volume", 60));
     return ok_json(req, true);
 }
@@ -266,9 +219,8 @@ static const struct { const char *name; lp_cmd_t cmd; } k_cmds[] = {
  * for a calibration a gate already calibrating (its C5 would refuse, on its USB
  * console only) is not sent but listed in "busy". */
 static esp_err_t post_command(httpd_req_t *req) {
-    if (!require_admin(req)) return ESP_OK;
     char buf[128], name[16];
-    if (!read_body(req, buf, sizeof buf)) { httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "body"); return ESP_FAIL; }
+    if (!web_auth_request(req, buf, sizeof buf)) return ESP_OK;
     const int32_t gate = json_i(buf, "gate", -2);
     lp_cmd_t cmd = 0;
     if (json_s(buf, "cmd", name, sizeof name))
@@ -347,9 +299,11 @@ static esp_err_t post_command(httpd_req_t *req) {
 }
 
 void c6_web_start(void) {
+    web_auth_init(s_admin_key, ADMIN_SALT, ADMIN_ITERATIONS, ADMIN_AUTH_OPEN);
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.lru_purge_enable = true;
-    cfg.max_uri_handlers = 10;
+    cfg.max_uri_handlers = 12;   /* 9 here + web_auth's 2 */
+    cfg.stack_size = 6144;       /* the signature's PSA HMAC under post_command: ~3.5 KB of the 4 KB default */
     httpd_handle_t srv = NULL;
     if (httpd_start(&srv, &cfg) != ESP_OK) { ESP_LOGE(TAG, "httpd start failed"); return; }
     const httpd_uri_t uris[] = {
@@ -364,5 +318,6 @@ void c6_web_start(void) {
         { .uri = "/api/command",  .method = HTTP_POST, .handler = post_command },
     };
     for (unsigned i = 0; i < sizeof uris / sizeof uris[0]; i++) httpd_register_uri_handler(srv, &uris[i]);
+    web_auth_register(srv);   /* POST /api/session, GET /auth.js */
     ESP_LOGI(TAG, "admin web on http://192.168.4.1/");
 }

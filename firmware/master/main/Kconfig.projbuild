@@ -43,11 +43,13 @@ menu "Checkpoint C6 master"
 
     comment "Web roles: spectators read live results; admin actions need this password."
     config C6_ADMIN_PASSWORD
-        string "Admin web password (128 bytes max, empty disables admin auth)"
+        string "Admin web password (empty disables admin auth)"
         default "checkpoint"
         help
-            Only its salted SHA-256 enters the firmware (main/CMakeLists.txt
-            generates admin_hash.h); the build fails above 128 bytes.
+            Any length. Only a key derived from it (PBKDF2) enters the firmware,
+            to check the page's signed admin requests (components/web_auth); it
+            never crosses the Wi-Fi. A listener on the AP who captures a signed
+            request can still test guesses offline: use a long random password.
 
     config C6_BOOT_CHIME
         bool "Play the coin sound once at boot (speaker check)"

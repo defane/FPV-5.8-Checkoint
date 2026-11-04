@@ -65,6 +65,9 @@ jobs:
             echo "version=5.0.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
             echo "tag=c5vrx5-v5.0.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
           fi
+      - uses: actions/setup-node@v4   # test/test_web_auth.mjs (the idf image has no node)
+        with:
+          node-version: 20
       - name: Host tests (quiet test, VTX deviation profile, dropout classifier, AFC, gain fade)
         shell: bash
         working-directory: test
@@ -131,6 +134,11 @@ jobs:
           cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/status_led/include test_status_led.c \
             ../components/status_led/status_led.c -o /tmp/test_status_led
           /tmp/test_status_led | tail -1
+          # Signed admin requests (components/web_auth): sessions, replay, HMAC; then the page side.
+          cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/web_auth/include test_web_auth.c \
+            ../components/web_auth/web_auth.c -o /tmp/test_web_auth
+          /tmp/test_web_auth | tail -1
+          node test_web_auth.mjs
       - name: Diagnostic log semantics
         run: |
           python3 test/test_field_diag_compare.py

@@ -102,6 +102,9 @@ permitted GPL reuse. Credit external sources used by C5VRX with the same care.
 - `components/fleet_proto/`, `components/race_timing/`, `components/espnow_link/`
   — the race-timing fleet: the C6<->C3 ESP-NOW protocol, the lap/sector engine,
   and the ESP-NOW transport.
+- `components/status_led/`, `components/web_auth/` — the boards' WS2812 status
+  indicator and the C3/C6 web pages' signed admin requests (sessions, replay
+  counter, HMAC-SHA256 with a PBKDF2 key; `www/auth.js` is the page side).
 - `firmware/detector/`, `firmware/node/` (node bridge) and `firmware/master/` (ESP32-C6
   race-timing master) — the ESP32 applications.
 - `test/` host tests, `tools/` console/log/build helpers, `docs/` the
