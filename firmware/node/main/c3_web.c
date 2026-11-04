@@ -130,14 +130,14 @@ static bool recv_body(httpd_req_t *req, char *buf, size_t cap)
     return true;
 }
 
-/* ---- admin auth (spectators read results; config and commands need a login) ---- */
-static char s_auth[160];
+/* ---- admin auth (spectators read results; config and commands need the password) ---- */
+static char s_auth[160];   /* expected "Basic <base64(:pass)>" (no username), empty = open */
 
 static void build_auth(void)
 {
     if (CONFIG_C3_ADMIN_PASSWORD[0] == '\0') { s_auth[0] = '\0'; return; }
     char up[96];
-    int n = snprintf(up, sizeof up, "%s:%s", CONFIG_C3_ADMIN_USER, CONFIG_C3_ADMIN_PASSWORD);
+    int n = snprintf(up, sizeof up, ":%s", CONFIG_C3_ADMIN_PASSWORD);
     unsigned char b64[128];
     size_t olen = 0;
     if (n <= 0 || mbedtls_base64_encode(b64, sizeof b64, &olen, (const unsigned char *)up,

@@ -162,7 +162,7 @@ Pinout (Kconfig defaults; crossed UART, common ground):
 C6 amp/UART pins are placeholders — check against the C6 board's strapping pins.
 **Temporary C5-as-master**: run the master on a spare C5 (`make flash
 FW=master-wave-c5`; amp on 9/8/7/10, UART 4/5). Protocols in depth, pairing, web
-roles (spectator vs admin login), degraded mode and the C5-as-master build:
+roles (spectator vs admin password), degraded mode and the C5-as-master build:
 `docs/fleet.md`, `docs/fleet.svg`, `docs/wiring-c5c5.svg`.
 
 ## Build and tests

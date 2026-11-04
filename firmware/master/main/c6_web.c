@@ -158,13 +158,13 @@ static esp_err_t ok_json(httpd_req_t *req, bool ok) {
     return httpd_resp_sendstr(req, ok ? "{\"ok\":true}" : "{\"ok\":false}");
 }
 
-/* ---- admin auth (spectators are read-only; admin actions need a login) ---- */
-static char s_auth[160];   /* expected "Basic <base64(user:pass)>", empty = open */
+/* ---- admin auth (spectators are read-only; admin actions need the password) ---- */
+static char s_auth[160];   /* expected "Basic <base64(:pass)>" (no username), empty = open */
 
 static void build_auth(void) {
     if (CONFIG_C6_ADMIN_PASSWORD[0] == '\0') { s_auth[0] = '\0'; return; }  /* auth disabled */
     char up[96];
-    int n = snprintf(up, sizeof up, "%s:%s", CONFIG_C6_ADMIN_USER, CONFIG_C6_ADMIN_PASSWORD);
+    int n = snprintf(up, sizeof up, ":%s", CONFIG_C6_ADMIN_PASSWORD);
     unsigned char b64[128];
     size_t olen = 0;
     if (n <= 0 || mbedtls_base64_encode(b64, sizeof b64, &olen, (const unsigned char *)up,

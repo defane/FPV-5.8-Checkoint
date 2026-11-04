@@ -26,9 +26,23 @@
   #events li { padding: 6px 0; border-top: 1px solid #2a313a; font-size: .9rem; }
   .muted { color: #8b97a7; }
   .pill { font-size: .8rem; padding: 2px 8px; border-radius: 999px; background: #2a313a; }
-  .pill.admin, .pill.ok { background: #14532d; color: #86efac; }
+  .pill.ok { background: #14532d; color: #86efac; }
   .pill.warn { background: #713f12; color: #fde68a; }
   .pill.busy { background: #1e3a8a; color: #93c5fd; }
+  .switch, .switch:active { display: inline-flex; align-items: center; gap: 8px; margin: 0; background: #2a313a; color: #e7ebf0;
+            border-radius: 999px; padding: 4px 10px 4px 4px; font-size: .8rem; }
+  .switch i { position: relative; width: 30px; height: 16px; border-radius: 999px; background: #0f1216; }
+  .switch i::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px;
+                     border-radius: 50%; background: #8b97a7; transition: left .15s; }
+  .switch[aria-checked=true] { background: #14532d; color: #86efac; }
+  .switch[aria-checked=true] i::after { left: 16px; background: #2ecc71; }
+  button.ghost { background: #2a313a; }
+  dialog { background: #1b2026; color: #e7ebf0; border: 1px solid #2a313a; border-radius: 10px; padding: 16px;
+           width: min(300px, calc(100vw - 64px)); }
+  dialog::backdrop { background: rgba(0, 0, 0, .6); }
+  dialog h3 { margin: 0 0 12px; font-size: 1rem; }
+  dialog input { width: 100%; box-sizing: border-box; }
+  dialog button { margin: 0; }
   .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   input[type=text], input[type=password] { background: #0f1216; color: #e7ebf0; border: 1px solid #2a313a; border-radius: 6px; padding: 6px; }
   .admin-only { display: none; }
@@ -38,14 +52,18 @@
 <body>
 <header style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
   <span>Checkpoint C3 <span id="link" class="pill">…</span></span>
-  <span class="bar"><span id="role" class="pill">spectator</span><button id="login_btn" style="margin:0">Admin login</button></span>
+  <span class="bar"><button id="role" class="switch" role="switch" aria-checked="false"><i></i><span id="role_txt">spectator</span></button></span>
 </header>
 <main>
-  <div id="login" class="card" style="display:none;margin-bottom:8px"><div class="bar">
-    <input id="u" type="text" placeholder="user" value="admin" style="width:110px">
-    <input id="p" type="password" placeholder="password" style="width:140px">
-    <button id="unlock" style="margin:0">Unlock</button><span id="login_msg" class="muted"></span>
-  </div></div>
+  <dialog id="login">
+    <form id="login_form">
+      <h3>Admin</h3>
+      <input id="p" type="password" placeholder="password" autocomplete="current-password" autofocus>
+      <div class="bar" style="margin-top:12px"><span id="login_msg" class="muted"></span>
+        <button type="button" id="login_cancel" class="ghost" style="margin-left:auto">Cancel</button>
+        <button>Unlock</button></div>
+    </form>
+  </dialog>
 
   <h2>Live</h2>
   <div class="card row">
@@ -103,17 +121,30 @@ let dirty = false, auth = null, admin = false;
 ["alpha","active","hyst","drop","minpeak","refr","stale"].forEach(
   id => $(id).addEventListener("input", () => { dirty = true; }));
 
-$("login_btn").addEventListener("click", () => {
-  const e = $("login"); e.style.display = e.style.display === "none" ? "block" : "none";
+function setAdmin(on) {             // back to spectator forgets the password and unsaved detector edits
+  admin = on;
+  if (!on) { auth = null; dirty = false; }
+  document.body.classList.toggle("is-admin", on);
+  $("role").setAttribute("aria-checked", on);
+  $("role_txt").textContent = on ? "admin" : "spectator";
+}
+
+$("role").addEventListener("click", () => {
+  if (admin) return setAdmin(false);
+  $("p").value = ""; $("login_msg").textContent = "";
+  $("login").showModal();
 });
-$("unlock").addEventListener("click", async () => {
-  auth = "Basic " + btoa($("u").value + ":" + $("p").value);
-  const r = await fetch("/api/auth", { headers: { "Authorization": auth } });
-  if (r.ok) {
-    admin = true; document.body.classList.add("is-admin");
-    $("role").textContent = "admin"; $("role").className = "pill admin";
-    $("login").style.display = "none"; $("login_msg").textContent = "";
-  } else { auth = null; $("login_msg").textContent = "wrong credentials"; }
+$("login_cancel").addEventListener("click", () => $("login").close());
+$("login").addEventListener("close", () => { $("p").value = ""; });   // unlock, Cancel or Esc
+$("login_form").addEventListener("submit", async e => {
+  e.preventDefault();
+  // password only: HTTP Basic with an empty user-id, UTF-8 so any password survives btoa()
+  const a = "Basic " + btoa(String.fromCharCode(...new TextEncoder().encode(":" + $("p").value)));
+  try {
+    const r = await fetch("/api/auth", { headers: { "Authorization": a } });
+    if (r.ok) { auth = a; setAdmin(true); $("login").close(); }
+    else { $("login_msg").textContent = "wrong password"; $("p").select(); }
+  } catch (_) { $("login_msg").textContent = "offline"; }
 });
 
 function fillConfig(c) {
@@ -125,11 +156,6 @@ function fillConfig(c) {
   $("minpeak").value= (c.min_peak_db_x10 / 10).toFixed(1);
   $("refr").value   = c.refractory_ms;
   $("stale").value  = c.stale_ms;
-}
-
-function demote() {                  // the server forgot (or never had) our login
-  admin = false; document.body.classList.remove("is-admin");
-  $("role").textContent = "spectator"; $("role").className = "pill";
 }
 
 const upTime = s => s >= 3600 ? `${Math.floor(s / 3600)}h ${String(Math.floor(s / 60) % 60).padStart(2, "0")}m`
@@ -183,7 +209,7 @@ $("save").addEventListener("click", async () => {
     const h = { "Content-Type": "application/json" };
     if (auth) h["Authorization"] = auth;
     const r = await fetch("/api/config", { method: "POST", headers: h, body: JSON.stringify(body) });
-    if (r.status === 401) { demote(); $("msg").textContent = "login required"; return; }
+    if (r.status === 401) { setAdmin(false); $("msg").textContent = "password required"; return; }
     dirty = false;
     $("msg").textContent = "saved";
     setTimeout(() => $("msg").textContent = "", 1500);
@@ -198,7 +224,7 @@ async function sendCommand(cmd, force) {
   const h = { "Content-Type": "application/json" };
   if (auth) h["Authorization"] = auth;
   const r = await fetch("/api/command", { method: "POST", headers: h, body: JSON.stringify({ cmd, force }) });
-  if (r.status === 401) { demote(); return { ok: false, msg: "login required" }; }
+  if (r.status === 401) { setAdmin(false); return { ok: false, msg: "password required" }; }
   return r.ok ? r.json() : { ok: false, msg: "failed (" + r.status + ")" };
 }
 

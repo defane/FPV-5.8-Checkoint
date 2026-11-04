@@ -34,10 +34,7 @@ menu "Checkpoint C3 bridge"
         int "Boot: wait this long for the C6 before degraded mode (ms)"
         default 8000
 
-    comment "Degraded web: spectators read results; changing the band needs this login."
-    config C3_ADMIN_USER
-        string "Degraded-web admin username"
-        default "admin"
+    comment "Degraded web: spectators read results; changing the band needs this password."
     config C3_ADMIN_PASSWORD
         string "Degraded-web admin password (empty disables admin auth)"
         default "checkpoint"

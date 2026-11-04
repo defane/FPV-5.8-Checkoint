@@ -46,9 +46,11 @@ passes. It scales to a multi-gate race-timing fleet.
 
 The web has **two roles**: **spectators** watch the live standings and status
 read-only (no login), while **admin** actions — pairing, gate order, channel
-assignment, reset, a gate's calibration or reboot, and (on a degraded C3) band
-selection — require a login
-(`CONFIG_*_ADMIN_USER` / `_PASSWORD`, sent as HTTP Basic and checked server-side).
+assignment, reset, volume, a gate's calibration or reboot, and (on a degraded
+C3) detector tuning and band selection — require the admin password
+(`CONFIG_*_ADMIN_PASSWORD`, no username): the spectator/admin toggle in the
+header opens a password dialog; the password is sent as HTTP Basic with an
+empty user and checked server-side.
 
 ## Layout
 

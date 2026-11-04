@@ -41,10 +41,7 @@ menu "Checkpoint C6 master"
         default 1
         range 1 13
 
-    comment "Web roles: spectators read live results; admin actions need this login."
-    config C6_ADMIN_USER
-        string "Admin web username"
-        default "admin"
+    comment "Web roles: spectators read live results; admin actions need this password."
     config C6_ADMIN_PASSWORD
         string "Admin web password (empty disables admin auth)"
         default "checkpoint"

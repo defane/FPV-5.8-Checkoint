@@ -38,9 +38,13 @@ with no change on the gate side.
   boot, the C3 serves its own local AP + web (band selection → `SET_CHANNEL`,
   pass display).
 - **Web roles:** two levels. A **spectator** sees timings/status read-only (no
-  login); **admin** actions (pairing, gate order, channel, reset; band selection
-  on a degraded C3) need a login (`CONFIG_*_ADMIN_USER`/`_PASSWORD`, HTTP Basic
-  header checked on the ESP). An empty password disables admin auth.
+  login); **admin** actions (pairing, gate order, channel, reset, volume, a
+  gate's calibration or reboot; detector tuning and band selection on a degraded
+  C3) need the admin password (`CONFIG_*_ADMIN_PASSWORD`, no
+  username): the header's spectator/admin toggle opens a password dialog, the
+  password goes out as an HTTP Basic header with an empty user and is checked on
+  the ESP; toggling back to spectator forgets it. An empty password disables
+  admin auth.
 - **Constraint:** the C6 and C3 APs **and** ESP-NOW share the **same Wi-Fi
   channel** (`CONFIG_*_AP_CHANNEL` / `CONFIG_C6_AP_CHANNEL`).
 - **Limit:** the time base (ESP-NOW beacons) aims for ~10 ms; not a sub-ms photo
