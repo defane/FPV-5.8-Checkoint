@@ -131,25 +131,39 @@ static bool recv_body(httpd_req_t *req, char *buf, size_t cap)
 }
 
 /* ---- admin auth (spectators read results; config and commands need the password) ---- */
-static char s_auth[160];   /* expected "Basic <base64(:pass)>" (no username), empty = open */
+/* 128 bytes of password make a 178-byte Authorization header, well inside the
+ * 1 KiB request-header budget (CONFIG_HTTPD_MAX_REQ_HDR_LEN) next to a phone
+ * browser's other headers. A longer one fails the build. */
+#define ADMIN_PASSWORD_MAX 128
+_Static_assert(sizeof CONFIG_C3_ADMIN_PASSWORD - 1 <= ADMIN_PASSWORD_MAX,
+               "CONFIG_C3_ADMIN_PASSWORD is longer than 128 bytes");
+#define B64_LEN(n) (4 * (((n) + 2) / 3))
+/* expected "Basic <base64(:pass)>" (no username); empty = locked, never open */
+static char s_auth[sizeof "Basic " + B64_LEN(1 + ADMIN_PASSWORD_MAX)];
 
 static void build_auth(void)
 {
-    if (CONFIG_C3_ADMIN_PASSWORD[0] == '\0') { s_auth[0] = '\0'; return; }
-    char up[96];
-    int n = snprintf(up, sizeof up, ":%s", CONFIG_C3_ADMIN_PASSWORD);
-    unsigned char b64[128];
+    if (CONFIG_C3_ADMIN_PASSWORD[0] == '\0') return;   /* auth disabled */
+    char up[1 + ADMIN_PASSWORD_MAX + 1];
+    const int n = snprintf(up, sizeof up, ":%s", CONFIG_C3_ADMIN_PASSWORD);
     size_t olen = 0;
-    if (n <= 0 || mbedtls_base64_encode(b64, sizeof b64, &olen, (const unsigned char *)up,
-                                        (size_t)n) != 0) { s_auth[0] = '\0'; return; }
-    snprintf(s_auth, sizeof s_auth, "Basic %.*s", (int)olen, (const char *)b64);
+    memcpy(s_auth, "Basic ", 6);
+    if (n < 0 || (size_t)n >= sizeof up ||
+        mbedtls_base64_encode((unsigned char *)s_auth + 6, sizeof s_auth - 6, &olen,
+                              (const unsigned char *)up, (size_t)n) != 0) {
+        s_auth[0] = '\0';
+        ESP_LOGE(TAG, "admin password encoding failed: admin actions locked");
+    }
 }
 
 static bool require_admin(httpd_req_t *req)
 {
-    if (s_auth[0] == '\0') return true;
-    char hdr[192];
-    if (httpd_req_get_hdr_value_str(req, "Authorization", hdr, sizeof hdr) == ESP_OK &&
+    if (CONFIG_C3_ADMIN_PASSWORD[0] == '\0') return true;   /* admin auth disabled */
+    /* One spare byte: ESP-IDF truncates a value exactly the buffer's size and still
+     * returns ESP_OK, so a longer header always mismatches here. */
+    char hdr[sizeof s_auth + 1];
+    if (s_auth[0] != '\0' &&
+        httpd_req_get_hdr_value_str(req, "Authorization", hdr, sizeof hdr) == ESP_OK &&
         strcmp(hdr, s_auth) == 0)
         return true;
     httpd_resp_set_status(req, "401 Unauthorized");

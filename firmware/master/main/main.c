@@ -15,6 +15,12 @@
 
 static const char *TAG = "c6";
 
+/* WPA2 takes an 8..63-character passphrase: a shorter one would leave the AP
+ * open and a longer one would be truncated, so both fail the build. */
+_Static_assert(sizeof CONFIG_C6_AP_PASSWORD == 1 ||
+               (sizeof CONFIG_C6_AP_PASSWORD - 1 >= 8 && sizeof CONFIG_C6_AP_PASSWORD - 1 <= 63),
+               "CONFIG_C6_AP_PASSWORD: empty (open AP) or 8 to 63 characters");
+
 static void wifi_ap_start(void) {
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());

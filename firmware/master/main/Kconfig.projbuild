@@ -34,7 +34,7 @@ menu "Checkpoint C6 master"
         string "Wi-Fi SoftAP SSID"
         default "checkpoint-c6"
     config C6_AP_PASSWORD
-        string "Wi-Fi SoftAP password (>= 8 chars, empty = open)"
+        string "Wi-Fi SoftAP password (8 to 63 chars, empty = open)"
         default "dronepass"
     config C6_AP_CHANNEL
         int "Wi-Fi SoftAP / ESP-NOW channel"
@@ -43,7 +43,7 @@ menu "Checkpoint C6 master"
 
     comment "Web roles: spectators read live results; admin actions need this password."
     config C6_ADMIN_PASSWORD
-        string "Admin web password (empty disables admin auth)"
+        string "Admin web password (128 bytes max, empty disables admin auth)"
         default "checkpoint"
 
     config C6_BOOT_CHIME

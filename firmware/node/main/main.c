@@ -23,6 +23,12 @@ static const char *TAG = "c3";
 static void deg_pass(const lp_event_t *e) { status_led_pass(); c3_store_add_event(e); }
 static void deg_stats(const lp_stats_t *s) { c3_store_set_stats(s); }
 
+/* WPA2 takes an 8..63-character passphrase: a shorter one would leave the AP
+ * open and a longer one would be truncated, so both fail the build. */
+_Static_assert(sizeof CONFIG_C3_AP_PASSWORD == 1 ||
+               (sizeof CONFIG_C3_AP_PASSWORD - 1 >= 8 && sizeof CONFIG_C3_AP_PASSWORD - 1 <= 63),
+               "CONFIG_C3_AP_PASSWORD: empty (open AP) or 8 to 63 characters");
+
 /* AP on the fleet channel (shared with the C6 AP and ESP-NOW). Always up: it
  * carries ESP-NOW in relay mode and the web in degraded mode. */
 static void wifi_ap_start(void) {
