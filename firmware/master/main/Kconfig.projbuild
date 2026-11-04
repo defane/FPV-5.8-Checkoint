@@ -45,6 +45,9 @@ menu "Checkpoint C6 master"
     config C6_ADMIN_PASSWORD
         string "Admin web password (128 bytes max, empty disables admin auth)"
         default "checkpoint"
+        help
+            Only its salted SHA-256 enters the firmware (main/CMakeLists.txt
+            generates admin_hash.h); the build fails above 128 bytes.
 
     config C6_BOOT_CHIME
         bool "Play the coin sound once at boot (speaker check)"

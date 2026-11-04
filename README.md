@@ -50,7 +50,8 @@ assignment, reset, volume, a gate's calibration or reboot, and (on a degraded
 C3) detector tuning and band selection — require the admin password
 (`CONFIG_*_ADMIN_PASSWORD`, no username): the spectator/admin toggle in the
 header opens a password dialog; the password is sent as HTTP Basic with an
-empty user and checked server-side.
+empty user and checked server-side against its salted SHA-256, the only form
+the firmware holds (128 bytes max).
 
 ## Layout
 

@@ -38,5 +38,8 @@ menu "Checkpoint C3 bridge"
     config C3_ADMIN_PASSWORD
         string "Degraded-web admin password (128 bytes max, empty disables admin auth)"
         default "checkpoint"
+        help
+            Only its salted SHA-256 enters the firmware (main/CMakeLists.txt
+            generates admin_hash.h); the build fails above 128 bytes.
 
 endmenu

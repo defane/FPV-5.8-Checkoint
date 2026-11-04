@@ -44,7 +44,9 @@ with no change on the gate side.
   username): the header's spectator/admin toggle opens a password dialog, the
   password goes out as an HTTP Basic header with an empty user and is checked on
   the ESP; toggling back to spectator forgets it. An empty password disables
-  admin auth.
+  admin auth. The firmware never holds the password, only its salted SHA-256
+  (generated at build time; 128 bytes max, a longer one fails the build). It
+  still crosses the Wi-Fi in clear (plain HTTP): anyone on the AP can sniff it.
 - **Constraint:** the C6 and C3 APs **and** ESP-NOW share the **same Wi-Fi
   channel** (`CONFIG_*_AP_CHANNEL` / `CONFIG_C6_AP_CHANNEL`).
 - **Limit:** the time base (ESP-NOW beacons) aims for ~10 ms; not a sub-ms photo
