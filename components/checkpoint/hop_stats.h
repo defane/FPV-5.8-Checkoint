@@ -69,6 +69,10 @@ static inline uint32_t hs_settle_us(const uint32_t *t_us, const uint32_t *power,
     return n - first < tail ? HS_UNSETTLED : t_us[first];
 }
 
+/* A ring of cap entries after count writes: how many it holds, and its oldest slot. */
+static inline size_t hs_ring_kept(uint32_t count, size_t cap) { return count < cap ? count : cap; }
+static inline size_t hs_ring_oldest(uint32_t count, size_t cap) { return count < cap ? 0 : count % cap; }
+
 /* Refresh per channel in Hz x10 for a scan of `channels`, one slot being the hop,
  * its settling and one power window. */
 static inline uint32_t hs_rate_x10(uint32_t hop_us, uint32_t settle_us, uint32_t window_us, unsigned channels)

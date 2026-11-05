@@ -134,6 +134,7 @@ cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/checkpoint \
    test_hop_stats.c -o /tmp/t && /tmp/t
 node test_web_auth.mjs   # the page side (auth.js), Node 18+
 python3 test_web_mock.py # tools/web_mock.py against the firmware's /api/state and buffers
+python3 test_scan_analyze.py   # tools/scan_analyze.py on synthetic recordings
 ```
 
 ## Architecture

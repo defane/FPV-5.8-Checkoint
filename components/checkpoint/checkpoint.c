@@ -276,7 +276,8 @@ void checkpoint_help(void)
            "  a/A smoothing alpha -/+0.05   t/T activity threshold -/+1 dB   h/H hysteresis -/+0.5 dB\n"
            "  d/D pass drop -/+0.5 dB        m/M minimum peak -/+1 dB         r/R refractory -/+250 ms\n"
            "  l live C/N trace on/off (20 lines/s)   0 defaults   k show\n"
-           "  s hop bench: time R1-R8 retunes, no detection for about 15 s (docs/bench.md)\n");
+           "  s hop bench: time R1-R8 retunes, no detection for about 15 s (docs/bench.md)\n"
+           "  S scan prototype: start, then K S again to stop and print; g/G its gain -/+4 (docs/bench.md)\n");
     checkpoint_print();
 }
 
@@ -305,6 +306,8 @@ bool checkpoint_key(char key)
     case '0': c = pd_config_default(); break;
     case 'k': case '?': checkpoint_print(); return true;
     case 's': hop_bench_start(); return true;
+    case 'S': scan_bench_toggle(); return true;
+    case 'g': case 'G': scan_bench_gain(key == 'G'); return true;
     default: return false;
     }
     if (!pd_config_valid(&c)) {

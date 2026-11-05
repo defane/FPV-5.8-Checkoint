@@ -73,10 +73,10 @@ detector sets it to `n`).
   saved with `settings_save()`) and a calibration (`filter_request()` /
   `filter_request_full()`, the console's F/B) or reboot (`COMMAND`). Production
   has no console, so every operator need goes through the link. The one other
-  exception is bench-only: `K` then `s` (`components/checkpoint/hop_bench.c`,
+  exception is bench-only: `K` then `s` or `S` (`components/checkpoint/hop_bench.c`,
   `docs/bench.md`) owns the receiver like `scan()` and calls libphy's
   `phy_set_freq()` and AGC-off functions directly (operator-approved) to measure
-  Raceband hops.
+  Raceband hops and try a scan.
 - The splash window is not cosmetic: `menu_stub.c` keeps its flag (BOOT_PHASE
   runs only under it) and the menu's TX ownership (calibrations and profile
   switches rely on it). Never turn `menu_splash_active()` or
@@ -207,6 +207,7 @@ cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/web_auth/include \
 cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/checkpoint test_hop_stats.c -o /tmp/t && /tmp/t
 node test_web_auth.mjs   # auth.js (page side of web_auth)
 python3 test_web_mock.py # tools/web_mock.py against the firmware's /api/state and buffers
+python3 test_scan_analyze.py   # tools/scan_analyze.py on synthetic recordings
 ```
 
 CI (`.github/workflows/c5vrx5.yml`) builds all three firmwares and runs the host

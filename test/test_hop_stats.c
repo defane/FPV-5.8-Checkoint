@@ -66,6 +66,11 @@ int main(void)
     CHECK("tail over the maximum", hs_settle_us(t, p, N, HS_TAIL_MAX + 1u, &level) == HS_UNSETTLED);
     CHECK("trace over the maximum", hs_settle_us(t, p, HS_TRACE_MAX + 1u, 4, &level) == HS_UNSETTLED);
 
+    CHECK("ring not full", hs_ring_kept(3, 10) == 3 && hs_ring_oldest(3, 10) == 0);
+    CHECK("ring exactly full", hs_ring_kept(10, 10) == 10 && hs_ring_oldest(10, 10) == 0);
+    CHECK("ring wrapped", hs_ring_kept(13, 10) == 10 && hs_ring_oldest(13, 10) == 3);
+    CHECK("empty ring", hs_ring_kept(0, 10) == 0 && hs_ring_oldest(0, 10) == 0);
+
     /* The issue's budget: 8 channels. */
     CHECK("1 kHz needs a 125 us slot", hs_rate_x10(0, 25, 100, 8) == 10000);
     CHECK("1 ms hop + 102 us window", hs_rate_x10(1000, 0, 102, 8) == 1134);

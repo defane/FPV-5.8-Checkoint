@@ -34,6 +34,7 @@ Pass detection on the tuned channel (`components/pass_detector`, pure C).
 
 Other keys: `K` then `l` (live C/N trace, 20 lines/s), `0` (defaults), `k`
 (show), `s` (hop bench: [bench.md](bench.md#4-hop-bench-can-one-c5-scan-raceband)),
+`S` (scan prototype, `g`/`G` its gain: [bench.md](bench.md#5-scan-prototype-do-real-passes-stand-out)),
 `q` (close). The `K` window stays open 5 s after each key. At the top
 level, `T` prints the `CHECKPOINT` line.
 

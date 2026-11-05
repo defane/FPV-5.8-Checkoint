@@ -117,3 +117,40 @@ channel like `full`, R1 to R8, from a single Wi-Fi centre. `phy_rfagc_disable()`
 (the refresh figures above count it; the `per_channel_hz` of that run did not). Still to
 prove: real passes, a moving VTX, sensitivity at range with this fixed gain, and hours of
 continuous hopping.
+
+## 5. Scan prototype: do real passes stand out?
+
+The hop bench says a scan is fast enough; this says whether it detects anything. It loops
+the `force` hop over R1-R8 with one power window per channel and records all of them. It
+is the tail of `components/checkpoint/hop_bench.c`, on the console only: no detection and
+no web health from this C5 while it runs.
+
+Its gain is 40 by default: at the hop bench's 52 a close VTX sits on the 4-bit IQ's rail and
+a pass only rises 3-4 dB. `K` then `g` or `G` moves it by 4, from 24 to 78, for the next scan
+(not saved). The aim: the VTX near the noise at rest, and around +15 dB at its closest,
+below the rail (about +20 dB). The channels are read R1 R5 R2 R6 R3 R7 R4 R8: what follows a
+strong channel in time is then never its neighbour in frequency, so a residue of the previous
+channel lands on another channel than a real bleed.
+
+1. Log the console to a file (`tio -L --log-file run.log <port>`, or `tools/flash.py <port>
+   --monitor-only --log run.log`). Set a VTX on a known channel, with the power low enough
+   that it does not saturate up close.
+2. `K` then `S` starts it: `SCANBENCH start`.
+3. Move the VTX past the antenna a few times, a second or so each, a few seconds apart.
+4. `K` then `S` again stops it, **within 20 s of the first pass**: only the last 20 s are
+   kept. The `SCAN,` lines print for a few seconds, up to `SCANBENCH done`.
+5. Reset the board, then read the recording:
+
+```sh
+python3 tools/scan_analyze.py run.log
+```
+
+It prints the real refresh, each channel's median and peak, and the passes: a channel rising
+10 dB above its own median (`--margin`), which rules out a steady signal, timed at the
+centroid of the peak. A pass seen on several channels at once goes to the strongest, and the
+others are listed as `also on`.
+
+What decides: every pass found, on the right channel, none invented, and neighbours well
+below it. For endurance, leave it running (one hour at most): a `SCANBENCH live` line every
+10 s gives the refresh, `no_data` (windows that could not be read) and each channel's peak,
+then do a few passes and stop it. The refresh must not sag and passes must still come out.
