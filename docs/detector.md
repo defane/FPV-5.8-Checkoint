@@ -33,7 +33,8 @@ Pass detection on the tuned channel (`components/pass_detector`, pure C).
 | `stale_ms` | 1000 ms | (fixed) |
 
 Other keys: `K` then `l` (live C/N trace, 20 lines/s), `0` (defaults), `k`
-(show), `q` (close). The `K` window stays open 5 s after each key. At the top
+(show), `s` (hop bench: [bench.md](bench.md#4-hop-bench-can-one-c5-scan-raceband)),
+`q` (close). The `K` window stays open 5 s after each key. At the top
 level, `T` prints the `CHECKPOINT` line.
 
 **Setting `active_db`:** put it below the C/N of a drone passing the gate, but

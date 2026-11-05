@@ -18,7 +18,8 @@
  * or the C6 master for its own gate) gets the console's T as health in STATS
  * and its B, F and a reset as link COMMANDs. Apart from those and SET_CHANNEL
  * (a retune, saved in the engine's settings like a console retune) the
- * checkpoint only reads the receiver. */
+ * checkpoint only reads the receiver; the console's K s (hop_bench.c) is a
+ * bench-only exception. */
 #include "checkpoint.h"
 #include "receiver.h"
 #include <stdio.h>
@@ -28,6 +29,7 @@
 #include "esp_heap_caps.h"
 #include "esp_system.h"
 #include "esp_timer.h"
+#include "hop_bench.h"
 #include "pass_detector.h"
 #include "rf.h"
 #include "sdkconfig.h"
@@ -273,7 +275,8 @@ void checkpoint_help(void)
     printf("CHECKPOINT K + key (lower = down, upper = up; K stays open 5 s after each key, q closes):\n"
            "  a/A smoothing alpha -/+0.05   t/T activity threshold -/+1 dB   h/H hysteresis -/+0.5 dB\n"
            "  d/D pass drop -/+0.5 dB        m/M minimum peak -/+1 dB         r/R refractory -/+250 ms\n"
-           "  l live C/N trace on/off (20 lines/s)   0 defaults   k show\n");
+           "  l live C/N trace on/off (20 lines/s)   0 defaults   k show\n"
+           "  s hop bench: time R1-R8 retunes, no detection for about 15 s (docs/bench.md)\n");
     checkpoint_print();
 }
 
@@ -301,6 +304,7 @@ bool checkpoint_key(char key)
         return true;
     case '0': c = pd_config_default(); break;
     case 'k': case '?': checkpoint_print(); return true;
+    case 's': hop_bench_start(); return true;
     default: return false;
     }
     if (!pd_config_valid(&c)) {

@@ -130,6 +130,8 @@ cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/status_led/include \
    test_status_led.c ../components/status_led/status_led.c -o /tmp/t && /tmp/t
 cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/web_auth/include \
    test_web_auth.c ../components/web_auth/web_auth.c -o /tmp/t && /tmp/t
+cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/checkpoint \
+   test_hop_stats.c -o /tmp/t && /tmp/t
 node test_web_auth.mjs   # the page side (auth.js), Node 18+
 python3 test_web_mock.py # tools/web_mock.py against the firmware's /api/state and buffers
 ```
