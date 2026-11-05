@@ -176,7 +176,10 @@ firmware/port menu when an arg is omitted), plus `make monitor`, `make variants`
 (`detector-xiao-c5`, `detector-wave-c5-lcd`, `master-wave-c5`); each variant is an
 overlay on the role's `sdkconfig.defaults` and builds in its own dir. flash/monitor fall back to esptool / a serial terminal on the
 already-built image when ESP-IDF is not installed (build it elsewhere, flash
-here). The raw commands:
+here). `make web-master` / `make web-node` (`tools/web_mock.py`) serve the C6/C3
+pages from disk against a simulated `/api`, so a page edit needs no build or
+flash; a new `/api/state` field or a changed POST buffer goes in the mock too
+(`test/test_web_mock.py` fails otherwise). The raw commands:
 
 ```sh
 . ~/esp/esp-idf-v6.0.2/export.sh
@@ -198,6 +201,7 @@ cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/status_led/include \
 cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/web_auth/include \
   test_web_auth.c ../components/web_auth/web_auth.c -o /tmp/t && /tmp/t
 node test_web_auth.mjs   # auth.js (page side of web_auth)
+python3 test_web_mock.py # tools/web_mock.py against the firmware's /api/state and buffers
 ```
 
 CI (`.github/workflows/c5vrx5.yml`) builds all three firmwares and runs the host

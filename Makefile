@@ -8,6 +8,8 @@
 #   make flash  [FW=<name>] [PORT=<port>]    flash one (interactive menu if omitted)
 #   make monitor [FW=<name>] [PORT=<port>]   serial monitor (Ctrl-] to quit)
 #   make clean                               remove all build dirs
+#   make web-master / web-node               the web pages on a mock server, no board
+#                                            (tools/web_mock.py; WEB_ARGS="--vtx --latency 300")
 #
 # FW= names: a role (detector/node/master) is its default board; "<role>-<tag>"
 # is a board variant (see `make variants`).
@@ -18,6 +20,7 @@
 IDF_EXPORT ?= $(HOME)/esp/esp-idf-v6.0.2/export.sh
 FW         ?=
 PORT       ?=
+WEB_ARGS   ?=
 export IDF_EXPORT
 
 FW_SH := tools/fw.sh
@@ -27,6 +30,7 @@ FW_SH := tools/fw.sh
 
 help:
 	@$(FW_SH) help
+	@echo "Web pages without a board: make web-master | web-node [WEB_ARGS=...] (tools/web_mock.py --help)"
 
 variants:
 	@$(FW_SH) variants
@@ -45,3 +49,6 @@ monitor:
 
 clean:
 	@$(FW_SH) clean
+
+web-%:
+	@python3 tools/web_mock.py $* $(WEB_ARGS)

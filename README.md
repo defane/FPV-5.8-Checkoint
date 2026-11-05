@@ -92,7 +92,18 @@ not installed, so you can build in one place and flash in another.
 For local, uncommitted settings — the Wi-Fi AP and admin-web passwords, or
 enabling audio — put them in `firmware/<role>/sdkconfig.local.defaults` (one
 `CONFIG_...=...` per line). It is gitignored, and `make`/`tools/fw.sh` append it
-last so it overrides the committed defaults. The raw commands:
+last so it overrides the committed defaults.
+
+To work on the web pages without a board, `make web-master` (<http://127.0.0.1:8080/>)
+or `make web-node` (port 8081) runs `tools/web_mock.py`: it serves the real pages from
+disk, so a browser reload shows an edit, no build and no flash. `/api/*` answers like
+the firmware on a simulated race, admin actions take effect (password `checkpoint`) and
+signed requests are checked as on the ESP. `WEB_ARGS` passes its options: `--vtx` (a
+strong carrier on every gate, for the calibration guard), `--latency 300`, `--host
+0.0.0.0` (to open it from a phone), `--password ""`. Stopping and restarting it is an
+ESP reboot.
+
+The raw commands:
 
 ```sh
 . ~/esp/esp-idf-v6.0.2/export.sh
@@ -120,6 +131,7 @@ cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/status_led/include \
 cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/web_auth/include \
    test_web_auth.c ../components/web_auth/web_auth.c -o /tmp/t && /tmp/t
 node test_web_auth.mjs   # the page side (auth.js), Node 18+
+python3 test_web_mock.py # tools/web_mock.py against the firmware's /api/state and buffers
 ```
 
 ## Architecture

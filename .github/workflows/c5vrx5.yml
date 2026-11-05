@@ -141,6 +141,7 @@ jobs:
           node test_web_auth.mjs
       - name: Diagnostic log semantics
         run: |
+          python3 test/test_web_mock.py
           python3 test/test_field_diag_compare.py
           python3 test/test_flash_tool.py
           python3 test/test_diag_snapshot_runtime.py
