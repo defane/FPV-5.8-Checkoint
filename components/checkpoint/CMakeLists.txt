@@ -7,4 +7,4 @@
 idf_component_register(
     SRCS "checkpoint.c" "checkpoint_link.c" "hop_bench.c"
     INCLUDE_DIRS "."
-    REQUIRES c5vrx_rx pass_detector link_proto esp_driver_uart esp_timer)
+    REQUIRES c5vrx_rx pass_detector link_proto esp_driver_gpio esp_driver_uart esp_timer)

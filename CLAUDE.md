@@ -108,7 +108,7 @@ per-board pinout: README "Pinout" + `docs/wiring-*.svg`.
 | 7, 10 | reserved 7th/8th DAC branches | free with video off; 7 is a strapping pin (never SD) |
 | 13, 14 | USB-Serial-JTAG (console, flashing) | forbidden |
 | 16–22 | SPI flash | forbidden |
-| 26 | antenna switch (C5-Zero) | forbidden |
+| 26 | antenna switch (C5-Zero): high IPEX, low onboard | never driven by default; only `K` `i` or `CONFIG_CHECKPOINT_ANTENNA_IPEX`, C5-Zero only |
 | 28 | BOOT button | input, strapping |
 | 6, 8 | C5 ↔ C3 UART link | TX 6, RX 8 (C5-Zero header pins, free with video off; GPIO 15 is not broken out) |
 

@@ -1,3 +1,19 @@
+menu "Checkpoint antenna"
+
+    config CHECKPOINT_ANTENNA_IPEX
+        bool "Boot on the IPEX antenna (Waveshare ESP32-C5-Zero only)"
+        default n
+        help
+            Drives GPIO 26 high before the radio starts: on the C5-Zero it is the
+            antenna switch, high for the IPEX connector, low for the onboard
+            antenna. Off, the firmware leaves GPIO 26 alone and the board stays on
+            its default, the onboard antenna. Only for a C5-Zero: GPIO 26 is
+            something else, or nothing, on other boards. On the bench, K then i
+            switches the antenna at run time. A boot with nothing on the IPEX
+            connector is deaf; recalibrate (B, VTX off) after changing antenna.
+
+endmenu
+
 menu "Checkpoint C5<->C3 link"
 
     config CHECKPOINT_LINK_ENABLE

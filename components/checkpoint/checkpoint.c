@@ -26,6 +26,7 @@
 #include <stdlib.h>
 #include "checkpoint_link.h"
 #include "cn_estimate.h"
+#include "driver/gpio.h"
 #include "esp_heap_caps.h"
 #include "esp_system.h"
 #include "esp_timer.h"
@@ -270,6 +271,27 @@ void checkpoint_link_command(uint8_t cmd)
     }
 }
 
+/* The Waveshare ESP32-C5-Zero's antenna switch: high = IPEX, low = onboard. Left
+ * alone unless asked for: other boards use GPIO 26 otherwise. */
+#define ANTENNA_GPIO GPIO_NUM_26
+static bool s_antenna_ipex;
+
+static void antenna_select(bool ipex)
+{
+    gpio_reset_pin(ANTENNA_GPIO);
+    gpio_set_direction(ANTENNA_GPIO, GPIO_MODE_OUTPUT);
+    gpio_set_level(ANTENNA_GPIO, ipex);
+    s_antenna_ipex = ipex;
+    printf("CHECKPOINT antenna=%s (GPIO %d %s)\n", ipex ? "ipex" : "onboard", ANTENNA_GPIO, ipex ? "high" : "low");
+}
+
+void checkpoint_antenna_boot(void)
+{
+#if CONFIG_CHECKPOINT_ANTENNA_IPEX
+    antenna_select(true);
+#endif
+}
+
 void checkpoint_help(void)
 {
     printf("CHECKPOINT K + key (lower = down, upper = up; K stays open 5 s after each key, q closes):\n"
@@ -277,7 +299,8 @@ void checkpoint_help(void)
            "  d/D pass drop -/+0.5 dB        m/M minimum peak -/+1 dB         r/R refractory -/+250 ms\n"
            "  l live C/N trace on/off (20 lines/s)   0 defaults   k show\n"
            "  s hop bench: time R1-R8 retunes, no detection for about 15 s (docs/bench.md)\n"
-           "  S scan prototype: start, then K S again to stop and print; g/G its gain -/+4 (docs/bench.md)\n");
+           "  S scan prototype: start, then K S again to stop and print; g/G its gain -/+4 (docs/bench.md)\n"
+           "  i antenna onboard/IPEX, C5-Zero only: drives GPIO 26 (not saved)\n");
     checkpoint_print();
 }
 
@@ -308,6 +331,7 @@ bool checkpoint_key(char key)
     case 's': hop_bench_start(); return true;
     case 'S': scan_bench_toggle(); return true;
     case 'g': case 'G': scan_bench_gain(key == 'G'); return true;
+    case 'i': antenna_select(!s_antenna_ipex); return true;
     default: return false;
     }
     if (!pd_config_valid(&c)) {

@@ -52,6 +52,7 @@ void app_main(void)
      * reachable whatever a later boot step does. */
     console_start();
     firmware_print();   /* first log line names the exact build */
+    checkpoint_antenna_boot();
     if(!control_prepare()) {
         s_boot_stage="control_memory";
         printf("CONTROL stack reservation failed; USB status/download remain available\n");

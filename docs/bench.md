@@ -154,3 +154,23 @@ What decides: every pass found, on the right channel, none invented, and neighbo
 below it. For endurance, leave it running (one hour at most): a `SCANBENCH live` line every
 10 s gives the refresh, `no_data` (windows that could not be read) and each channel's peak,
 then do a few passes and stop it. The refresh must not sag and passes must still come out.
+
+### For later: hardware attenuation, for a more precise pass point
+
+Not needed yet: try the software gain first, it is free and set per gate. Come back to this
+when a gate needs to know more precisely where and when a drone passed:
+
+- **A directive or shielded antenna aimed at the gate** is the real gain: it narrows the zone
+  the C5 sees, so the pass peak gets sharper and the timing better.
+- **A fixed attenuator** (20 dB, on an IPEX to SMA lead, rated to 6 GHz: many stop lower) only
+  shifts the levels down: useful if the RF stage saturates before the gain setting can help.
+
+The IPEX connector is off by default. The C5-Zero's antenna switch is GPIO 26, high for the
+IPEX connector, low for the onboard antenna, and the firmware leaves it alone: with the VTX on
+R6, unplugging the IPEX antenna moved `power_db` by only 1-2 dB in `K` `s` on the onboard
+antenna, and by over 30 dB after `K` `i` (2026-11-05: +13 dB to the metric's floor). `K` then
+`i` switches it at run time (C5-Zero only, not saved, back to onboard after a reset;
+`CHECKPOINT antenna=` shows which) and `CONFIG_CHECKPOINT_ANTENNA_IPEX=y` boots on the IPEX
+connector, set before the radio starts so the calibration sees that antenna. Recalibrate (`B`,
+VTX off) after changing antenna. Too much attenuation misses a drone passing high or
+far from the antenna, and every pilot must fly the same power (25 mW and 600 mW are 14 dB apart).

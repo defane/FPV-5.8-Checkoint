@@ -10,6 +10,8 @@
 /* Call after the boot splash: the task and its state are allocated then,
  * not during the boot memory peak. */
 void checkpoint_start(void);
+/* Call before the radio starts: the antenna the calibration will see. */
+void checkpoint_antenna_boot(void);
 void checkpoint_print(void);   /* T: CHECKPOINT line */
 
 /* Console (console.c). */

@@ -10,5 +10,6 @@
 
 __attribute__((weak)) void checkpoint_start(void) {}
 __attribute__((weak)) void checkpoint_print(void) {}
+__attribute__((weak)) void checkpoint_antenna_boot(void) {}
 __attribute__((weak)) void checkpoint_help(void) {}
 __attribute__((weak)) bool checkpoint_key(char key) { (void)key; return false; }
