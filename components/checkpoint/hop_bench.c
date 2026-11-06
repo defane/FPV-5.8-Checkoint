@@ -14,7 +14,8 @@
  * operator-approved, on this bench only.
  * The scan prototype (K then S) loops the `force` hop over R1-R8 and records the
  * power of every channel, to see whether real passes stand out and for how long
- * it holds. At the end of the file.
+ * it holds, and the residue trace (K then z) times what a strong channel leaves in
+ * the next reading. Both at the end of the file.
  * Both own the receiver like scan() does (receiver_pause + s_scan_active, so the
  * control loop stops reading windows and steering AFC), at scan()'s fixed gain,
  * then restores the channel, offset and gain. No detection meanwhile, and nothing
@@ -334,20 +335,21 @@ void hop_bench_start(void)
  * "SCAN,t_us,p1..p8" lines for tools/scan_analyze.py. A SCANBENCH live line every
  * SCAN_LIVE_S shows it is still running, for endurance.
  * K then g/G sets its gain: a close VTX saturates the 4-bit IQ at the hop bench's 52,
- * and a pass must rise out of the noise without reaching the rail. The hops cross
+ * and at 40 the other channels fill with bursts; a pass must rise out of the noise
+ * without reaching the rail. The hops cross
  * the band (scan_order): the channel read after another is never its neighbour in
  * frequency, so a residue of the previous channel and a real bleed fall on different
  * channels, and each hop is the 4-channel step the hop bench measured. */
 #define SCAN_MAX_S        3600u
 #define SCAN_KEEP_S       20u
-#define SCAN_HZ           88u           /* measured with one window per hop */
-#define SCAN_FRESH_US     210u          /* two descriptors: no sample from before the hop */
+#define SCAN_HZ           57u           /* hop + SCAN_FRESH_US + one window, over 8 channels */
+#define SCAN_FRESH_US     1000u         /* the residue trace (K then z): gone by 1 ms */
 #define SCAN_YIELD_SWEEPS 16u           /* lets idle and priority 1 run */
 #define SCAN_LIVE_S       10u
 #define SCAN_HEADROOM     16384u        /* heap left for the rest of the firmware */
 #define SCAN_MIN_SWEEPS   500u
 #define SCAN_NO_DATA      0xffffu
-#define SCAN_GAIN_DEFAULT 40u
+#define SCAN_GAIN_DEFAULT 24u           /* onboard antenna, close passes: docs/bench.md */
 #define SCAN_GAIN_MIN     24u           /* the console's fixed gains */
 #define SCAN_GAIN_MAX     78u
 #define SCAN_GAIN_STEP    4u
@@ -496,5 +498,123 @@ void scan_bench_toggle(void)
         printf("SCANBENCH refused: no memory for the task\n");
         free(sc);
         s_running = s_scanning = false;
+    }
+}
+
+/* ---- Residue trace (console K then z) ---------------------------------------
+ * After a hop off a strong channel, the next channel's first window still shows
+ * that signal about 8 dB down (scan prototype, board 2026-11-05: it stayed with the
+ * channel read next, not with the neighbour in frequency). This times it: strongest
+ * channel to the quietest, a delay, then the IQ power of the four quarters of one
+ * window (25 us each), against the same hop from another quiet channel. The delay
+ * where both agree is how long a scan must wait, and the quarters which samples to
+ * skip. At the scan's gain, with a VTX close enough to read well above the noise. */
+#define RES_REPEATS     8u
+#define RES_QUARTERS    4u
+#define RES_SETTLE_MS   3u
+#define RES_LEVEL_READS 4u
+
+static const uint16_t k_res_delay_us[] = {0, 50, 100, 150, 200, 250, 300, 400, 500, 600, 800, 1000, 1500, 2000, 3000, 5000};
+#define RES_DELAYS (sizeof k_res_delay_us / sizeof k_res_delay_us[0])
+
+typedef struct {
+    uint8_t window[CONTROL_BYTES];
+    uint32_t level[CHANNELS];
+    uint32_t after[RES_DELAYS][RES_QUARTERS], control[RES_DELAYS][RES_QUARTERS];
+    uint32_t after_n[RES_DELAYS], control_n[RES_DELAYS];
+} residue_t;
+
+static void residue_levels(residue_t *r)
+{
+    for (unsigned ch = 0; ch < CHANNELS; ch++) {
+        hop(NULL, M_FORCE, ch);
+        vTaskDelay(pdMS_TO_TICKS(RES_SETTLE_MS));
+        uint32_t sum = 0, n = 0;
+        for (unsigned k = 0; k < RES_LEVEL_READS; k++) {
+            if (copy_control_window(r->window, CONTROL_BYTES)) {
+                sum += window_power(r->window, CONTROL_BYTES);
+                n++;
+            }
+            vTaskDelay(1);
+        }
+        r->level[ch] = n ? sum / n : 0u;
+    }
+}
+
+static void residue_measure(residue_t *r, unsigned from, unsigned to, uint32_t (*out)[RES_QUARTERS], uint32_t *count)
+{
+    const size_t q = CONTROL_BYTES / RES_QUARTERS;
+    for (unsigned d = 0; d < RES_DELAYS; d++)
+        for (unsigned rep = 0; rep < RES_REPEATS; rep++) {
+            hop(NULL, M_FORCE, from);
+            vTaskDelay(pdMS_TO_TICKS(RES_SETTLE_MS));
+            hop(NULL, M_FORCE, to);
+            const int64_t at = esp_timer_get_time() + k_res_delay_us[d];
+            while (esp_timer_get_time() < at) {}
+            if (!copy_control_window(r->window, CONTROL_BYTES)) continue;
+            for (unsigned k = 0; k < RES_QUARTERS; k++) out[d][k] += window_power(r->window + k * q, q);
+            count[d]++;
+        }
+}
+
+static void residue_report(const residue_t *r, unsigned top, unsigned quiet, unsigned other)
+{
+    printf("RESIDUE strong=R%u %.1f dB quiet=R%u %.1f dB control=R%u %.1f dB gain=%u%s\n", top + 1u,
+           power_db(r->level[top]), quiet + 1u, power_db(r->level[quiet]), other + 1u, power_db(r->level[other]),
+           s_scan_gain, power_db(r->level[top]) < 5.0f ? " (weak: bring the VTX closer)" : "");
+    for (unsigned d = 0; d < RES_DELAYS; d++) {
+        const uint32_t a = r->after_n[d] ? r->after_n[d] : 1u, c = r->control_n[d] ? r->control_n[d] : 1u;
+        printf("RESIDUE d_us=%u after_db=%.1f/%.1f/%.1f/%.1f control_db=%.1f/%.1f/%.1f/%.1f\n", k_res_delay_us[d],
+               power_db(r->after[d][0] / a), power_db(r->after[d][1] / a), power_db(r->after[d][2] / a),
+               power_db(r->after[d][3] / a), power_db(r->control[d][0] / c), power_db(r->control[d][1] / c),
+               power_db(r->control[d][2] / c), power_db(r->control[d][3] / c));
+    }
+}
+
+static void residue_task(void *arg)
+{
+    residue_t *r = arg;
+    saved_rx_t saved;
+    if (take_receiver("RESIDUE", s_scan_gain, &saved)) {
+        unsigned top = 0, quiet = 0, other = 0;
+        if (rf_set_channel(DIRECT_BASE) == ESP_OK) {
+            residue_levels(r);
+            top = (unsigned)hs_strongest(r->level, CHANNELS);
+            quiet = top ? 0u : 1u;
+            for (unsigned ch = 0; ch < CHANNELS; ch++)
+                if (ch != top && r->level[ch] < r->level[quiet]) quiet = ch;
+            other = quiet == (top ? 0u : 1u) ? (top == 2u ? 3u : 2u) : (top ? 0u : 1u);
+            for (unsigned ch = 0; ch < CHANNELS; ch++)
+                if (ch != top && ch != quiet && r->level[ch] < r->level[other]) other = ch;
+            residue_measure(r, top, quiet, r->after, r->after_n);
+            residue_measure(r, other, quiet, r->control, r->control_n);
+        }
+        const unsigned failed = give_receiver(&saved);
+        residue_report(r, top, quiet, other);
+        printf("RESIDUE done failed_retunes=%u restored=%s; reset the board before any other measurement\n",
+               failed, rf_channel()->name);
+    }
+    free(r);
+    s_running = false;
+    vTaskDelete(NULL);
+}
+
+void residue_bench_start(void)
+{
+    if (!receiver_free()) {
+        printf("RESIDUE refused: the receiver is busy\n");
+        return;
+    }
+    residue_t *r = calloc(1, sizeof *r);
+    if (!r) {
+        printf("RESIDUE refused: no memory\n");
+        return;
+    }
+    s_running = true;
+    printf("RESIDUE start: VTX on and close, no detection for about 5 s\n");
+    if (xTaskCreate(residue_task, "residue", BENCH_STACK, r, BENCH_PRIORITY, NULL) != pdPASS) {
+        printf("RESIDUE refused: no memory for the task\n");
+        free(r);
+        s_running = false;
     }
 }

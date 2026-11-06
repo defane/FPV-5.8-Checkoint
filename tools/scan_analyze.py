@@ -114,7 +114,7 @@ def find_passes(rows, margin, alpha, position=range(CHANNELS)):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("log", nargs="?", default="run.log", type=Path)
-    ap.add_argument("--margin", type=float, default=6.0, help="dB above a channel's resting level that counts (default 6)")
+    ap.add_argument("--margin", type=float, default=8.0, help="dB above a channel's resting level that counts (default 8)")
     ap.add_argument("--alpha", type=float, default=0.25, help="smoothing per sweep (default 0.25)")
     a = ap.parse_args()
     rows, header = read_scans(a.log.read_text(errors="replace"))

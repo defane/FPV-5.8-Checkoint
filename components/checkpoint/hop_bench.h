@@ -7,5 +7,7 @@
 void hop_bench_start(void);
 /* Starts the scan prototype, or stops it and prints what it recorded. */
 void scan_bench_toggle(void);
+/* Times what a strong channel leaves in the next window after a hop (K then z). */
+void residue_bench_start(void);
 /* The scan prototype's gain, one step up or down for the next scan (K then G or g). */
 void scan_bench_gain(bool up);

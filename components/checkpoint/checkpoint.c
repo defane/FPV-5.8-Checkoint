@@ -300,6 +300,7 @@ void checkpoint_help(void)
            "  l live C/N trace on/off (20 lines/s)   0 defaults   k show\n"
            "  s hop bench: time R1-R8 retunes, no detection for about 15 s (docs/bench.md)\n"
            "  S scan prototype: start, then K S again to stop and print; g/G its gain -/+4 (docs/bench.md)\n"
+           "  z residue trace: what a strong channel leaves after a hop (docs/bench.md)\n"
            "  i antenna onboard/IPEX, C5-Zero only: drives GPIO 26 (not saved)\n");
     checkpoint_print();
 }
@@ -331,6 +332,7 @@ bool checkpoint_key(char key)
     case 's': hop_bench_start(); return true;
     case 'S': scan_bench_toggle(); return true;
     case 'g': case 'G': scan_bench_gain(key == 'G'); return true;
+    case 'z': residue_bench_start(); return true;
     case 'i': antenna_select(!s_antenna_ipex); return true;
     default: return false;
     }

@@ -125,10 +125,10 @@ the `force` hop over R1-R8 with one power window per channel and records all of 
 is the tail of `components/checkpoint/hop_bench.c`, on the console only: no detection and
 no web health from this C5 while it runs.
 
-Its gain is 40 by default: at the hop bench's 52 a close VTX sits on the 4-bit IQ's rail and
-a pass only rises 3-4 dB. `K` then `g` or `G` moves it by 4, from 24 to 78, for the next scan
-(not saved). The aim: the VTX near the noise at rest, and around +15 dB at its closest,
-below the rail (about +20 dB). The channels are read R1 R5 R2 R6 R3 R7 R4 R8: what follows a
+Its gain is 24 by default, the lowest it takes: at the hop bench's 52 a close VTX sits on the
+4-bit IQ's rail and a pass only rises 3-4 dB. `K` then `g` or `G` moves it by 4, from 24 to 78,
+for the next scan (not saved). The aim: the VTX near the noise at rest, and around +15 dB at
+its closest, below the rail (about +20 dB). The channels are read R1 R5 R2 R6 R3 R7 R4 R8: what follows a
 strong channel in time is then never its neighbour in frequency, so a residue of the previous
 channel lands on another channel than a real bleed.
 
@@ -145,8 +145,8 @@ channel lands on another channel than a real bleed.
 python3 tools/scan_analyze.py run.log
 ```
 
-It prints the real refresh, each channel's median and peak, and the passes: a channel rising
-10 dB above its own median (`--margin`), which rules out a steady signal, timed at the
+It prints the real refresh, each channel's levels, and the passes: a channel rising
+8 dB above its own resting level (`--margin`), which rules out a steady signal, timed at the
 centroid of the peak. A pass seen on several channels at once goes to the strongest, and the
 others are listed as `also on`.
 
@@ -154,6 +154,30 @@ What decides: every pass found, on the right channel, none invented, and neighbo
 below it. For endurance, leave it running (one hour at most): a `SCANBENCH live` line every
 10 s gives the refresh, `no_data` (windows that could not be read) and each channel's peak,
 then do a few passes and stop it. The refresh must not sag and passes must still come out.
+
+### Residue after a hop
+
+First board recordings: whatever channel is read right after a strong one shows it about 8 dB
+down. It followed the reading order, R7 after R6, then R3 once the order crossed the band, so
+it is not a bleed between neighbours, which stay clean (R5 43 dB under R6). `K` then `z` times
+it, at the scan's gain, with a VTX close enough to read well above the noise: hops from the
+strongest channel to the quietest, waits a delay from 0 to 5 ms, then prints the IQ power of the
+four quarters of one window (oldest first, 25 µs each) as `after_db`, and the same hop from
+another quiet channel as `control_db`. The first delay where both agree is how long a scan
+must wait, and the quarters show which samples to skip. Reset the board afterwards.
+
+Board result (2026-11-06, R4 at +10 dB, gain 40): the residue starts about 4 dB under the strong
+channel, falls about 20 dB in the first 200 µs, then lingers near -10 dB; from 1 ms on neither
+trace shows anything. Even a hop from a quiet channel leaves a transient over the first 100 µs
+and blips near 500 and 800 µs, so it is not only the previous signal. The scan now waits 1 ms
+after each hop, which takes it from about 88 Hz to about 57 Hz per channel.
+
+Result with that wait (2026-11-06, onboard antenna, one drone on R4, hand passes): at gain 24,
+4 passes out of 4 on R4, at +13 to +16 dB over its rest, with `--margin` 8 or 10 (6 adds four
+weak bumps of +7 to +8 dB), and nothing on the other channels. R8, read right after R4, no
+longer follows it in any of the nine recordings. At gain 40 the same antenna with the drone
+close fills the other channels with bursts over +5 dB, which the analyzer took for passes on
+R8. Still to prove: real flight speed, several drones at once, hours of running.
 
 ### For later: hardware attenuation, for a more precise pass point
 
