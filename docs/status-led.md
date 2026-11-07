@@ -25,7 +25,7 @@ Per role:
 
 - **node** (C3-Zero, GP10): 🟢 green when the master is alive (a fleet message
   within 5 s), 🔵 blue in degraded mode (local AP), 🟣 magenta while pairing, 🔴
-  red if the UART link to its C5 goes silent (> 3 s), ⚪ white flash on each pass.
+  red if the UART link to its C5 is silent (> 3 s, even if the C5 never spoke), ⚪ white flash on each pass.
 - **master** (C6-Zero, GP8): 🟢 green while running, 🟣 magenta while no gate is
   paired yet, 🔵 blue if a paired gate goes offline, ⚪ white flash on each pass
   (local or remote gate).

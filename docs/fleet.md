@@ -34,7 +34,8 @@ with no change on the gate side.
   carries the channel it was seen on.
 - **Pairing:** C6 web → *pairing open*; an unpaired C3 broadcasts a
   `PAIR_REQUEST`; the C6 assigns it a gate (`PAIR_ACCEPT` + `CONFIG`),
-  persisted on both sides. The channel those frames still carry is ignored.
+  persisted on both sides. The channel those frames still carry is ignored. A node only asks
+  while it boots, so with pairing closed it ends up degraded: open pairing, then reboot it.
 - **Degraded C3:** if the C6 is unreachable for `CONFIG_C3_FLEET_TIMEOUT_MS` at
   boot, the C3 serves its own local AP + web (pass display, the channels' levels,
   detector settings).

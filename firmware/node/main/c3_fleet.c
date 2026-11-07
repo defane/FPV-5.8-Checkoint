@@ -65,9 +65,13 @@ static void apply_config(const fp_config_t *c) {
 
 static void on_msg(const uint8_t mac[6], const fp_msg_t *msg, int8_t rssi) {
     (void)rssi;                    /* the node shows no RSSI; the master tracks it */
-    s_master_last_ms = now_ms();   /* any fleet message = the master is alive */
+    /* Every master broadcasts beacons: only ours says the fleet is reachable, or an unpaired
+     * node stops asking to pair and one paired elsewhere relays to nobody, both in silence. */
+    const bool ours = s_paired && memcmp(mac, s_c6, 6) == 0;
+    if (ours) s_master_last_ms = now_ms();
     switch (msg->type) {
     case FP_MSG_TIME_BEACON:
+        if (!ours) break;
         s_offset_ms = (int64_t)msg->time_beacon.fleet_ms - (int64_t)now_ms();
         s_master_seen = true;
         break;
@@ -80,6 +84,7 @@ static void on_msg(const uint8_t mac[6], const fp_msg_t *msg, int8_t rssi) {
             s_paired = true;
             espnow_link_add_peer(mac);
             save_nvs();
+            s_master_last_ms = now_ms();
             s_master_seen = true;
             ESP_LOGI(TAG, "paired: node=%u gate=%u ch=%u", s_node_id, s_gate, s_channel);
         }
@@ -130,10 +135,19 @@ bool c3_fleet_try_online(uint32_t timeout_ms) {
             last_tx = now_ms();
             if (s_paired) send_heartbeat(); else send_pair_request();
         }
-        if (s_master_seen) return true;
+        if (s_master_seen) break;
         vTaskDelay(pdMS_TO_TICKS(100));
         waited += 100;
     }
+    /* The boot's log is all a relay node says, so it tells what it found. */
+    if (s_master_seen)
+        ESP_LOGI(TAG, "master %02x:%02x:%02x:%02x:%02x:%02x, node %u, gate %u", s_c6[0], s_c6[1], s_c6[2],
+                 s_c6[3], s_c6[4], s_c6[5], s_node_id, s_gate);
+    else if (s_paired)
+        ESP_LOGW(TAG, "paired master %02x:%02x:%02x:%02x:%02x:%02x not heard", s_c6[0], s_c6[1], s_c6[2],
+                 s_c6[3], s_c6[4], s_c6[5]);
+    else
+        ESP_LOGW(TAG, "not paired: open pairing on the master, then reboot this node");
     return s_master_seen;
 }
 

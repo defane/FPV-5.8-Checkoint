@@ -23,6 +23,7 @@ static void (*s_on_pass)(const lp_event_t *);
 static void (*s_on_stats)(const lp_stats_t *);
 static volatile uint32_t s_last_c5_rx;   /* last valid frame from the C5 (ms), 0 = never;
                                           * written by the link task, read by the web */
+static uint32_t s_link_start;            /* a C5 that never spoke is silent since then */
 
 typedef struct { uint8_t buf[LP_MAX_FRAME]; uint8_t len; } frame_t;
 
@@ -79,6 +80,7 @@ static void link_task(void *arg) {
     uint8_t hello[LP_MAX_FRAME];
     size_t hn = lp_encode_hello(hello, sizeof hello, LP_ROLE_C3);
     if (hn) uart_write_bytes(LINK_UART, (const char *)hello, hn);
+    bool silent = false;
 
     for (;;) {
         uint8_t rx[64];
@@ -86,6 +88,7 @@ static void link_task(void *arg) {
         for (int i = 0; i < n; i++) {
             lp_msg_t m;
             if (lp_decoder_push(&dec, rx[i], &m)) {
+                if (!s_last_c5_rx || silent) ESP_LOGI(TAG, "C5 heard");
                 s_last_c5_rx = now_ms();
                 handle_msg(&m);
             }
@@ -94,15 +97,21 @@ static void link_task(void *arg) {
         while (xQueueReceive(s_outq, &f, 0) == pdTRUE)
             uart_write_bytes(LINK_UART, (const char *)f.buf, f.len);
 
-        /* Status LED: red if the C5 link went silent (its STATS stopped),
+        /* Status LED: red if the C5 link is silent (its STATS stopped, or never came),
          * else the fleet state. The C5 has no LED, so no keepalive is sent. */
         const uint32_t t = now_ms();
-        status_led_set_base((s_last_c5_rx != 0u && (uint32_t)(t - s_last_c5_rx) > C5_SILENT_MS)
-                            ? SLED_ERR_RECOV : c3_fleet_led_base(t));
+        const uint32_t heard = s_last_c5_rx ? s_last_c5_rx : s_link_start;
+        const bool now_silent = (uint32_t)(t - heard) > C5_SILENT_MS;
+        if (now_silent && !silent)
+            ESP_LOGW(TAG, "no frame from the C5 for %u ms: check its wiring and that it runs protocol v%u",
+                     C5_SILENT_MS, LP_VERSION);
+        silent = now_silent;
+        status_led_set_base(silent ? SLED_ERR_RECOV : c3_fleet_led_base(t));
     }
 }
 
 void c3_link_start(void) {
+    s_link_start = now_ms();
     s_outq = xQueueCreate(OUTQ_DEPTH, sizeof(frame_t));
     const uart_config_t cfg = {
         .baud_rate = CONFIG_C3_UART_BAUD,
