@@ -48,13 +48,25 @@
   .admin-only { display: none; }
   body.is-admin .admin-only { display: revert; }
   body.is-admin .admin-only.bar { display: flex; }
+  body.simple .adv { display: none !important; }
+  .tip { position: relative; display: inline-block; cursor: pointer; }
+  .bubble { display: none; position: absolute; z-index: 1; left: 0; bottom: calc(100% + 6px); padding: 4px 8px;
+            border: 1px solid #3a4350; border-radius: 6px; background: #0e1014; font-size: .78rem; white-space: nowrap; }
+  .tip.open .bubble { display: block; }
+  @media (hover: hover) { .tip:hover .bubble { display: block; } }
+  .nowrap th, .nowrap td { white-space: nowrap; }
+  tr.lap { cursor: pointer; } tr.sub td { color: #8b97a7; font-size: .8rem; }
+  .h2bar { display: flex; justify-content: space-between; align-items: baseline; }
+  .late { display: block; width: fit-content; margin: 2px auto 0; padding: 0 5px; }
+  @media (max-width: 480px) { th, td { padding-left: 4px; padding-right: 4px; } .nowrap { font-size: .8rem; } }
 </style>
 </head>
 <body>
 <header>
   <span>Checkpoint C6 — race</span>
-  <span class="bar"><span id="gates" class="pill">—</span>
-  <button id="role" class="switch" role="switch" aria-checked="false"><i></i><span id="role_txt">spectator</span></button></span>
+  <span class="bar"><span id="conn" class="pill bad" hidden>connection lost</span>
+  <button id="mode" class="switch" role="switch" aria-checked="false"><i></i><span>advanced</span></button>
+  <button id="role" class="switch" role="switch" aria-checked="false"><i></i><span>admin</span></button></span>
 </header>
 <main>
   <dialog id="login">
@@ -68,17 +80,24 @@
   </dialog>
 
   <h2>Standings</h2>
-  <div class="card">
-    <table>
-      <thead><tr><th>Channel</th><th>Laps</th><th>Last lap</th><th>Best lap</th><th>Last gate</th></tr></thead>
-      <tbody id="standings"><tr><td colspan="5" class="muted">no passes yet</td></tr></tbody>
+  <div class="card scroll">
+    <table class="nowrap">
+      <thead><tr><th>Ch</th><th>Status</th><th>Laps</th><th>Last lap</th><th>Best lap</th><th>Gate</th></tr></thead>
+      <tbody id="standings"><tr><td colspan="6" class="muted">no passes yet</td></tr></tbody>
     </table>
-    <div class="bar admin-only" style="margin-top:12px"><button id="reset" class="warn">Reset race</button>
+    <div class="bar admin-only adv" style="margin-top:12px">
       <label style="margin-left:auto">Volume <input id="vol" type="range" min="0" max="100" step="5" style="vertical-align:middle;width:120px"> <b id="vol_v">—</b>%</label></div>
   </div>
 
-  <h2>Channels</h2>
+  <div class="h2bar"><h2>Last results</h2>
+    <button id="pause" class="switch" role="switch" aria-checked="false"><i></i><span>pause</span></button></div>
   <div class="card scroll">
+    <table class="chans nowrap"><tbody id="results"><tr><td class="muted">no laps yet</td></tr></tbody></table>
+    <p class="muted" style="margin:10px 0 0">Seconds, each channel's newest lap on top. Click a row for its sectors, gate to gate. Pause holds the table; a badge counts the laps it is behind.</p>
+  </div>
+
+  <h2 class="adv">Channels</h2>
+  <div class="card scroll adv">
     <table class="chans">
       <thead><tr><th>Gate</th><th>R1</th><th>R2</th><th>R3</th><th>R4</th><th>R5</th><th>R6</th><th>R7</th><th>R8</th></tr></thead>
       <tbody id="chans"><tr><td colspan="9" class="muted">no gate yet</td></tr></tbody>
@@ -86,8 +105,8 @@
     <p class="muted" style="margin:10px 0 0">dB above the noise, yellow on a pass. — not measured: the C5 is away or calibrating.</p>
   </div>
 
-  <h2>Gates / nodes</h2>
-  <div class="card scroll">
+  <h2 class="adv">Gates / nodes</h2>
+  <div class="card scroll adv">
     <div class="bar" style="margin-bottom:10px">Pairing: <b id="pair_state" class="off">closed</b>
       <button id="pair_toggle" class="admin-only">Toggle pairing</button>
       <button id="cal_all" class="admin-only warn" title="Full calibration (console B) on every reachable gate">Calibrate all gates (B)</button>
@@ -99,8 +118,8 @@
     <p class="muted" style="margin:10px 0 0">Gate 0 is the master's own C5.</p>
   </div>
 
-  <h2>Master &amp; local gate (0)</h2>
-  <div class="card row">
+  <h2 class="adv">Master &amp; local gate (0)</h2>
+  <div class="card row adv">
     <div class="stat"><b id="l_state">—</b><span>detector</span></div>
     <div class="stat"><b id="l_health">—</b><span>C5 health</span></div>
     <div class="stat"><b id="l_passes">—</b><span>total passes</span></div>
@@ -153,7 +172,6 @@ function setAdmin(on) {             // back to spectator forgets the key
   if (!on) AdminAuth.logout();
   document.body.classList.toggle("is-admin", on);
   $("role").setAttribute("aria-checked", on);
-  $("role_txt").textContent = on ? "admin" : "spectator";
 }
 
 $("role").addEventListener("click", () => {
@@ -182,7 +200,103 @@ $("login_form").addEventListener("submit", async e => {
   else { $("login_msg").textContent = msg; $("p").select(); }
 });
 
+// Simple shows what spectators came for, the standings and the results; the choice stays on this device.
+const MODE_KEY = "checkpoint.mode";
+function setSimple(simple, save) {
+  document.body.classList.toggle("simple", simple);
+  $("mode").setAttribute("aria-checked", !simple);
+  if (save) try { localStorage.setItem(MODE_KEY, simple ? "simple" : "advanced"); } catch (_) {}
+}
+try { setSimple(localStorage.getItem(MODE_KEY) !== "advanced", false); } catch (_) { setSimple(true, false); }
+$("mode").addEventListener("click", () => setSimple(!document.body.classList.contains("simple"), true));
+
+// A channel is online while a pass is recent. Its badge tells how long ago in a bubble,
+// on hover or on tap: the rows are only rebuilt when they change, so the bubble holds
+// under the mouse, and the channel tapped open is kept here.
+const ONLINE_MS = 30000;
 const chName = c => c < 8 ? "R" + (c + 1) : c;
+const statusTd = (x, up) => { const on = up - x.last_seen_ms < ONLINE_MS;
+  return `<td><span class="tip" data-ch="${x.channel}" data-seen="${x.last_seen_ms}">` +
+    `<span class="pill${on ? " ok" : ""}">${on ? "online" : "offline"}</span><span class="bubble"></span></span></td>`; };
+let shownRows = "", tipCh = null, tipUp = 0;
+function fillTips(up = tipUp) {
+  tipUp = up;
+  document.querySelectorAll("#standings .tip").forEach(t => {
+    t.classList.toggle("open", t.dataset.ch === tipCh);
+    t.lastChild.textContent = "last seen " + fmtUp(Math.max(0, up - t.dataset.seen)) + " ago";
+  });
+}
+document.addEventListener("click", e => {
+  const t = e.target.closest(".tip");
+  tipCh = t && t.dataset.ch !== tipCh ? t.dataset.ch : null;
+  fillTips();
+});
+
+// Last results: a column per channel, its own newest lap on top, so a row holds laps of
+// the same age. Sector k runs from gate k-1 to gate k, the last one closing on gate 0;
+// a missed gate leaves the two around it empty. Fetched only when a lap count changes.
+let results = { num_gates: 1, channels: [] }, resultsSig = null, openLap = null, paused = false, live = [];
+const secTxt = ms => ms ? (ms/1000).toFixed(2) : "—";
+function sectorMs(lap, k, n) {
+  const from = k === 1 ? 0 : lap.splits[k-2], to = k === n ? lap.lap_ms : lap.splits[k-1];
+  return (k === 1 || from) && to > from ? to - from : 0;
+}
+// While paused, how far a column is behind the race; fewer laps than shown means a reset.
+function lateBadge(c) {
+  if (!paused) return "";
+  const late = (live.find(x => x.channel === c.channel)?.laps ?? 0) - (c.laps[0]?.number ?? 0);
+  return late ? `<span class="pill busy late">${late > 0 ? "+" + late : "reset"}</span>` : "";
+}
+function fillResults() {
+  const n = results.num_gates, known = results.channels.map(c => c.channel);
+  const added = paused ? live.filter(x => !known.includes(x.channel)).map(x => ({ channel: x.channel, laps: [] })) : [];
+  const ch = [...results.channels, ...added].sort((a, b) => a.channel - b.channel);
+  if (!ch.length) { $("results").innerHTML = '<tr><td class="muted">no laps yet</td></tr>'; return; }
+  const cells = f => ch.map(c => `<td>${f(c)}</td>`).join("");
+  let h = `<tr><th>Lap</th>${ch.map(c => `<th>${chName(c.channel)}${lateBadge(c)}</th>`).join("")}</tr>`;
+  for (let r = 0; r < Math.max(...ch.map(c => c.laps.length)); r++) {
+    const open = n > 1 && r === openLap, lapOf = (c, f) => c.laps[r] ? f(c.laps[r]) : "";
+    h += `<tr class="lap" data-row="${r}"><td>${n > 1 ? (open ? "▾ " : "▸ ") : ""}${r ? "-" + r : "last"}</td>` +
+         `${cells(c => lapOf(c, l => secTxt(l.lap_ms)))}</tr>`;
+    if (!open) continue;
+    h += `<tr class="sub"><td>lap no.</td>${cells(c => lapOf(c, l => l.number))}</tr>`;
+    for (let k = 1; k <= n; k++)
+      h += `<tr class="sub"><td>G${k-1}→${k % n}</td>${cells(c => lapOf(c, l => secTxt(sectorMs(l, k, n))))}</tr>`;
+  }
+  $("results").innerHTML = h + `<tr class="admin-only"><td><button class="warn sm reset_ch">Reset all</button></td>` +
+    `${cells(c => `<button class="warn sm reset_ch" data-ch="${c.channel}">Reset</button>`)}</tr>`;
+}
+async function loadResults(st) {
+  live = st;
+  const sig = st.map(x => x.channel + ":" + x.laps).join();
+  if (sig === resultsSig) return;
+  if (paused) { resultsSig = sig; fillResults(); return; }   // only the badges move
+  try {
+    const r = await fetch("/api/results");
+    if (r.ok) { results = await r.json(); resultsSig = sig; fillResults(); }
+  } catch (_) {}                    // the next poll tries again
+}
+$("results").addEventListener("click", async e => {
+  const b = e.target.closest(".reset_ch");
+  if (b) {
+    const one = b.dataset.ch !== undefined;
+    if (confirm(one ? `Reset the times of ${chName(+b.dataset.ch)}?` : "Reset the times of every channel?")) {
+      await post("/api/reset", one ? { channel: +b.dataset.ch } : {}); setPaused(false); poll();
+    }
+    return;
+  }
+  const tr = e.target.closest("tr.lap");
+  if (tr && results.num_gates > 1) { openLap = +tr.dataset.row === openLap ? null : +tr.dataset.row; fillResults(); }
+});
+
+function setPaused(on) {
+  paused = on; resultsSig = null;
+  $("pause").setAttribute("aria-checked", on);
+  loadResults(live);
+}
+$("pause").addEventListener("click", () => setPaused(!paused));
+
+
 // Channels: one row per gate, R1..R8; a pass lights its cell for HIT_MS, its age
 // taken here, since a pass and the master do not share a clock.
 const HIT_MS = 3000;
@@ -213,8 +327,8 @@ function fillChannels(s) {
 async function poll() {
   try {
     const s = await (await fetch("/api/state")).json();
-    $("gates").textContent = s.num_gates + " gate(s)";
     fillChannels(s);
+    $("conn").hidden = true;
     $("pair_state").textContent = s.pairing ? "OPEN" : "closed";
     $("pair_state").className = s.pairing ? "on" : "off";
     const L = s.local || {};
@@ -234,10 +348,13 @@ async function poll() {
     }
 
     const st = s.standings || [];
-    $("standings").innerHTML = st.length ? st.map(x => `
-      <tr><td>${chName(x.channel)}</td><td>${x.laps}</td><td>${fmt(x.last_lap_ms)}</td>
+    const rows = st.length ? st.map(x => `
+      <tr><td>${chName(x.channel)}</td>${statusTd(x, s.uptime_ms)}<td>${x.laps}</td><td>${fmt(x.last_lap_ms)}</td>
       <td>${fmt(x.best_lap_ms)}</td><td>${x.last_gate<0?'—':x.last_gate}</td></tr>`).join("")
-      : '<tr><td colspan="5" class="muted">no passes yet</td></tr>';
+      : '<tr><td colspan="6" class="muted">no passes yet</td></tr>';
+    if (rows !== shownRows) $("standings").innerHTML = shownRows = rows;
+    fillTips(s.uptime_ms);
+    loadResults(st);
 
     if (!editing) {
       const nodes = s.nodes || [];
@@ -264,13 +381,12 @@ async function poll() {
           <td>${seen(n)}</td></tr>`).join("")
         : '<tr><td colspan="9" class="muted">no nodes paired</td></tr>';
     }
-  } catch (e) { $("gates").textContent = "offline"; }
+  } catch (e) { $("conn").hidden = false; }
 }
 
 $("pair_toggle").addEventListener("click", async () => {
   await post("/api/pairing", { open: $("pair_state").textContent !== "OPEN" ? 1 : 0 }); poll();
 });
-$("reset").addEventListener("click", async () => { await post("/api/reset", {}); poll(); });
 
 // Calibrate/reboot a gate's C5 (gate -1 = every reachable gate). The master holds a
 // calibration when a target sees a strong signal (a VTX probably on) until forced.

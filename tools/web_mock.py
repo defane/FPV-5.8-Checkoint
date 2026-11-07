@@ -32,6 +32,7 @@ ACTIVE_X10 = 150          # pass detector active_db: the VTX guard's threshold
 CAL_S = {"cal_full": 8.0, "cal_quick": 3.0}
 REBOOT_S = 4.0
 PASSES_KEPT = {"master": 24, "node": 16}   # C6_EVENTS, C3_EVENTS
+RESULTS_KEPT = 10   # RT_HISTORY in race_timing.h
 
 
 class Auth:
@@ -156,6 +157,9 @@ class Master:
         self.add_node(2, 2, 11.0, rssi=-78, lost=9, cal_needed=True, faults=3, gain=61)
         self.add_node(3, 3, 13.0, rssi=-88, lost=31, online=False)
         self.reset_race()
+        self.laps[7] = {"laps": 4, "last_lap_ms": 9120, "best_lap_ms": 8840, "start": None,  # a pilot who left
+                        "last_gate": 2, "seen_ms": 45000,
+                        "history": [self.lap_entry(n, 8840 + 93 * n) for n in range(4, 0, -1)]}
 
     def add_node(self, gate, channel, period, rssi=-60, lost=0, online=True, **health):
         n = Gate(gate, channel, period, self.vtx, **health)
@@ -164,6 +168,11 @@ class Master:
         self.nodes.append(n)
 
     def reset_race(self, b=None, t=None):
+        if b and "channel" in b:                          # one channel: it stays listed
+            s = self.laps.get(b["channel"])
+            if s:
+                s.update(laps=0, last_lap_ms=0, best_lap_ms=0, start=None, last_gate=-1, history=[])
+            return {"ok": bool(s)}
         self.laps, self.events, self.total = {}, [], 0
         return {"ok": True}
 
@@ -171,13 +180,26 @@ class Master:
         self.total += 1
         self.events = [{"gate": g.gate, "channel": g.channel, "peak_db_x10": peak,
                         "at_ms": int(at * 1000)}] + self.events[:PASSES_KEPT["master"] - 1]
-        s = self.laps.setdefault(g.channel, {"laps": 0, "last_lap_ms": 0, "best_lap_ms": 0, "start": None})
+        s = self.laps.setdefault(g.channel, {"laps": 0, "last_lap_ms": 0, "best_lap_ms": 0, "start": None,
+                                             "history": []})
         if s["start"] is not None:
             lap = int((at - s["start"]) * 1000)
             s["laps"] += 1
             s["last_lap_ms"] = lap
             s["best_lap_ms"] = min(lap, s["best_lap_ms"] or lap)
-        s["start"], s["last_gate"] = at, g.gate
+            s["history"] = [self.lap_entry(s["laps"], lap)] + s["history"][:RESULTS_KEPT - 1]
+        s["start"], s["last_gate"], s["seen_ms"] = at, g.gate, int(at * 1000)
+
+    def lap_entry(self, number, lap):
+        """Gates are not simulated in order: splits spread along the lap, a gate missed now and then."""
+        n = 1 + len(self.nodes)
+        splits = [lap * k // n + random.randint(-150, 150) for k in range(1, n)]
+        return {"number": number, "lap_ms": lap, "splits": [0 if random.random() < .06 else v for v in splits]}
+
+    def results(self, t):
+        self.advance(t)
+        return {"num_gates": 1 + len(self.nodes),
+                "channels": [{"channel": c, "laps": s["history"]} for c, s in sorted(self.laps.items())]}
 
     def advance(self, t):
         if self.join_at is not None and t >= self.join_at:   # pairing: a node shows up
@@ -204,7 +226,8 @@ class Master:
                 "total_passes": self.total, "volume": self.volume, "uptime_ms": int(t * 1000),
                 "free_heap": 182000 + random.randint(-2000, 2000), "heap_total": 330000, "nodes": nodes,
                 "standings": [{"channel": c, "laps": s["laps"], "last_lap_ms": s["last_lap_ms"],
-                               "best_lap_ms": s["best_lap_ms"], "last_gate": s["last_gate"]}
+                               "best_lap_ms": s["best_lap_ms"], "last_gate": s["last_gate"],
+                               "last_seen_ms": s["seen_ms"]}
                               for c, s in sorted(self.laps.items())],
                 "passes": self.events}
 
@@ -347,6 +370,9 @@ def make_handler(role, sim, auth, latency_s):
             elif self.path == "/api/state":
                 with lock:
                     self.reply(200, sim.state(time.monotonic() - t0))
+            elif self.path == "/api/results" and hasattr(sim, "results"):
+                with lock:
+                    self.reply(200, sim.results(time.monotonic() - t0))
             elif self.path == "/api/auth":
                 self.admin(8, lambda b, t: {"admin": True})
             else:

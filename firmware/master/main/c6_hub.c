@@ -347,6 +347,19 @@ bool c6_hub_remove_node(uint8_t node_id) {
     return true;
 }
 
+bool c6_hub_reset_channel(uint8_t channel) {
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    const bool ok = rt_reset_channel(&s_rt, channel);
+    xSemaphoreGive(s_lock);
+    return ok;
+}
+
+void c6_hub_results(race_timing_t *out) {
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    *out = s_rt;
+    xSemaphoreGive(s_lock);
+}
+
 void c6_hub_reset_race(void) {
     xSemaphoreTake(s_lock, portMAX_DELAY);
     rt_reset(&s_rt);
@@ -398,6 +411,7 @@ void c6_hub_snapshot(c6_fleet_t *out) {
         out->standings[i].last_lap_ms = s_rt.ch[i].last_lap_ms;
         out->standings[i].best_lap_ms = s_rt.ch[i].best_lap_ms;
         out->standings[i].last_gate = s_rt.ch[i].last_gate;
+        out->standings[i].last_seen_ms = s_rt.ch[i].last_cross_ms;
     }
     xSemaphoreGive(s_lock);
 }

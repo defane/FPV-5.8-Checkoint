@@ -38,6 +38,19 @@ with no change on the gate side.
 - **Degraded C3:** if the C6 is unreachable for `CONFIG_C3_FLEET_TIMEOUT_MS` at
   boot, the C3 serves its own local AP + web (pass display, the channels' levels,
   detector settings).
+- **Simple and advanced:** the C6 page opens on what spectators came for, the standings
+  and the last results. Each channel in the standings has its status: online while a pass is under 30 s old, else offline; hover or tap the badge
+  for when it was last seen, on the master's clock. The advanced toggle adds the channels, the gates
+  and the race controls; the choice stays on the device (browser storage). It changes
+  the view only: the admin password still guards every action.
+- **Last results** (both views, `GET /api/results`): a column per channel seen, with
+  its last 10 laps, newest on top. A click on a row adds the lap numbers and the sectors
+  gate to gate (`G0→1`, `G1→2`, then `G2→0` closing the lap); `—` next to a gate that
+  missed the drone. The pause toggle holds the table for that viewer, with a badge per
+  channel counting the laps it is behind (`reset` if the channel was reset meanwhile)
+  until it is released. An admin can reset one channel (`POST /api/reset` `{"channel": N}`):
+  its times and its lap in progress go, it stays listed with when it was last seen.
+  *Reset all* (`{}`) clears the whole race, standings included.
 - **Channels panel:** the C6 page shows one row per gate, the degraded C3 page one
   tile per channel, R1 to R8, with its level in dB above the channel's rest and a yellow
   mark on a pass; `—` while the C5 is away or calibrating. A VTX left on keeps showing.

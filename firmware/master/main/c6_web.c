@@ -25,6 +25,7 @@ static esp_err_t get_root(httpd_req_t *req) {
  * ~1.5 KB), and httpd runs one handler at a time. */
 static c6_snapshot_t s_snap;
 static c6_fleet_t    s_fleet;
+static race_timing_t s_results;
 
 /* A C5's firmware id is foreign text: keep it inert in the JSON and in the
  * page's HTML (printable ASCII minus quotes, backslash and markup). */
@@ -64,7 +65,8 @@ static esp_err_t get_state(httpd_req_t *req) {
     const c6_snapshot_t *s = &s_snap;
     const c6_fleet_t *f = &s_fleet;
 
-    /* Worst case (every field at its widest) 9796 B: levels 59 x 16 gates, header + local 394,
+    /* Worst case (every field at its widest) 9996 B: levels 59 x 16 gates, last_seen_ms
+     * 25 x 8 standings, header + local 394,
      * 15 nodes x 392, 8 standings 838, 24 passes 1739; sized so it never truncates. */
     static char body[10240];   /* larger than the stack; this handler is serialised by httpd */
     const lp_stats_t *l = &s->local;
@@ -107,9 +109,11 @@ static esp_err_t get_state(httpd_req_t *req) {
     for (unsigned i = 0; i < f->num_standings && o < (int)sizeof body; i++) {
         const c6_standing_t *st = &f->standings[i];
         o += snprintf(body + o, sizeof body - o,
-                      "%s{\"channel\":%u,\"laps\":%lu,\"last_lap_ms\":%lu,\"best_lap_ms\":%lu,\"last_gate\":%d}",
+                      "%s{\"channel\":%u,\"laps\":%lu,\"last_lap_ms\":%lu,\"best_lap_ms\":%lu,\"last_gate\":%d,"
+                      "\"last_seen_ms\":%lu}",
                       i ? "," : "", st->channel, (unsigned long)st->laps,
-                      (unsigned long)st->last_lap_ms, (unsigned long)st->best_lap_ms, st->last_gate);
+                      (unsigned long)st->last_lap_ms, (unsigned long)st->best_lap_ms, st->last_gate,
+                      (unsigned long)st->last_seen_ms);
     }
     o += snprintf(body + o, sizeof body - o, "],\"passes\":[");
     for (unsigned i = 0; i < s->n_passes && o < (int)sizeof body; i++)
@@ -121,6 +125,35 @@ static esp_err_t get_state(httpd_req_t *req) {
 
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req, body, o);
+}
+
+/* Each channel's last laps, a chunk per channel: 8 full ones reach 18 KB. */
+static esp_err_t get_results(httpd_req_t *req) {
+    c6_hub_results(&s_results);
+    const race_timing_t *rt = &s_results;
+    /* Worst chunk (16 gates, every number at its widest) 2244 B: header 28, channel 24,
+     * 10 laps x 219, closing 2; sized so it never truncates. */
+    static char body[2304];   /* larger than the stack; this handler is serialised by httpd */
+    httpd_resp_set_type(req, "application/json");
+    int o = snprintf(body, sizeof body, "{\"num_gates\":%u,\"channels\":[", rt->cfg.num_gates);
+    for (unsigned i = 0; i < rt->num_channels; i++) {
+        const rt_channel_t *c = &rt->ch[i];
+        o += snprintf(body + o, sizeof body - o, "%s{\"channel\":%u,\"laps\":[", i ? "," : "", c->channel);
+        const rt_lap_t *lap;
+        for (unsigned age = 0; (lap = rt_recent_lap(c, age)) != NULL; age++) {
+            o += snprintf(body + o, sizeof body - o, "%s{\"number\":%lu,\"lap_ms\":%lu,\"splits\":[",
+                          age ? "," : "", (unsigned long)lap->number, (unsigned long)lap->lap_ms);
+            for (unsigned g = 1; g < rt->cfg.num_gates; g++)
+                o += snprintf(body + o, sizeof body - o, "%s%lu", g > 1 ? "," : "", (unsigned long)lap->split_ms[g]);
+            o += snprintf(body + o, sizeof body - o, "]}");
+        }
+        o += snprintf(body + o, sizeof body - o, "]}");
+        if (httpd_resp_send_chunk(req, body, o) != ESP_OK) return ESP_FAIL;
+        o = 0;
+    }
+    o += snprintf(body + o, sizeof body - o, "]}");
+    if (httpd_resp_send_chunk(req, body, o) != ESP_OK) return ESP_FAIL;
+    return httpd_resp_send_chunk(req, NULL, 0);
 }
 
 /* Tiny parser for the flat integer objects our own client POSTs. */
@@ -196,8 +229,10 @@ static esp_err_t post_node_remove(httpd_req_t *req) {
 }
 
 static esp_err_t post_reset(httpd_req_t *req) {
-    char buf[16];   /* "{}": signed like any body */
+    char buf[16];   /* "{}" for the race, {"channel":255} for one: signed like any body */
     if (!web_auth_request(req, buf, sizeof buf)) return ESP_OK;
+    const int32_t channel = json_i(buf, "channel", -1);
+    if (channel >= 0) return ok_json(req, c6_hub_reset_channel((uint8_t)channel));
     c6_hub_reset_race();
     return ok_json(req, true);
 }
@@ -314,13 +349,14 @@ void c6_web_start(void) {
     web_auth_init(s_admin_key, ADMIN_SALT, ADMIN_ITERATIONS, ADMIN_AUTH_OPEN);
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.lru_purge_enable = true;
-    cfg.max_uri_handlers = 12;   /* 9 here + web_auth's 2 */
+    cfg.max_uri_handlers = 12;   /* 10 here + web_auth's 2 */
     cfg.stack_size = 6144;       /* the signature's PSA HMAC under post_command: ~3.5 KB of the 4 KB default */
     httpd_handle_t srv = NULL;
     if (httpd_start(&srv, &cfg) != ESP_OK) { ESP_LOGE(TAG, "httpd start failed"); return; }
     const httpd_uri_t uris[] = {
         { .uri = "/",             .method = HTTP_GET,  .handler = get_root },
         { .uri = "/api/state",    .method = HTTP_GET,  .handler = get_state },
+        { .uri = "/api/results",  .method = HTTP_GET,  .handler = get_results },
         { .uri = "/api/auth",     .method = HTTP_GET,  .handler = get_auth },
         { .uri = "/api/pairing",  .method = HTTP_POST, .handler = post_pairing },
         { .uri = "/api/node",     .method = HTTP_POST, .handler = post_node },

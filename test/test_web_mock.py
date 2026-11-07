@@ -44,6 +44,15 @@ class Firmware(unittest.TestCase):
             self.assertTrue(want)
             self.assertEqual(json_keys(sim.state(61.0)), want, path)
 
+    def test_results_fields_match_the_c_code(self):
+        src = (ROOT / SOURCES[web_mock.Master]).read_text()
+        want = set(re.findall(r'\\"([a-z0-9_]+)\\":', c_function(src, "get_results")))
+        sim = web_mock.Master()
+        self.assertTrue(want)
+        self.assertEqual(json_keys(sim.results(60.0)), want)
+        header = (ROOT / "components/race_timing/include/race_timing.h").read_text()
+        self.assertEqual(web_mock.RESULTS_KEPT, int(re.search(r"RT_HISTORY\s+(\d+)u", header).group(1)))
+
     def test_admin_routes_and_buffers_match_the_c_code(self):
         for cls, path in SOURCES.items():
             src = (ROOT / path).read_text()
@@ -99,6 +108,20 @@ class Protocol(unittest.TestCase):
         status, data = self.signed("0" * 32, 1, "GET", "/api/auth")
         self.assertEqual((status, json.loads(data)["session"]), (401, False))
         self.assertEqual(self.call("POST", "/api/reset", b"{}")[0], 401, "unsigned")
+
+    def test_reset_of_one_channel(self):
+        status, data = self.call("GET", "/api/results")
+        self.assertEqual(status, 200)
+        self.assertTrue(json.loads(data)["channels"])
+        self.sim.state(60.0)
+        sid = self.open()
+        self.assertEqual(self.signed(sid, 1, "POST", "/api/reset", b'{"channel":0}')[0], 200)
+        by = {c["channel"]: c["laps"] for c in self.sim.results(60.0)["channels"]}
+        self.assertEqual(by[0], [])
+        self.assertTrue(by[7], "the other channels keep their laps")
+        self.assertEqual(self.signed(sid, 2, "POST", "/api/reset", b'{"channel":5}')[1], b'{"ok": false}')
+        self.assertEqual(self.signed(sid, 3, "POST", "/api/reset", b"{}")[0], 200)
+        self.assertEqual(self.sim.results(60.0)["channels"], [])
 
     def test_body_over_the_firmware_buffer_is_refused(self):
         sid = self.open()

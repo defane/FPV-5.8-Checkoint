@@ -40,6 +40,7 @@ typedef struct {
     uint8_t  channel;
     uint32_t laps, last_lap_ms, best_lap_ms;
     int16_t  last_gate;
+    uint32_t last_seen_ms;   /* fleet clock at its last pass, comparable to uptime_ms */
 } c6_standing_t;
 
 typedef struct {
@@ -62,6 +63,8 @@ void c6_hub_set_volume(uint8_t pct);           /* 0..100 %, applied + saved in N
 bool c6_hub_set_node(uint8_t node_id, uint8_t gate_index, uint8_t channel);  /* reassign */
 bool c6_hub_remove_node(uint8_t node_id);
 void c6_hub_reset_race(void);
+bool c6_hub_reset_channel(uint8_t channel);
+void c6_hub_results(race_timing_t *out);   /* copy of the timing state */
 void c6_hub_snapshot(c6_fleet_t *out);
 /* Run a C5 command (calibrate/reboot) at a gate: 0 is the local C5 over UART
  * (false while it is absent: no STATS for C6_LOCAL_LIVE_MS), 1.. its online
