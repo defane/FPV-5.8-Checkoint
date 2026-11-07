@@ -24,3 +24,4 @@ CONFIG_C6_AUDIO_SD_GPIO=10
 # Status LED: C5-as-master runs no receiver, so the C5-Zero onboard WS2812 on
 # GPIO27 is free here (unlike the detector).
 CONFIG_STATUS_LED_GPIO=27
+CONFIG_STATUS_LED_RGB_ORDER=n

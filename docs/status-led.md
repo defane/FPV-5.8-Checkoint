@@ -41,5 +41,9 @@ No-colour cases:
   a red power LED). The colour scheme does not apply — use a C3-Zero for a node
   with a status LED.
 
-Settings: `CONFIG_STATUS_LED_*` (ENABLE, GPIO, BRIGHTNESS ~40/255, TICK, STACK);
+The C3-Zero and C6-Zero LEDs take their bytes in RGB order, not WS2812's usual GRB (Waveshare's
+FAQ for each board), so `CONFIG_STATUS_LED_RGB_ORDER=y` in those firmwares. Without it red and
+green swap: a healthy board reads red, and the fast red blink of a silent C5 reads green.
+
+Settings: `CONFIG_STATUS_LED_*` (ENABLE, GPIO, RGB_ORDER, BRIGHTNESS ~40/255, TICK, STACK);
 the pin is set per board in the firmware's `sdkconfig.defaults`.

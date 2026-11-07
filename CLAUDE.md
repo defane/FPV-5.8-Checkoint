@@ -134,7 +134,8 @@ table (defaults + console keys): **`docs/detector.md`**.
 
 A board's onboard WS2812 shows state via `components/status_led` (pure-C
 state→colour core, host-tested; RMT WS2812 driver; boot red→green→blue
-self-test; priority-1 task; ~15%). Onboard GPIO: node **10**, master **8**
+self-test; priority-1 task; ~15%). Onboard GPIO: node **10**, master **8**, both in RGB byte
+order (`CONFIG_STATUS_LED_RGB_ORDER`), not GRB
 (C5-as-master **27**). **The detector has no status LED** — the C5-Zero WS2812 is
 on **GPIO27**, a receiver IQ-loopback pin, so the checkpoint glue has no LED code
 and `CONFIG_STATUS_LED_ENABLE=n`; a C3 SuperMini has no WS2812 either. Full scheme

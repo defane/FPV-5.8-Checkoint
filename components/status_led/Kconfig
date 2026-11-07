@@ -13,6 +13,14 @@ menu "Status LED"
             detector), 10 (C3-Zero, node), 8 (C6-Zero, master). Set the
             right one per firmware in its sdkconfig.defaults.
 
+    config STATUS_LED_RGB_ORDER
+        bool "The LED takes its bytes in RGB order, not the usual GRB"
+        depends on STATUS_LED_ENABLE
+        default n
+        help
+            The onboard LED of the Waveshare C3-Zero and C6-Zero does (see their FAQ):
+            in GRB, its red shows as green. The boot self-test tells: it starts on red.
+
     config STATUS_LED_BRIGHTNESS
         int "Master brightness (1..255)"
         depends on STATUS_LED_ENABLE

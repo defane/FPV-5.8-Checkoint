@@ -32,9 +32,13 @@ static inline uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1
 
 static void render(sled_rgb_t c)
 {
-    const uint8_t grb[3] = { c.g, c.r, c.b };          /* WS2812 byte order */
+#if CONFIG_STATUS_LED_RGB_ORDER
+    const uint8_t bytes[3] = { c.r, c.g, c.b };
+#else
+    const uint8_t bytes[3] = { c.g, c.r, c.b };        /* WS2812's usual order */
+#endif
     const rmt_transmit_config_t tx = { .loop_count = 0 };
-    if (rmt_transmit(s_rt->chan, s_rt->enc, grb, sizeof grb, &tx) == ESP_OK)
+    if (rmt_transmit(s_rt->chan, s_rt->enc, bytes, sizeof bytes, &tx) == ESP_OK)
         (void)rmt_tx_wait_all_done(s_rt->chan, 50);
     /* >=50 us idle before the next frame (next tick is ~50 ms) latches it. */
 }

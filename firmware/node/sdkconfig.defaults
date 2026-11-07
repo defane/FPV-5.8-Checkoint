@@ -13,3 +13,5 @@ CONFIG_HTTPD_MAX_URI_LEN=128
 
 # Status LED: onboard WS2812 of the Waveshare C3-Zero is on GPIO10.
 CONFIG_STATUS_LED_GPIO=10
+# Its bytes are RGB, not GRB (Waveshare FAQ): in GRB, red shows as green.
+CONFIG_STATUS_LED_RGB_ORDER=y
