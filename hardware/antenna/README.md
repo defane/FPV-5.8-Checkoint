@@ -12,7 +12,7 @@ value, and the gain is unknown, which is why the silkscreen does not state one.
 To order: [`../gerbers/qyagi58-v2-gerbers.zip`](../gerbers/qyagi58-v2-gerbers.zip), 2 layers,
 FR-4, 1.6 mm, 1 oz copper, 34 × 47 mm.
 
-To use it on a gate, take an IPEX to SMA lead to the C5-Zero's IPEX connector, with `K` then
+Its parts are in [`../BOM.csv`](../BOM.csv). To use it on a gate, take an IPEX to SMA lead to the C5-Zero's IPEX connector, with `K` then
 `i` on the bench or `CONFIG_CHECKPOINT_ANTENNA_IPEX=y`, then recalibrate (`docs/bench.md`).
 
 ## Versions

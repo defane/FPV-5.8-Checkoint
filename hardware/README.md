@@ -31,16 +31,11 @@ and the drill files.
 
 ## Parts
 
-| Ref | Part | Qty |
-| --- | --- | --- |
-| U1 | Waveshare ESP32-C5-Zero | 1 |
-| U2 | Waveshare ESP32-C3-Zero (node) or ESP32-C6-Zero (master) | 1 |
-| U3 | MAX98357A breakout (master only) | 1 |
-| D1, D2 | Schottky SS34, 3 A 40 V, **SMA** package (DO-214AC; SS34 also comes in larger ones) | 2 |
-| R1, R2 | 1 kΩ, 0805 | 2 |
-| | Male headers, 2.54 mm: 1×9 (not needed on the `-M` modules, already fitted) | 4 |
-| | Male header 1×7 (master only, usually supplied with the breakout) | 1 |
-| J1, J2 | Power wire, or a 5.08 mm terminal block | 1 pair |
+[`BOM.csv`](BOM.csv) lists each board's parts with an order reference. `test/test_pcb.py` checks
+it against the node and master boards.
+
+The `-M` Waveshare modules cost a little more but come with their headers fitted, which saves
+the 1×9 headers and 18 joints per module. SS34 diodes must be in the **SMA** package.
 
 ## Assembly
 

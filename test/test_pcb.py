@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """The carrier boards stay in step with the firmware: the pins come from its Kconfig
 defaults, the nets and the pad positions from the .kicad_pcb files."""
+import csv
 import re
 import unittest
 from pathlib import Path
@@ -102,6 +103,17 @@ class Boards(unittest.TestCase):
                 self.assertIsNone(pads["U1", pin][0], pin)
             used = {pin for (ref, pin), (net, _, _) in pads.items() if ref == "U1" and net}
             self.assertEqual(used, {"5V", "GND", C5_TX, C5_RX})
+
+    def test_the_bom_lists_every_part_of_a_board(self):
+        with open(ROOT / "hardware/BOM.csv", newline="") as f:
+            rows = list(csv.DictReader(f))
+        for name, pads in self.boards.items():
+            board = [r for r in rows if r["board"] == name.removeprefix("checkpoint-")]
+            listed = [ref for r in board for ref in r["ref"].split()]
+            self.assertEqual(sorted(listed), sorted({ref for ref, _ in pads}), name)
+            for r in board:
+                if r["ref"]:
+                    self.assertEqual(int(r["qty"]), len(r["ref"].split()), r["part"])
 
     def test_header_rows_match_the_module_drawings(self):
         for pads in self.boards.values():

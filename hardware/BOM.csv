@@ -1,0 +1,22 @@
+board,ref,qty,part,package,fitted,supplier,supplier_ref,note
+node,U1,1,Waveshare ESP32-C5-Zero,18 x 28 mm module,yes,Waveshare,34599,SKU 34598 is the -M version with its headers fitted
+node,U2,1,Waveshare ESP32-C3-Zero,18 x 23.5 mm module,yes,Waveshare,25452,SKU 25532 is the -M version with its headers fitted
+node,D1 D2,2,Schottky diode SS34 3 A 40 V,SMA (DO-214AC),yes,LCSC,C8678,SS34 also comes in larger packages that do not fit
+node,R1 R2,2,Resistor 1 kOhm 1%,0805,yes,LCSC,C17513,
+node,,4,Male pin header 1x9 2.54 mm,through hole,yes,any,,not needed with -M modules
+node,J1 J2,2,Power wire 22 AWG (or a 2-pin 5.08 mm terminal block),1.5 mm hole,yes,any,,4.6 to 5.5 V 1 A
+node,H1 H2 H3 H4,4,M3 screw,3.2 mm hole,optional,any,,
+master,U1,1,Waveshare ESP32-C5-Zero,18 x 28 mm module,yes,Waveshare,34599,SKU 34598 is the -M version with its headers fitted
+master,U2,1,Waveshare ESP32-C6-Zero,18 x 23.5 mm module,yes,Waveshare,27035,SKU 26976 is the -M version with its headers fitted
+master,U3,1,MAX98357A I2S amplifier breakout,17.78 x 19.05 mm module,yes,Adafruit,3006,other breakouts: compare the pin order with the board labels first
+master,D1 D2,2,Schottky diode SS34 3 A 40 V,SMA (DO-214AC),yes,LCSC,C8678,SS34 also comes in larger packages that do not fit
+master,R1 R2,2,Resistor 1 kOhm 1%,0805,yes,LCSC,C17513,
+master,,4,Male pin header 1x9 2.54 mm,through hole,yes,any,,not needed with -M modules
+master,,1,Male pin header 1x7 2.54 mm,through hole,yes,any,,usually supplied with the breakout
+master,,1,Speaker 4 Ohm 3 W,wires to the breakout's terminal,yes,any,,
+master,J1 J2,2,Power wire 22 AWG (or a 2-pin 5.08 mm terminal block),1.5 mm hole,yes,any,,4.6 to 5.5 V 2 A
+master,H1 H2 H3 H4,4,M3 screw,3.2 mm hole,optional,any,,
+antenna,,1,Edge-launch SMA jack for a 1.6 mm board,to choose,yes,to choose,,no part chosen: its pads must suit the board's generic footprint (x = 10-12 and 22-24 mm)
+antenna,,1,Series link 0 Ohm,0402,yes,LCSC,C17168,required: the line is cut there
+antenna,,2,PI shunts,0402,no,,,left unfitted until tuning
+antenna,,1,IPEX to SMA lead rated to 6 GHz,to the C5-Zero's IPEX connector,yes,any,,the SMA end must mate with the antenna's jack
