@@ -61,8 +61,8 @@ void c6_hub_set_volume(uint8_t pct) {
 
 static lp_config_t default_config(void) {
     const lp_config_t c = {
-        .alpha_milli = 300, .active_db_x10 = 150, .hysteresis_db_x10 = 30,
-        .drop_db_x10 = 30, .min_peak_db_x10 = 250, .refractory_ms = 1500,
+        .alpha_milli = 250, .active_db_x10 = 80, .hysteresis_db_x10 = 30,   /* sd_config_default() */
+        .drop_db_x10 = 30, .min_peak_db_x10 = 100, .refractory_ms = 1500,
         .stale_ms = 1000, .volume_pct = 60, .muted = 0,
     };
     return c;
@@ -204,6 +204,7 @@ static void status_track_loss(c6_node_t *n, uint32_t seq) {
 /* The node's relayed C5 state and health (the decoder NUL-terminates fw). */
 static void node_take_status(c6_node_t *n, const fp_node_status_t *s) {
     n->cn_x10 = s->cn_x10; n->state = s->state;
+    memcpy(n->levels, s->levels, sizeof n->levels);
     n->passes = s->passes; n->flags = s->flags; n->gain = s->gain;
     n->c5_uptime_s = s->uptime_s; n->heap_min = s->heap_min; n->faults = s->faults;
     memcpy(n->fw, s->fw, sizeof n->fw);
@@ -300,7 +301,10 @@ void c6_hub_start(void) {
 }
 
 void c6_hub_local_pass(uint8_t channel, int32_t peak_db_x10, uint32_t at_ms) {
-    record_pass(0, channel, peak_db_x10, at_ms);   /* gate 0 = master's local C5 */
+    /* Gate 0 = master's local C5, stamped on its own clock: on the fleet clock, like the
+     * remote gates, or a sector between it and them means nothing. Only the link task calls. */
+    static rt_clock_t local_clock;
+    record_pass(0, channel, peak_db_x10, rt_clock_to_fleet(&local_clock, at_ms, now_ms()));
 }
 
 void c6_hub_set_pairing(bool open) {

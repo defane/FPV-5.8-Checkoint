@@ -92,7 +92,7 @@ size_t fp_encode_gate_pass(uint8_t *buf, size_t cap, const fp_gate_pass_t *m) {
     put_u32(pl + 10, m->seq);
     return frame(buf, cap, FP_MSG_GATE_PASS, pl, sizeof pl);
 }
-#define NODE_STATUS_LEN (29u + LP_FW_LEN)   /* 53 <= FP_MAX_PAYLOAD */
+#define NODE_STATUS_LEN (37u + LP_FW_LEN)   /* 61 <= FP_MAX_PAYLOAD */
 
 size_t fp_encode_node_status(uint8_t *buf, size_t cap, const fp_node_status_t *m) {
     uint8_t pl[NODE_STATUS_LEN];
@@ -107,10 +107,11 @@ size_t fp_encode_node_status(uint8_t *buf, size_t cap, const fp_node_status_t *m
     put_u32(pl + 17, m->uptime_s);
     put_u32(pl + 21, m->heap_min);
     put_u32(pl + 25, m->faults);
+    for (unsigned k = 0; k < LP_LEVELS; k++) pl[29 + k] = (uint8_t)m->levels[k];
     /* NUL-padded, never unterminated: the last byte is always 0. */
     unsigned i = 0;
-    for (; i + 1u < LP_FW_LEN && m->fw[i]; i++) pl[29 + i] = (uint8_t)m->fw[i];
-    for (; i < LP_FW_LEN; i++) pl[29 + i] = 0;
+    for (; i + 1u < LP_FW_LEN && m->fw[i]; i++) pl[37 + i] = (uint8_t)m->fw[i];
+    for (; i < LP_FW_LEN; i++) pl[37 + i] = 0;
     return frame(buf, cap, FP_MSG_NODE_STATUS, pl, sizeof pl);
 }
 
@@ -191,7 +192,8 @@ bool fp_decode(const uint8_t *buf, size_t n, fp_msg_t *out) {
         out->node_status.uptime_s = get_u32(p + 17);
         out->node_status.heap_min = get_u32(p + 21);
         out->node_status.faults = get_u32(p + 25);
-        for (unsigned i = 0; i < LP_FW_LEN; i++) out->node_status.fw[i] = (char)p[29 + i];
+        for (unsigned k = 0; k < LP_LEVELS; k++) out->node_status.levels[k] = (int8_t)p[29 + k];
+        for (unsigned i = 0; i < LP_FW_LEN; i++) out->node_status.fw[i] = (char)p[37 + i];
         out->node_status.fw[LP_FW_LEN - 1u] = '\0';   /* a peer may not have terminated it */
         return true;
     case FP_MSG_COMMAND:

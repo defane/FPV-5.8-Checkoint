@@ -16,6 +16,7 @@ typedef struct {
     uint8_t  gate_index;     /* 1.. */
     uint8_t  channel;        /* assigned FPV channel code */
     int32_t  cn_x10;         /* last reported; LP_CN_UNKNOWN if none */
+    int8_t   levels[LP_LEVELS];   /* last reported */
     uint8_t  state;          /* pd_state_t of the node's detector */
     uint32_t last_seen_ms;
     bool     online;         /* seen within the liveness window */

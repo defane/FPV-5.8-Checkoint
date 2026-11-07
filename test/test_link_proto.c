@@ -88,18 +88,19 @@ int main(void) {
 
     /* EVENT_PASS and STATS roundtrip. */
     {
-        lp_event_t e = { .channel = 5, .peak_db_x10 = 352, .at_ms = 123456 };
+        lp_event_t e = { .channel = 5, .peak_db_x10 = 352, .at_ms = 123456, .age_ms = 60123 };
         size_t n = lp_encode_event(buf, sizeof buf, &e);
         int g = run(buf, n, got, 4);
         bool ok = g == 1 && got[0].type == LP_MSG_EVENT_PASS &&
                   got[0].event.channel == 5 && got[0].event.peak_db_x10 == 352 &&
-                  got[0].event.at_ms == 123456u;
+                  got[0].event.at_ms == 123456u && got[0].event.age_ms == 60123u;
         CHECK(ok, "event_pass roundtrip");
 
         lp_stats_t s = { .cn_x10 = LP_CN_UNKNOWN, .channel = 3, .state = 2,
                          .flags = LP_HEALTH_CAL_NEEDED | LP_HEALTH_CALIBRATING, .gain = 83,
                          .passes = 41, .uptime_s = 86400, .heap_min = 123456,
-                         .faults = 0xFFFFFFFEu, .fw = "5.0.0-dev+3201b7196ece" };
+                         .faults = 0xFFFFFFFEu, .levels = {0, 1, -2, 127, -127, LP_LEVEL_UNKNOWN, 7, 8},
+                         .fw = "5.0.0-dev+3201b7196ece" };
         n = lp_encode_stats(buf, sizeof buf, &s);
         g = run(buf, n, got, 4);
         const lp_stats_t *r = &got[0].stats;
@@ -107,7 +108,8 @@ int main(void) {
              r->cn_x10 == LP_CN_UNKNOWN && r->channel == 3 && r->state == 2 &&
              r->flags == (LP_HEALTH_CAL_NEEDED | LP_HEALTH_CALIBRATING) && r->gain == 83 &&
              r->passes == 41 && r->uptime_s == 86400 && r->heap_min == 123456 &&
-             r->faults == 0xFFFFFFFEu && strcmp(r->fw, "5.0.0-dev+3201b7196ece") == 0;
+             r->faults == 0xFFFFFFFEu && memcmp(r->levels, s.levels, LP_LEVELS) == 0 &&
+             strcmp(r->fw, "5.0.0-dev+3201b7196ece") == 0;
         CHECK(ok, "stats roundtrip (health, negative cn, fw id, full payload)");
 
         /* A fw id filling the whole field is truncated to stay NUL-terminated. */
@@ -119,7 +121,7 @@ int main(void) {
 
         /* A peer that sends 24 non-NUL bytes cannot unterminate it either. */
         n = lp_encode_stats(buf, sizeof buf, &s);
-        buf[4 + 24 + LP_FW_LEN - 1u] = 'y';                       /* last fw byte */
+        buf[4 + 32 + LP_FW_LEN - 1u] = 'y';                       /* last fw byte */
         const uint16_t crc = lp_crc16(&buf[1], 3u + buf[3]);
         buf[n - 2] = (uint8_t)(crc & 0xFFu);
         buf[n - 1] = (uint8_t)(crc >> 8);
@@ -128,13 +130,6 @@ int main(void) {
         CHECK(ok, "stats fw id never unterminated (decoder)");
     }
 
-    /* SET_CHANNEL roundtrip. */
-    {
-        size_t n = lp_encode_set_channel(buf, sizeof buf, 27);
-        int g = run(buf, n, got, 4);
-        CHECK(g == 1 && got[0].type == LP_MSG_SET_CHANNEL && got[0].channel_index == 27,
-              "set_channel roundtrip");
-    }
 
     /* COMMAND: every known command roundtrips; an unknown one is neither
      * encoded nor decoded. */

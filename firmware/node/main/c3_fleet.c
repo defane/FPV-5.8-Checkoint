@@ -61,7 +61,6 @@ static void apply_config(const fp_config_t *c) {
     s_gate = c->gate_index;
     s_channel = c->channel;
     c3_link_push_config(&c->det);       /* detector/audio tunables to the C5 */
-    c3_link_set_channel(c->channel);    /* retune the C5 to the assigned channel */
 }
 
 static void on_msg(const uint8_t mac[6], const fp_msg_t *msg, int8_t rssi) {
@@ -153,8 +152,8 @@ sled_base_t c3_fleet_led_base(uint32_t now) {
 void c3_fleet_report_pass(const lp_event_t *e) {
     status_led_pass();   /* flash on every C5 pass, even before we relay it */
     if (!s_paired) return;
-    const fp_gate_pass_t gp = { .gate_index = s_gate, .channel = s_channel,
-                                .peak_db_x10 = e->peak_db_x10, .fleet_ms = fleet_ms(),
+    const fp_gate_pass_t gp = { .gate_index = s_gate, .channel = e->channel,   /* the C5 scans */
+                                .peak_db_x10 = e->peak_db_x10, .fleet_ms = fleet_ms() - e->age_ms,
                                 .seq = s_pass_seq++ };
     uint8_t buf[FP_MAX_FRAME];
     size_t n = fp_encode_gate_pass(buf, sizeof buf, &gp);
@@ -168,6 +167,7 @@ void c3_fleet_report_stats(const lp_stats_t *s) {
                             .passes = s->passes, .flags = s->flags, .seq = s_status_seq++,
                             .gain = s->gain, .uptime_s = s->uptime_s,
                             .heap_min = s->heap_min, .faults = s->faults };
+    memcpy(ns.levels, s->levels, sizeof ns.levels);
     strlcpy(ns.fw, s->fw, sizeof ns.fw);
     uint8_t buf[FP_MAX_FRAME];
     size_t n = fp_encode_node_status(buf, sizeof buf, &ns);

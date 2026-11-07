@@ -37,7 +37,7 @@ class Firmware(unittest.TestCase):
     def test_state_fields_match_the_c_code(self):
         for cls, path in SOURCES.items():
             src = (ROOT / path).read_text()
-            c = c_function(src, "get_state") + c_function(src, "put_health")
+            c = c_function(src, "get_state") + c_function(src, "put_health") + c_function(src, "put_levels")
             want = set(re.findall(r'\\"([a-z0-9_]+)\\":', c))
             sim = cls()
             sim.state(60.0)                       # past a few passes: every list is filled

@@ -12,16 +12,15 @@
  * drops the forced gain, and forcing it again is all it takes; phy_rfagc_disable()
  * alone costs 3.4 ms for nothing. The direct hops call libphy past rf.c:
  * operator-approved, on this bench only.
- * The scan prototype (K then S) loops the `force` hop over R1-R8 and records the
+ * The scan recording (K then S) loops the `force` hop over R1-R8 and records the
  * power of every channel, to see whether real passes stand out and for how long
  * it holds, and the residue trace (K then z) times what a strong channel leaves in
  * the next reading. Both at the end of the file.
- * Both own the receiver like scan() does (receiver_pause + s_scan_active, so the
- * control loop stops reading windows and steering AFC), at scan()'s fixed gain,
- * then restores the channel, offset and gain. No detection meanwhile, and nothing
- * is saved. The protected receive chain is not edited: only its public calls and,
- * for the direct hops, the same libphy functions rf.c uses. A one-shot priority-1
- * task with its buffers on the heap, gone when the bench ends. */
+ * Each takes the receiver from the detector's own scan (scan_hop.c, checkpoint.c),
+ * then gives it back. No detection meanwhile, and nothing is saved. The protected
+ * receive chain is not edited: only its public calls and, for the direct hops, the
+ * same libphy functions rf.c uses. A one-shot priority-1 task with its buffers on
+ * the heap, gone when the bench ends. */
 #include "hop_bench.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -31,6 +30,7 @@
 #include "phy.h"
 #include "receiver.h"
 #include "rf.h"
+#include "scan_hop.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -43,8 +43,8 @@ extern void phy_rfagc_disable(void);
 #define BENCH_PRIORITY  1u              /* below every receiver task */
 #define BENCH_STACK     6144u
 #define BENCH_GAIN      52u             /* scan()'s: every channel compared at one gain */
-#define CHANNELS        8u              /* R1..R8 are indices 0..7 */
-#define DIRECT_BASE     3u              /* R4: mid band, the Wi-Fi centre direct hops stay on */
+#define CHANNELS        SCAN_CHANNELS
+#define DIRECT_BASE     SCAN_BASE_CHANNEL
 #define SWEEPS          4u
 #define TRACE_POINTS    100u
 #define TRACE_STEP_US   100u            /* a floor: a point takes as long as it takes */
@@ -87,52 +87,20 @@ typedef struct {
 static volatile bool s_running, s_scanning, s_scan_stop;
 static uint8_t s_hop_gain = BENCH_GAIN;   /* forced again after each direct hop */
 
-typedef struct { size_t channel; int offset_khz; uint8_t gain; } saved_rx_t;
-
-static bool take_receiver(const char *tag, uint8_t gain, saved_rx_t *saved)
+static bool take_receiver(const char *tag, uint8_t gain, scan_saved_t *saved)
 {
-    if (!receiver_pause(tag)) return false;
-    *saved = (saved_rx_t){rf_channel_index(), rf_offset_khz(), s_current_gain};
-    s_scan_active = true;
+    if (!scan_take(tag, gain, saved)) return false;
     s_hop_gain = gain;
-    receiver_set_gain(gain);
     return true;
 }
 
-/* Back by the far end of the band: esp_wifi_set_channel() may do nothing for the
- * Wi-Fi channel it believes is current, and direct hops left it stale. Returns
- * the retunes that failed. */
-static unsigned give_receiver(const saved_rx_t *saved)
+/* The detector's scan lets go of the receiver for as long as a bench runs. */
+static bool bench_claim(void)
 {
-    const int f = rf_channel_freq(saved->channel);
-    const size_t detour = abs(f - rf_channel_freq(0)) > abs(f - rf_channel_freq(CHANNELS - 1u)) ? 0u : CHANNELS - 1u;
-    const unsigned failed = rf_set_channel(detour) != ESP_OK || rf_set_channel(saved->channel) != ESP_OK;
-    rf_set_offset_khz(saved->offset_khz);
-    receiver_set_gain(saved->gain);
-    s_scan_active = false;
-    receiver_resume();
-    return failed;
-}
-
-static bool receiver_free(void)
-{
-    return !(s_running || s_menu_active || s_scan_active || menu_status_active() || calibration_in_startup() ||
-             receiver_paused() || !receiver_active());
-}
-
-/* Mean IQ power of a window, DC removed, x256 (4-bit I and Q as measure_window). */
-static uint32_t window_power(const uint8_t *s, size_t n)
-{
-    int32_t si = 0, sq = 0;
-    uint32_t sp = 0;
-    for (size_t k = 0; k < n; k++) {
-        const int q = (int8_t)((s[k] & 0x0fu) << 4) >> 4, i = (int8_t)(s[k] & 0xf0u) >> 4;
-        si += i;
-        sq += q;
-        sp += (uint32_t)(i * i + q * q);
-    }
-    const int64_t ac = (int64_t)sp * (int64_t)n - (int64_t)si * si - (int64_t)sq * sq;
-    return ac <= 0 ? 0u : (uint32_t)(ac * 256 / ((int64_t)n * (int64_t)n));
+    checkpoint_scan_hold(true);
+    if (!s_running && scan_receiver_free()) return true;
+    checkpoint_scan_hold(false);
+    return false;
 }
 
 static void hop(bench_t *b, unsigned method, unsigned ch)
@@ -170,7 +138,7 @@ static void time_steps(bench_t *b)
         t[S_COPY] = esp_timer_get_time();
         (void)copy_control_window(b->window, CONTROL_BYTES);
         t[S_POWER] = esp_timer_get_time();
-        volatile uint32_t power = window_power(b->window, CONTROL_BYTES);   /* kept: else optimised out */
+        volatile uint32_t power = hs_window_power(b->window, CONTROL_BYTES);   /* kept: else optimised out */
         (void)power;
         t[STEPS] = esp_timer_get_time();
         for (unsigned s = 0; s < STEPS; s++) b->step_us[s][i] = (uint32_t)(t[s + 1] - t[s]);
@@ -188,7 +156,7 @@ static size_t trace(bench_t *b, int64_t t0)
         while (esp_timer_get_time() < at) {}
         if (!copy_control_window(b->window, CONTROL_BYTES)) continue;
         b->t_us[n] = (uint32_t)(esp_timer_get_time() - t0);
-        b->power[n++] = window_power(b->window, CONTROL_BYTES);
+        b->power[n++] = hs_window_power(b->window, CONTROL_BYTES);
     }
     return n;
 }
@@ -218,7 +186,7 @@ static void run_method(bench_t *b, unsigned m)
             }
             vTaskDelay(pdMS_TO_TICKS(LATE_MS));            /* also lets idle and priority 1 run */
             if (copy_control_window(b->window, CONTROL_BYTES))
-                b->late[m][ch] = window_power(b->window, CONTROL_BYTES);
+                b->late[m][ch] = hs_window_power(b->window, CONTROL_BYTES);
         }
 }
 
@@ -292,11 +260,11 @@ static void report(bench_t *b, unsigned m)
 static void bench_task(void *arg)
 {
     bench_t *b = arg;
-    saved_rx_t saved;
+    scan_saved_t saved;
     if (take_receiver("HOPBENCH", BENCH_GAIN, &saved)) {
         time_steps(b);
         for (unsigned m = 0; m < METHODS; m++) run_method(b, m);
-        b->failed += give_receiver(&saved);
+        b->failed += scan_give(&saved);
         report_steps(b);
         for (unsigned m = 0; m < METHODS; m++) report(b, m);
         printf("HOPBENCH done gain=%u window_us=%lu failed_retunes=%u restored=%s offset_khz=%d; "
@@ -305,18 +273,20 @@ static void bench_task(void *arg)
     }
     free(b);
     s_running = false;
+    checkpoint_scan_hold(false);
     vTaskDelete(NULL);
 }
 
 void hop_bench_start(void)
 {
-    if (!receiver_free()) {
+    if (!bench_claim()) {
         printf("HOPBENCH refused: the receiver is busy\n");
         return;
     }
     bench_t *b = calloc(1, sizeof *b);
     if (!b) {
         printf("HOPBENCH refused: no memory\n");
+        checkpoint_scan_hold(false);
         return;
     }
     s_running = true;
@@ -325,10 +295,11 @@ void hop_bench_start(void)
         printf("HOPBENCH refused: no memory for the task\n");
         free(b);
         s_running = false;
+        checkpoint_scan_hold(false);
     }
 }
 
-/* ---- Scan prototype (console K then S) -------------------------------------
+/* ---- Scan recording (console K then S) -------------------------------------
  * Hops over R1-R8 with `force` until K then S again (SCAN_MAX_S at most) and keeps
  * the last SCAN_KEEP_S seconds of every channel's power in a heap ring: printing
  * while hopping would slow the scan, so the ring is printed at the end, as
@@ -341,28 +312,18 @@ void hop_bench_start(void)
  * frequency, so a residue of the previous channel and a real bleed fall on different
  * channels, and each hop is the 4-channel step the hop bench measured. */
 #define SCAN_MAX_S        3600u
-#define SCAN_KEEP_S       20u
+#define SCAN_KEEP_S       60u           /* less on a tight heap: SCANBENCH start tells */
 #define SCAN_HZ           57u           /* hop + SCAN_FRESH_US + one window, over 8 channels */
-#define SCAN_FRESH_US     1000u         /* the residue trace (K then z): gone by 1 ms */
-#define SCAN_YIELD_SWEEPS 16u           /* lets idle and priority 1 run */
 #define SCAN_LIVE_S       10u
 #define SCAN_HEADROOM     16384u        /* heap left for the rest of the firmware */
 #define SCAN_MIN_SWEEPS   500u
-#define SCAN_NO_DATA      0xffffu
-#define SCAN_GAIN_DEFAULT 24u           /* onboard antenna, close passes: docs/bench.md */
-#define SCAN_GAIN_MIN     24u           /* the console's fixed gains */
-#define SCAN_GAIN_MAX     78u
-#define SCAN_GAIN_STEP    4u
 #define SCAN_DUMP_PAUSE_MS 200u
 #define SCAN_DUMP_LINES   4u
-#define SCAN_DUMP_MS      5u            /* a 20 s ring prints in about 3 s */
-
-static const uint8_t scan_order[CHANNELS] = {0, 4, 1, 5, 2, 6, 3, 7};   /* R1 R5 R2 R6 R3 R7 R4 R8 */
-static uint8_t s_scan_gain = SCAN_GAIN_DEFAULT;
+#define SCAN_DUMP_MS      5u            /* a full ring prints in about 5 s */
 
 typedef struct {
     uint32_t t_us;
-    uint16_t power[CHANNELS];           /* window_power(); fits: at most 32768 */
+    uint16_t power[CHANNELS];           /* hs_window_power(); fits: at most 32768 */
 } sweep_t;
 
 typedef struct {
@@ -371,22 +332,6 @@ typedef struct {
     uint32_t count, no_data;
     sweep_t ring[];
 } scan_t;
-
-static void scan_sweep(scan_t *sc, sweep_t *e)
-{
-    for (unsigned k = 0; k < CHANNELS; k++) {
-        const unsigned ch = scan_order[k];
-        hop(NULL, M_FORCE, ch);
-        const int64_t fresh = esp_timer_get_time() + SCAN_FRESH_US;
-        while (esp_timer_get_time() < fresh) {}
-        if (copy_control_window(sc->window, CONTROL_BYTES)) {
-            e->power[ch] = (uint16_t)window_power(sc->window, CONTROL_BYTES);
-        } else {
-            e->power[ch] = SCAN_NO_DATA;
-            sc->no_data++;
-        }
-    }
-}
 
 static void scan_loop(scan_t *sc)
 {
@@ -399,10 +344,10 @@ static void scan_loop(scan_t *sc)
         if (now - t0 >= SCAN_MAX_S * 1000000ll) break;
         sweep_t *e = &sc->ring[sc->count % sc->cap];
         e->t_us = (uint32_t)(now - t0);
-        scan_sweep(sc, e);
+        scan_sweep(sc->window, e->power, &sc->no_data);
         sc->count++;
         for (unsigned ch = 0; ch < CHANNELS; ch++)
-            if (e->power[ch] != SCAN_NO_DATA && e->power[ch] > peak[ch]) peak[ch] = e->power[ch];
+            if (e->power[ch] != SD_NO_DATA && e->power[ch] > peak[ch]) peak[ch] = e->power[ch];
         if (sc->count % SCAN_YIELD_SWEEPS == 0u) vTaskDelay(1);
         if (esp_timer_get_time() >= next_live) {
             const uint32_t sweeps = sc->count - live_from;
@@ -430,29 +375,30 @@ static void scan_dump(const scan_t *sc)
         order[2u * k + 1u] = k + 1u < CHANNELS ? ':' : '\0';
     }
     printf("SCANDUMP begin sweeps=%lu kept=%u no_data=%lu gain=%u order=%s\n", (unsigned long)sc->count,
-           (unsigned)kept, (unsigned long)sc->no_data, s_scan_gain, order);
+           (unsigned)kept, (unsigned long)sc->no_data, scan_gain(), order);
     for (size_t i = 0; i < kept; i++) {
         const sweep_t *e = &sc->ring[(oldest + i) % sc->cap];
         printf("SCAN,%lu,%u,%u,%u,%u,%u,%u,%u,%u\n", (unsigned long)e->t_us, e->power[0], e->power[1], e->power[2],
                e->power[3], e->power[4], e->power[5], e->power[6], e->power[7]);
         if (i % SCAN_DUMP_LINES == 0u) vTaskDelay(pdMS_TO_TICKS(SCAN_DUMP_MS));
     }
-    printf("SCANDUMP end gain=%u order=%s\n", s_scan_gain, order);   /* the begin line can get lost */
+    printf("SCANDUMP end gain=%u order=%s\n", scan_gain(), order);   /* the begin line can get lost */
 }
 
 static void scan_task(void *arg)
 {
     scan_t *sc = arg;
-    saved_rx_t saved;
-    if (take_receiver("SCANBENCH", s_scan_gain, &saved)) {
+    scan_saved_t saved;
+    if (take_receiver("SCANBENCH", scan_gain(), &saved)) {
         if (rf_set_channel(DIRECT_BASE) == ESP_OK) scan_loop(sc);
-        const unsigned failed = give_receiver(&saved);
+        const unsigned failed = scan_give(&saved);
         scan_dump(sc);
         printf("SCANBENCH done failed_retunes=%u restored=%s; reset the board before any other measurement\n",
                failed, rf_channel()->name);
     }
     free(sc);
     s_running = s_scanning = false;
+    checkpoint_scan_hold(false);
     vTaskDelete(NULL);
 }
 
@@ -462,11 +408,8 @@ void scan_bench_gain(bool up)
         printf("SCANBENCH gain refused: a scan is running\n");
         return;
     }
-    int g = (int)s_scan_gain + (up ? (int)SCAN_GAIN_STEP : -(int)SCAN_GAIN_STEP);
-    if (g < (int)SCAN_GAIN_MIN) g = (int)SCAN_GAIN_MIN;
-    if (g > (int)SCAN_GAIN_MAX) g = (int)SCAN_GAIN_MAX;
-    s_scan_gain = (uint8_t)g;
-    printf("SCANBENCH gain=%u for the next scan (not saved)\n", s_scan_gain);
+    scan_gain_step(up);
+    printf("SCANBENCH gain=%u, now and for the next recording (not saved)\n", scan_gain());
 }
 
 void scan_bench_toggle(void)
@@ -476,7 +419,7 @@ void scan_bench_toggle(void)
         printf("SCANBENCH stopping\n");
         return;
     }
-    if (!receiver_free()) {
+    if (!bench_claim()) {
         printf("SCANBENCH refused: the receiver is busy\n");
         return;
     }
@@ -487,23 +430,25 @@ void scan_bench_toggle(void)
     scan_t *sc = cap >= SCAN_MIN_SWEEPS ? calloc(1, sizeof *sc + cap * sizeof(sweep_t)) : NULL;
     if (!sc) {
         printf("SCANBENCH refused: no memory (largest block %u)\n", (unsigned)largest);
+        checkpoint_scan_hold(false);
         return;
     }
     sc->cap = cap;
     s_scan_stop = false;
     s_running = s_scanning = true;
     printf("SCANBENCH start: R1-R8 gain=%u keeping the last %u s; K then S stops, %u s at most; no detection meanwhile\n",
-           s_scan_gain, (unsigned)(cap / SCAN_HZ), SCAN_MAX_S);
+           scan_gain(), (unsigned)(cap / SCAN_HZ), SCAN_MAX_S);
     if (xTaskCreate(scan_task, "scan_bench", BENCH_STACK, sc, BENCH_PRIORITY, NULL) != pdPASS) {
         printf("SCANBENCH refused: no memory for the task\n");
         free(sc);
         s_running = s_scanning = false;
+        checkpoint_scan_hold(false);
     }
 }
 
 /* ---- Residue trace (console K then z) ---------------------------------------
  * After a hop off a strong channel, the next channel's first window still shows
- * that signal about 8 dB down (scan prototype, board 2026-11-05: it stayed with the
+ * that signal about 8 dB down (scan recording, board 2026-11-05: it stayed with the
  * channel read next, not with the neighbour in frequency). This times it: strongest
  * channel to the quietest, a delay, then the IQ power of the four quarters of one
  * window (25 us each), against the same hop from another quiet channel. The delay
@@ -532,7 +477,7 @@ static void residue_levels(residue_t *r)
         uint32_t sum = 0, n = 0;
         for (unsigned k = 0; k < RES_LEVEL_READS; k++) {
             if (copy_control_window(r->window, CONTROL_BYTES)) {
-                sum += window_power(r->window, CONTROL_BYTES);
+                sum += hs_window_power(r->window, CONTROL_BYTES);
                 n++;
             }
             vTaskDelay(1);
@@ -552,7 +497,7 @@ static void residue_measure(residue_t *r, unsigned from, unsigned to, uint32_t (
             const int64_t at = esp_timer_get_time() + k_res_delay_us[d];
             while (esp_timer_get_time() < at) {}
             if (!copy_control_window(r->window, CONTROL_BYTES)) continue;
-            for (unsigned k = 0; k < RES_QUARTERS; k++) out[d][k] += window_power(r->window + k * q, q);
+            for (unsigned k = 0; k < RES_QUARTERS; k++) out[d][k] += hs_window_power(r->window + k * q, q);
             count[d]++;
         }
 }
@@ -561,7 +506,7 @@ static void residue_report(const residue_t *r, unsigned top, unsigned quiet, uns
 {
     printf("RESIDUE strong=R%u %.1f dB quiet=R%u %.1f dB control=R%u %.1f dB gain=%u%s\n", top + 1u,
            power_db(r->level[top]), quiet + 1u, power_db(r->level[quiet]), other + 1u, power_db(r->level[other]),
-           s_scan_gain, power_db(r->level[top]) < 5.0f ? " (weak: bring the VTX closer)" : "");
+           scan_gain(), power_db(r->level[top]) < 5.0f ? " (weak: bring the VTX closer)" : "");
     for (unsigned d = 0; d < RES_DELAYS; d++) {
         const uint32_t a = r->after_n[d] ? r->after_n[d] : 1u, c = r->control_n[d] ? r->control_n[d] : 1u;
         printf("RESIDUE d_us=%u after_db=%.1f/%.1f/%.1f/%.1f control_db=%.1f/%.1f/%.1f/%.1f\n", k_res_delay_us[d],
@@ -574,8 +519,8 @@ static void residue_report(const residue_t *r, unsigned top, unsigned quiet, uns
 static void residue_task(void *arg)
 {
     residue_t *r = arg;
-    saved_rx_t saved;
-    if (take_receiver("RESIDUE", s_scan_gain, &saved)) {
+    scan_saved_t saved;
+    if (take_receiver("RESIDUE", scan_gain(), &saved)) {
         unsigned top = 0, quiet = 0, other = 0;
         if (rf_set_channel(DIRECT_BASE) == ESP_OK) {
             residue_levels(r);
@@ -589,25 +534,27 @@ static void residue_task(void *arg)
             residue_measure(r, top, quiet, r->after, r->after_n);
             residue_measure(r, other, quiet, r->control, r->control_n);
         }
-        const unsigned failed = give_receiver(&saved);
+        const unsigned failed = scan_give(&saved);
         residue_report(r, top, quiet, other);
         printf("RESIDUE done failed_retunes=%u restored=%s; reset the board before any other measurement\n",
                failed, rf_channel()->name);
     }
     free(r);
     s_running = false;
+    checkpoint_scan_hold(false);
     vTaskDelete(NULL);
 }
 
 void residue_bench_start(void)
 {
-    if (!receiver_free()) {
+    if (!bench_claim()) {
         printf("RESIDUE refused: the receiver is busy\n");
         return;
     }
     residue_t *r = calloc(1, sizeof *r);
     if (!r) {
         printf("RESIDUE refused: no memory\n");
+        checkpoint_scan_hold(false);
         return;
     }
     s_running = true;
@@ -616,5 +563,6 @@ void residue_bench_start(void)
         printf("RESIDUE refused: no memory for the task\n");
         free(r);
         s_running = false;
+        checkpoint_scan_hold(false);
     }
 }

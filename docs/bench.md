@@ -118,16 +118,16 @@ channel like `full`, R1 to R8, from a single Wi-Fi centre. `phy_rfagc_disable()`
 prove: real passes, a moving VTX, sensitivity at range with this fixed gain, and hours of
 continuous hopping.
 
-## 5. Scan prototype: do real passes stand out?
+## 5. Scan recording: do real passes stand out?
 
-The hop bench says a scan is fast enough; this says whether it detects anything. It loops
-the `force` hop over R1-R8 with one power window per channel and records all of them. It
-is the tail of `components/checkpoint/hop_bench.c`, on the console only: no detection and
-no web health from this C5 while it runs.
+The detector scans by itself ([detector.md](detector.md)); this records the raw power of every
+channel, to see whether real passes stand out and to tune it. It is the tail of
+`components/checkpoint/hop_bench.c`, on the console only: every bench takes the receiver from
+the detector, so there is no detection while it runs, and the detector starts again after it.
 
-Its gain is 24 by default, the lowest it takes: at the hop bench's 52 a close VTX sits on the
+The gain is 24 by default, the lowest it takes: at the hop bench's 52 a close VTX sits on the
 4-bit IQ's rail and a pass only rises 3-4 dB. `K` then `g` or `G` moves it by 4, from 24 to 78,
-for the next scan (not saved). The aim: the VTX near the noise at rest, and around +15 dB at
+not saved. The aim: the VTX near the noise at rest, and around +15 dB at
 its closest, below the rail (about +20 dB). The channels are read R1 R5 R2 R6 R3 R7 R4 R8: what follows a
 strong channel in time is then never its neighbour in frequency, so a residue of the previous
 channel lands on another channel than a real bleed.
@@ -137,8 +137,9 @@ channel lands on another channel than a real bleed.
    that it does not saturate up close.
 2. `K` then `S` starts it: `SCANBENCH start`.
 3. Move the VTX past the antenna a few times, a second or so each, a few seconds apart.
-4. `K` then `S` again stops it, **within 20 s of the first pass**: only the last 20 s are
-   kept. The `SCAN,` lines print for a few seconds, up to `SCANBENCH done`.
+4. `K` then `S` again stops it, **within 60 s of the first pass**: only the last 60 s are
+   kept, or less on a tight heap (`SCANBENCH start` tells). The `SCAN,` lines print for a few
+   seconds, up to `SCANBENCH done`.
 5. Reset the board, then read the recording:
 
 ```sh

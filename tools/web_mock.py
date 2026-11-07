@@ -4,8 +4,8 @@
 Serves the real pages from disk, read at every request: edit
 firmware/<role>/main/www/index.html or components/web_auth/www/auth.js and reload
 the browser, no build, no flash. /api/* answers like the firmware on a simulated
-race (a healthy gate, one needing a calibration, one offline), and admin actions
-take effect. Signed requests are checked as on the ESP (components/web_auth), and
+race (a healthy gate, one needing a calibration, one offline), every Raceband
+channel of every gate measured as the scanning C5 does, and admin actions take effect. Signed requests are checked as on the ESP (components/web_auth), and
 a body over the firmware's buffer is refused, so a page cannot outgrow it unnoticed.
 Restarting the mock is an ESP reboot: sessions are lost, the page's key stays valid.
 
@@ -96,6 +96,17 @@ class Gate:
         near = min(abs(t - self.next_pass), abs(t - self.last_pass))
         return noise + (220 if self.vtx else int(max(0.0, 220 * (1 - near / 1.2))))
 
+    def levels(self, t):
+        """One level per Raceband channel: the gate's own, a second pilot, the noise."""
+        if not self.up(t) or self.calibrating(t):
+            return [CN_UNKNOWN] * 8
+        out = [random.randint(-50, -10) for _ in range(8)]
+        if self.channel < 8:
+            out[self.channel] = self.cn_x10(t)
+        other = (self.channel + 3) % 8
+        out[other] = max(out[other], int(190 * math.sin((t + self.gate) / 6.0) ** 40))
+        return out
+
     def state(self, t):                              # pd_state_t
         if self.next_pass - t < 1.2:
             return 1
@@ -185,9 +196,11 @@ class Master:
                   "cn_x10": n.cn_x10(t) if n.online else CN_UNKNOWN, "state": n.state(t) if n.online else 0,
                   "last_seen_ms": int(t * 1000) - 300 if n.online else 12000, "rssi": n.rssi,
                   "rx_frames": int(t * 6), "status_rx": int(t * 2), "status_lost": n.status_lost,
-                  "mac": n.mac, **n.health(t)} for n in self.nodes]
+                  "mac": n.mac, "levels": n.levels(t) if n.online else [CN_UNKNOWN] * 8,
+                  **n.health(t)} for n in self.nodes]
         return {"pairing": self.pairing, "num_gates": 1 + len(self.nodes), "has_local": lo.up(t),
-                "local": {"channel": lo.channel, "cn_x10": lo.cn_x10(t), "state": lo.state(t), **lo.health(t)},
+                "local": {"channel": lo.channel, "cn_x10": lo.cn_x10(t), "state": lo.state(t),
+                          "levels": lo.levels(t), **lo.health(t)},
                 "total_passes": self.total, "volume": self.volume, "uptime_ms": int(t * 1000),
                 "free_heap": 182000 + random.randint(-2000, 2000), "heap_total": 330000, "nodes": nodes,
                 "standings": [{"channel": c, "laps": s["laps"], "last_lap_ms": s["last_lap_ms"],
@@ -286,13 +299,11 @@ class Node:
                           "flags": h["cal_needed"] | h["calibrating"] << 1, "cal_needed": h["cal_needed"],
                           "calibrating": h["calibrating"], "gain": h["gain"], "passes": h["passes"],
                           "uptime_s": h["c5_uptime_s"], "heap_min": h["heap_min"], "faults": h["faults"],
-                          "fw": h["fw"]},
+                          "fw": h["fw"], "levels": g.levels(t)},
                 "total_events": self.total, "events": self.events}
 
     def set_config(self, b, t):
         self.config.update({k: v for k, v in b.items() if k in self.config})
-        if b.get("channel", -1) >= 0:
-            self.gate.channel = b["channel"]
         return {"ok": True}
 
     def command(self, b, t):

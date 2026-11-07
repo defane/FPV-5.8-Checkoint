@@ -5,23 +5,23 @@ https://github.com/Twotoz/C5VRX, remote `upstream`): a two-ESP checkpoint
 (C5 + C3) that scales to a C6-mastered race-timing fleet (see Fleet below).
 
 - **ESP32-C5** (Waveshare ESP32-C5-Zero, `firmware/detector`): the full C5VRX RF
-  receive chain → pass detection on the tuned channel's C/N → a pass report over
-  the UART link. **No local output at all**: no video
+  receive chain → a continuous sweep of R1-R8, pass detection on any of them → a
+  pass report over the UART link. **No local output at all**: no video
   (`CONFIG_C5VRX_VIDEO_OUTPUT=n` in `firmware/detector/sdkconfig.defaults`; the
   transport runs unchanged but `s_dac_gpio` routes it to no pin), **no amplifier**
   (the sound is the C6 master's) and no status LED.
 - **ESP32-C3** (`firmware/node`): the bridge. UART to the C5; when a C6 master is
   reachable it relays over ESP-NOW (headless), otherwise it falls back to a
-  local Wi-Fi SoftAP + web UI that tunes the detector and shows its live C/N,
+  local Wi-Fi SoftAP + web UI that tunes the detector and shows its channels' levels,
   stats and passes.
 
 It also scales to a **race-timing fleet** (`docs/CHECKPOINT.md`): an **ESP32-C6
 master** (`firmware/master`, UART to its own C5 + the speaker + a Wi-Fi AP admin
 web) aggregates passes from remote **C3 nodes** over **ESP-NOW**, each node a
-gate wired to a C5. The C6 orders gates, pairs nodes, assigns channels (retune
-via `SET_CHANNEL`), times laps/sectors per channel, and plays the central sound.
+gate wired to a C5. The C6 orders gates, pairs nodes, times laps/sectors per channel
+(every gate sees every channel, nobody picks one), and plays the central sound.
 A C3 that cannot reach the C6 at boot falls back to a degraded local AP+web
-(band selection + results).
+(results + detector settings).
 
 C5VRX is consumed as a **component**, never edited in place to add a feature:
 `components/c5vrx_rx` is the upstream receive engine (RF/transport/gain/agc/
@@ -40,10 +40,10 @@ applies here too. Full feature notes and the bench procedure:
 ```
 components/
   c5vrx_rx/      upstream C5VRX receive engine, pruned (consumable; INCLUDE_DIRS ".")
-  checkpoint/    our glue: detector + NVS + the C5<->C3 UART link (no audio, no LED)
-  pass_detector/ pure-C pass detector (host-tested)
+  checkpoint/    our glue: the sweep, detector + NVS + the C5<->C3 UART link (no audio, no LED)
+  pass_detector/ pure-C pass detector and scan detector (host-tested)
   audio_player/  I2S coin-sound player (the C6 speaker in a fleet)
-  link_proto/    pure-C C5<->bridge UART protocol (host-tested; incl. SET_CHANNEL)
+  link_proto/    pure-C C5<->bridge UART protocol (host-tested)
   fleet_proto/   pure-C C6<->C3 ESP-NOW protocol (host-tested)
   race_timing/   pure-C lap/sector timing engine (host-tested)
   espnow_link/   ESP-NOW transport (C6 + C3) carrying fleet_proto
@@ -68,15 +68,14 @@ detector sets it to `n`).
   `agc.c`, `*.bsasm`) are **not modified** without the operator's approval;
   the engine was moved into the component by pure file renames, then pruned
   without touching them (byte-identical to upstream, except `transport.c`'s
-  7-line `VIDEO_OUTPUT=n` pin routing). The checkpoint code only reads receiver
-  state, except what a bridge asks for over the link: a retune (`SET_CHANNEL`,
-  saved with `settings_save()`) and a calibration (`filter_request()` /
-  `filter_request_full()`, the console's F/B) or reboot (`COMMAND`). Production
-  has no console, so every operator need goes through the link. The one other
-  exception is bench-only: `K` then `s` or `S` (`components/checkpoint/hop_bench.c`,
-  `docs/bench.md`) owns the receiver like `scan()` and calls libphy's
-  `phy_set_freq()` and AGC-off functions directly (operator-approved) to measure
-  Raceband hops and try a scan.
+  7-line `VIDEO_OUTPUT=n` pin routing). The detector owns the receiver like `scan()` (`components/checkpoint/scan_hop.c`):
+  `receiver_pause`, `s_scan_active`, a fixed gain, and libphy's `phy_set_freq()` called
+  directly to hop R1-R8 (operator-approved, in production since 2026-11-06). It lets go
+  within one sweep for a calibration (`filter_request()` / `filter_request_full()`, the
+  console's F/B, also over the link as `COMMAND`) or a console bench. Production has no
+  console, so every operator need goes through the link. The console's `K` then `s`, `S`
+  or `z` (`hop_bench.c`, `docs/bench.md`) stays a bench: it also calls the AGC-off
+  functions to measure hops.
 - The splash window is not cosmetic: `menu_stub.c` keeps its flag (BOOT_PHASE
   runs only under it) and the menu's TX ownership (calibrations and profile
   switches rely on it). Never turn `menu_splash_active()` or
@@ -119,8 +118,8 @@ interrupts on every transport restart, so never add a long-lived GDMA user here.
 
 ## Detector (`components/pass_detector`, pure C)
 
-Input: the tuned channel's C/N in dB (`receiver_obs_cn_x10()`), every 50 ms.
-Channel slot = `rf_channel_index() % 8` (R1..R8 → 0..7). States
+Input: the IQ power of R1..R8 (slots 0..7) from a sweep, about 57 Hz per channel, as a
+rise in dB above each channel's own rest (`scan_detector.c`). States
 `IDLE → RISING → PEAK_PASSED → COOLDOWN`; re-arm needs the refractory period
 elapsed AND the level under `active_db - hysteresis_db`. The glue is
 `components/checkpoint`; the parameters are editable from the console
@@ -144,9 +143,9 @@ and `CONFIG_STATUS_LED_ENABLE=n`; a C3 SuperMini has no WS2812 either. Full sche
 Race timing across ordered gates (each gate = a C5). The **C6** (`firmware/master`,
 esp32c6) is UART-wired to its own C5 (gate 0) and aggregates remote gates over
 **ESP-NOW**; a remote gate is a C5 UART-wired to a **C3** (`firmware/node`).
-Protocols (both v2; reflash every board together after a change):
-`components/link_proto` (C5↔bridge UART: config, passes, `STATS` with the C5's
-health, `LP_MSG_SET_CHANNEL` and `LP_MSG_COMMAND` calibrate/reboot),
+Protocols (both v3; reflash every board together after a change):
+`components/link_proto` (C5↔bridge UART: config, passes, `STATS` with the 8 levels and
+the C5's health, `LP_MSG_COMMAND` calibrate/reboot),
 `components/fleet_proto` over `components/espnow_link` (pairing, beacons,
 `GATE_PASS`, `NODE_STATUS` relaying the health, `FP_MSG_COMMAND`),
 `components/race_timing`. The C6 admin web (and a degraded C3's page) shows each
@@ -193,6 +192,8 @@ flash; a new `/api/state` field or a changed POST buffer goes in the mock too
 cd test     # host tests (engine headers now at ../components/c5vrx_rx)
 cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/pass_detector/include \
   test_pass_detector.c ../components/pass_detector/pass_detector.c -lm -o /tmp/t && /tmp/t
+cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/pass_detector/include test_scan_detector.c \
+  ../components/pass_detector/scan_detector.c ../components/pass_detector/pass_detector.c -lm -o /tmp/t && /tmp/t
 cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/audio_player/include test_audio_resample.c -lm -o /tmp/t && /tmp/t
 cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/link_proto/include \
   test_link_proto.c ../components/link_proto/link_proto.c -o /tmp/t && /tmp/t

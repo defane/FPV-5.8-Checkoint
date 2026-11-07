@@ -1,10 +1,9 @@
 /* checkpoint_link: the C5 side of the C5<->bridge UART link (link_proto).
  *
  * A single priority-1 task owns the UART. It announces itself (HELLO), sends
- * STATS (live C/N and health) periodically and an EVENT_PASS for every
- * detected pass, and serves the bridge (a C3 node, or the C6 master for its
- * own gate): applies CONFIG_SET / answers CONFIG_REQ, retunes on SET_CHANNEL
- * (saved, so a reboot comes back on the assigned channel) and runs a COMMAND
+ * STATS (the channels' levels and health) periodically and an EVENT_PASS for
+ * every detected pass, and serves the bridge (a C3 node, or the C6 master for its
+ * own gate): applies CONFIG_SET / answers CONFIG_REQ and runs a COMMAND
  * (a calibration like the console's B/F, or a reboot), as nobody opens the
  * C5's USB console in production. Pass events reach it through a small queue
  * (checkpoint_link_report_pass, called from the detector task), so every UART
@@ -20,8 +19,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
-#include "receiver.h"   /* settings_save and the busy flags a retune waits for */
-#include "rf.h"   /* rf_set_channel: operator-approved retune on a link command */
 
 #define LINK_UART       ((uart_port_t)CONFIG_CHECKPOINT_LINK_UART_NUM)
 #define LINK_PRIORITY   1u      /* below every receiver task, like the detector */
@@ -52,27 +49,7 @@ static void send_stats(void) {
     send_frame(buf, lp_encode_stats(buf, sizeof buf, &s));
 }
 
-/* The channel the bridge assigned (SET_CHANNEL; -1 = none) waits while a
- * calibration, a scan or a pause owns the receiver, as the console's c/b do:
- * a sweep would retune away from it, and settings_save() stores whichever
- * channel is tuned when it runs. Saved like a console retune, so a reboot
- * (LP_CMD_REBOOT, power) comes back on it; settings_save writes NVS only on a
- * change, and this task already writes NVS (CONFIG_SET). */
-static void apply_channel(int *pending) {
-    if (*pending < 0 || calibration_in_startup() || s_scan_active || receiver_paused()) return;
-    const size_t index = (size_t)*pending;
-    *pending = -1;
-    /* Already there (a bridge re-sends its config on a reconnect): no retune,
-     * it would reset the AFC offset mid-race. */
-    if (index != rf_channel_index() && rf_set_channel(index) != ESP_OK) {
-        printf("CHECKPOINT channel=%u refused=retune from=link\n", (unsigned)index);
-        return;
-    }
-    settings_save();
-    printf("CHECKPOINT channel=%s from=link (saved)\n", rf_channel()->name);
-}
-
-static void handle_msg(const lp_msg_t *m, int *pending_channel) {
+static void handle_msg(const lp_msg_t *m) {
     switch (m->type) {
     case LP_MSG_CONFIG_SET:
         (void)checkpoint_link_apply_config(&m->config);
@@ -81,9 +58,6 @@ static void handle_msg(const lp_msg_t *m, int *pending_channel) {
     case LP_MSG_CONFIG_REQ:
     case LP_MSG_HELLO:          /* the C3 just connected: sync it */
         send_config_state();
-        break;
-    case LP_MSG_SET_CHANNEL:    /* the master assigns this gate's channel: retune */
-        *pending_channel = m->channel_index;   /* the latest wins */
         break;
     case LP_MSG_COMMAND:        /* calibrate or reboot: the bridge's web confirmed it */
         checkpoint_link_command(m->command);
@@ -102,21 +76,20 @@ static void link_task(void *arg) {
     send_frame(hello, lp_encode_hello(hello, sizeof hello, LP_ROLE_C5));
 
     uint32_t last_stats = now_ms();
-    int pending_channel = -1;
     for (;;) {
         uint8_t rx[64];
         const int n = uart_read_bytes(LINK_UART, rx, sizeof rx, pdMS_TO_TICKS(LINK_READ_MS));
         for (int i = 0; i < n; i++) {
             lp_msg_t m;
-            if (lp_decoder_push(&dec, rx[i], &m)) handle_msg(&m, &pending_channel);
+            if (lp_decoder_push(&dec, rx[i], &m)) handle_msg(&m);
         }
-        apply_channel(&pending_channel);
 
         pd_event_t e;
         while (xQueueReceive(s_evq, &e, 0) == pdTRUE) {
+            const uint32_t age = now_ms() - e.peak_ms;
             const lp_event_t le = { .channel = e.channel,
                                     .peak_db_x10 = (int32_t)(e.peak_db * 10.0f + (e.peak_db >= 0 ? 0.5f : -0.5f)),
-                                    .at_ms = e.at_ms };
+                                    .at_ms = e.peak_ms, .age_ms = age > UINT16_MAX ? UINT16_MAX : (uint16_t)age };
             uint8_t buf[LP_MAX_FRAME];
             send_frame(buf, lp_encode_event(buf, sizeof buf, &le));
         }

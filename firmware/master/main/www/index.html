@@ -40,6 +40,10 @@
   dialog h3 { margin: 0 0 12px; font-size: 1rem; }
   dialog input { width: 100%; box-sizing: border-box; }
   .on { color: #2ecc71; } .off { color: #8b97a7; } .muted { color: #8b97a7; }
+  table.chans th, table.chans td { text-align: center; padding: 6px 4px; font-variant-numeric: tabular-nums; }
+  table.chans th:first-child, table.chans td:first-child { text-align: left; white-space: nowrap; }
+  td.lv { border-radius: 4px; } td.lv.none { color: #4a5563; }
+  td.lv.hit { outline: 2px solid #fcd34d; outline-offset: -2px; font-weight: 700; }
   .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .admin-only { display: none; }
   body.is-admin .admin-only { display: revert; }
@@ -73,6 +77,15 @@
       <label style="margin-left:auto">Volume <input id="vol" type="range" min="0" max="100" step="5" style="vertical-align:middle;width:120px"> <b id="vol_v">—</b>%</label></div>
   </div>
 
+  <h2>Channels</h2>
+  <div class="card scroll">
+    <table class="chans">
+      <thead><tr><th>Gate</th><th>R1</th><th>R2</th><th>R3</th><th>R4</th><th>R5</th><th>R6</th><th>R7</th><th>R8</th></tr></thead>
+      <tbody id="chans"><tr><td colspan="9" class="muted">no gate yet</td></tr></tbody>
+    </table>
+    <p class="muted" style="margin:10px 0 0">dB above the noise, yellow on a pass. — not measured: the C5 is away or calibrating.</p>
+  </div>
+
   <h2>Gates / nodes</h2>
   <div class="card scroll">
     <div class="bar" style="margin-bottom:10px">Pairing: <b id="pair_state" class="off">closed</b>
@@ -80,16 +93,14 @@
       <button id="cal_all" class="admin-only warn" title="Full calibration (console B) on every reachable gate">Calibrate all gates (B)</button>
       <span id="cmd_msg" class="muted"></span></div>
     <table>
-      <thead><tr><th>Gate</th><th>Channel</th><th>Node</th><th>Link</th><th>Detector</th><th>C/N</th><th title="C5 calibration state and transport faults (hover for firmware, uptime, heap)">Health</th><th>RSSI</th><th>Loss</th><th>Seen</th><th class="admin-only"></th></tr></thead>
-      <tbody id="nodes"><tr><td colspan="11" class="muted">no nodes paired</td></tr></tbody>
+      <thead><tr><th>Gate</th><th>Node</th><th>Link</th><th>Detector</th><th title="C5 calibration state and transport faults (hover for firmware, uptime, heap)">Health</th><th>RSSI</th><th>Loss</th><th>Seen</th><th class="admin-only"></th></tr></thead>
+      <tbody id="nodes"><tr><td colspan="9" class="muted">no nodes paired</td></tr></tbody>
     </table>
     <p class="muted" style="margin:10px 0 0">Gate 0 is the master's own C5.</p>
   </div>
 
   <h2>Master &amp; local gate (0)</h2>
   <div class="card row">
-    <div class="stat"><b id="l_cn">—</b><span>C/N dB</span></div>
-    <div class="stat"><b id="l_ch">—</b><span>channel</span></div>
     <div class="stat"><b id="l_state">—</b><span>detector</span></div>
     <div class="stat"><b id="l_health">—</b><span>C5 health</span></div>
     <div class="stat"><b id="l_passes">—</b><span>total passes</span></div>
@@ -171,15 +182,42 @@ $("login_form").addEventListener("submit", async e => {
   else { $("login_msg").textContent = msg; $("p").select(); }
 });
 
+const chName = c => c < 8 ? "R" + (c + 1) : c;
+// Channels: one row per gate, R1..R8; a pass lights its cell for HIT_MS, its age
+// taken here, since a pass and the master do not share a clock.
+const HIT_MS = 3000;
+const hits = new Map();
+let seenPasses = null;
+// Each cell shows a channel's level, its dB above the noise: a VTX reads the same
+// whenever the page was opened and however long it stays on.
+const QUIET_DB = 3, RISE_HIGH = 20;
+const riseAlpha = rise => Math.min(1, Math.max(0, (rise - QUIET_DB)/(RISE_HIGH - QUIET_DB)));
+const riseTxt = rise => rise < QUIET_DB ? "0" : "+" + rise.toFixed(0);
+function notePasses(s) {
+  const fresh = seenPasses === null ? 0 : Math.max(0, s.total_passes - seenPasses);
+  seenPasses = s.total_passes;
+  (s.passes || []).slice(0, fresh).forEach(p => hits.set(`${p.gate}:${p.channel}`, Date.now() + HIT_MS));
+}
+const lvCell = (x10, key) => {
+  if (x10 <= -990) return '<td class="lv none">—</td>';
+  const hit = (hits.get(key) || 0) > Date.now(), rise = x10/10;
+  return `<td class="lv${hit ? " hit" : ""}" style="background:rgba(46,204,113,${riseAlpha(rise).toFixed(2)})">${riseTxt(rise)}</td>`;
+};
+const chanRow = (name, gate, levels) => `<tr><td>${name}</td>${(levels || []).map((v, ch) => lvCell(v, `${gate}:${ch}`)).join("")}</tr>`;
+function fillChannels(s) {
+  notePasses(s);
+  const rows = [...(s.nodes || [])].sort((a, b) => a.gate - b.gate).map(n => chanRow(`${n.gate} ${n.mac.slice(12)}`, n.gate, n.levels));
+  $("chans").innerHTML = chanRow("0 master", 0, (s.local || {}).levels) + rows.join("");
+}
+
 async function poll() {
   try {
     const s = await (await fetch("/api/state")).json();
     $("gates").textContent = s.num_gates + " gate(s)";
+    fillChannels(s);
     $("pair_state").textContent = s.pairing ? "OPEN" : "closed";
     $("pair_state").className = s.pairing ? "on" : "off";
     const L = s.local || {};
-    $("l_cn").textContent = s.has_local ? cnTxt(L.cn_x10) : "—";
-    $("l_ch").textContent = s.has_local ? L.channel : "—";
     $("l_state").textContent = s.has_local ? stName(L.state) : "—";
     $("l_health").innerHTML = s.has_local ? calBadge(L) + faultsTxt(L) : "—";
     $("l_info").textContent = s.has_local ? healthInfo(L) : "local C5 not linked (no report for 3 s)";
@@ -197,7 +235,7 @@ async function poll() {
 
     const st = s.standings || [];
     $("standings").innerHTML = st.length ? st.map(x => `
-      <tr><td>${x.channel}</td><td>${x.laps}</td><td>${fmt(x.last_lap_ms)}</td>
+      <tr><td>${chName(x.channel)}</td><td>${x.laps}</td><td>${fmt(x.last_lap_ms)}</td>
       <td>${fmt(x.best_lap_ms)}</td><td>${x.last_gate<0?'—':x.last_gate}</td></tr>`).join("")
       : '<tr><td colspan="5" class="muted">no passes yet</td></tr>';
 
@@ -206,28 +244,25 @@ async function poll() {
       const up = s.uptime_ms || 0;
       const seen = n => n.online ? Math.max(0, (up - n.last_seen_ms)/1000 | 0) + "s" : "—";
       $("nodes").innerHTML = nodes.length ? nodes.map(n => admin ? `
-        <tr data-id="${n.node_id}" data-gate="${n.gate}">
+        <tr data-id="${n.node_id}" data-gate="${n.gate}" data-channel="${n.channel}">
           <td><input type="number" min="1" max="15" value="${n.gate}" class="g"></td>
-          <td><input type="number" min="0" max="47" value="${n.channel}" class="c"></td>
           <td class="muted">${n.mac.slice(9)}</td>
           <td class="${n.online?'on':'off'}">${n.online?'online':'offline'}</td>
           <td>${stName(n.state)}</td>
-          <td>${cnTxt(n.cn_x10)}</td>
           ${healthTd(n)}
           <td>${rssiTxt(n.rssi)}</td>
           <td title="${lossTitle(n)}">${lossTxt(n)}</td>
           <td>${seen(n)}</td>
           <td class="admin-only acts"><button class="save">Save</button> <button class="ghost rm">✕</button> ${cmdBtns(n.online && n.calibrating)}</td>
         </tr>` : `
-        <tr><td>${n.gate}</td><td>${n.channel}</td><td class="muted">${n.mac.slice(9)}</td>
+        <tr><td>${n.gate}</td><td class="muted">${n.mac.slice(9)}</td>
           <td class="${n.online?'on':'off'}">${n.online?'online':'offline'}</td>
           <td>${stName(n.state)}</td>
-          <td>${cnTxt(n.cn_x10)}</td>
           ${healthTd(n)}
           <td>${rssiTxt(n.rssi)}</td>
           <td title="${lossTitle(n)}">${lossTxt(n)}</td>
           <td>${seen(n)}</td></tr>`).join("")
-        : '<tr><td colspan="11" class="muted">no nodes paired</td></tr>';
+        : '<tr><td colspan="9" class="muted">no nodes paired</td></tr>';
     }
   } catch (e) { $("gates").textContent = "offline"; }
 }
@@ -278,7 +313,7 @@ $("nodes").addEventListener("click", async e => {
   const tr = e.target.closest("tr"); if (!tr || !admin) return;
   const id = +tr.dataset.id;
   if (e.target.classList.contains("save")) {   // a failed save must not freeze the table (editing)
-    try { await post("/api/node", { node_id: id, gate: +tr.querySelector(".g").value, channel: +tr.querySelector(".c").value }); }
+    try { await post("/api/node", { node_id: id, gate: +tr.querySelector(".g").value, channel: +tr.dataset.channel }); }
     catch (_) { $("cmd_msg").textContent = "save failed: master not answering"; }
     finally { editing = false; }
     poll();

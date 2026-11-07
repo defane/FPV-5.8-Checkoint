@@ -37,5 +37,5 @@
   <text x="900" y="264" font-size="11" fill="#64748b" text-anchor="middle">master</text>
 
   <text x="40" y="420" font-size="12" fill="#64748b">Crossed UART, common ground. ESP-NOW uses no GPIO (shared Wi-Fi channel with the C6).</text>
-  <text x="40" y="440" font-size="12" fill="#64748b">If the C6 is unreachable at boot, the C3 serves a local AP + web (band select + results) instead of relaying.</text>
+  <text x="40" y="440" font-size="12" fill="#64748b">If the C6 is unreachable at boot, the C3 serves a local AP + web (results + detector settings) instead of relaying.</text>
 </svg>

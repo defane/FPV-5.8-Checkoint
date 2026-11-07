@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read a scan prototype recording (console K then S, docs/bench.md) out of a log.
+"""Read a scan recording recording (console K then S, docs/bench.md) out of a log.
 
 Prints the scan rate, each channel's level and the passes it finds: a channel rising
 well above its own resting level, timed at the centroid of the peak. A pass also seen on

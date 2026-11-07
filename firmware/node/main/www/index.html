@@ -25,6 +25,12 @@
   #events { list-style: none; padding: 0; margin: 0; font-variant-numeric: tabular-nums; }
   #events li { padding: 6px 0; border-top: 1px solid #2a313a; font-size: .9rem; }
   .muted { color: #8b97a7; }
+  .chans { display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; }
+  .ch { background: #0f1216; border-radius: 6px; padding: 8px 2px; text-align: center; font-variant-numeric: tabular-nums; }
+  .ch span { display: block; font-size: .75rem; color: #8b97a7; }
+  .ch b { font-size: 1rem; } .ch.none b { color: #4a5563; }
+  .ch.hit { outline: 2px solid #fcd34d; outline-offset: -2px; }
+  @media (max-width: 420px) { .chans { grid-template-columns: repeat(4, 1fr); } }
   .pill { font-size: .8rem; padding: 2px 8px; border-radius: 999px; background: #2a313a; }
   .pill.ok { background: #14532d; color: #86efac; }
   .pill.warn { background: #713f12; color: #fde68a; }
@@ -52,7 +58,7 @@
 <body>
 <header style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
   <span>Checkpoint C3 <span id="link" class="pill">…</span></span>
-  <span class="bar"><button id="role" class="switch" role="switch" aria-checked="false"><i></i><span id="role_txt">spectator</span></button></span>
+  <span class="bar"><button id="role" class="switch" role="switch" aria-checked="false"><i></i><span>admin</span></button></span>
 </header>
 <main>
   <dialog id="login">
@@ -67,10 +73,14 @@
 
   <h2>Live</h2>
   <div class="card row">
-    <div class="stat"><b id="s_cn">—</b><span>C/N dB</span></div>
-    <div class="stat"><b id="s_ch">—</b><span>channel</span></div>
     <div class="stat"><b id="s_state">—</b><span>state</span></div>
     <div class="stat"><b id="s_passes">—</b><span>passes</span></div>
+  </div>
+
+  <h2>Channels</h2>
+  <div class="card">
+    <div id="chans" class="chans"></div>
+    <div class="muted" style="margin-top:10px;font-size:.85rem">dB above the noise, yellow on a pass. — not measured: the C5 is away or calibrating.</div>
   </div>
 
   <h2>C5 health</h2>
@@ -94,7 +104,7 @@
   </div>
 
   <div class="admin-only">
-  <h2>Detector &amp; band (admin)</h2>
+  <h2>Detector (admin)</h2>
   <div class="card">
     <label>Smoothing alpha <input id="alpha" type="number" step="0.05" min="0.05" max="1"></label>
     <label>Activity threshold (dB) <input id="active" type="number" step="0.5"></label>
@@ -103,7 +113,6 @@
     <label>Minimum peak (dB) <input id="minpeak" type="number" step="0.5"></label>
     <label>Refractory (ms) <input id="refr" type="number" step="250" min="0"></label>
     <label>Stale (ms) <input id="stale" type="number" step="250" min="1"></label>
-    <label>Band / RF channel index <input id="chan" type="number" min="0" max="47" placeholder="unchanged"></label>
     <button id="save">Apply &amp; save</button>
     <span id="msg" class="muted"></span>
   </div>
@@ -127,7 +136,6 @@ function setAdmin(on) {             // back to spectator forgets the key and uns
   if (!on) { AdminAuth.logout(); dirty = false; }
   document.body.classList.toggle("is-admin", on);
   $("role").setAttribute("aria-checked", on);
-  $("role_txt").textContent = on ? "admin" : "spectator";
 }
 
 $("role").addEventListener("click", () => {
@@ -184,16 +192,38 @@ function fillHealth(s) {
   document.querySelectorAll('button[data-cmd^="cal_"]').forEach(b => { b.disabled = ok && st.calibrating; });
 }
 
+// Channels: R1..R8; a pass lights its tile for HIT_MS, its age taken here, since a
+// pass and this page do not share a clock.
+const HIT_MS = 3000;
+const hits = new Map();
+let seenEvents = null;
+// Each tile shows the channel's level, its dB above the noise: a VTX reads the same
+// whenever the page was opened and however long it stays on.
+const QUIET_DB = 3, RISE_HIGH = 20;
+const riseAlpha = rise => Math.min(1, Math.max(0, (rise - QUIET_DB)/(RISE_HIGH - QUIET_DB)));
+const riseTxt = rise => rise < QUIET_DB ? "0" : "+" + rise.toFixed(0);
+function fillChannels(s) {
+  const fresh = seenEvents === null ? 0 : Math.max(0, s.total_events - seenEvents);
+  seenEvents = s.total_events;
+  (s.events || []).slice(0, fresh).forEach(e => hits.set(e.channel, Date.now() + HIT_MS));
+  const levels = (s.stats || {}).levels || [];
+  $("chans").innerHTML = levels.map((x10, ch) => {
+    const name = "R" + (ch + 1), hit = (hits.get(ch) || 0) > Date.now() ? " hit" : "";
+    if (x10 <= -990) return `<div class="ch none${hit}"><span>${name}</span><b>—</b></div>`;
+    const rise = x10/10;
+    return `<div class="ch${hit}" style="background:rgba(46,204,113,${riseAlpha(rise).toFixed(2)})"><span>${name}</span><b>${riseTxt(rise)}</b></div>`;
+  }).join("");
+}
+
 async function poll() {
   try {
     const s = await (await fetch("/api/state")).json();
+    fillChannels(s);
     // c5_alive: a C5 frame within 3 s; has_stats alone stays true after it goes silent
     const lk = s.c5_alive ? ["linked", "pill ok"] : s.has_stats ? ["C5 silent", "pill warn"] : ["no C5 yet", "pill"];
     $("link").textContent = lk[0]; $("link").className = lk[1];
     if (s.has_config) fillConfig(s.config);
     const st = s.stats || {};
-    $("s_cn").textContent = (s.has_stats && st.cn_x10 > -990) ? (st.cn_x10 / 10).toFixed(1) : "—";
-    $("s_ch").textContent = s.has_stats ? CH(st.channel) : "—";
     $("s_state").textContent = s.has_stats ? (STATES[st.state] || st.state) : "—";
     $("s_passes").textContent = s.total_events;
     fillHealth(s);
@@ -212,7 +242,6 @@ $("save").addEventListener("click", async () => {
     min_peak_db_x10: Math.round(parseFloat($("minpeak").value) * 10),
     refractory_ms: parseInt($("refr").value, 10),
     stale_ms: parseInt($("stale").value, 10),
-    channel: $("chan").value === "" ? -1 : parseInt($("chan").value, 10),
   };
   $("msg").textContent = "saving…";
   try {

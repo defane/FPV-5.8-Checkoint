@@ -1,6 +1,7 @@
 # Checkpoint: "a drone just passed"
 
-An addition to C5VRX-5: a pass detector on the **tuned channel** of a C5, reported
+An addition to C5VRX-5: a C5 that sweeps **every Raceband channel** and detects a pass on
+any of them, reported
 over a UART link; the C6 master plays an 8-bit coin sound at a per-channel pitch
 (R1..R8, major pentatonic, −7 to +9 semitones, R4 = the original pitch).
 

@@ -22,7 +22,7 @@
 extern "C" {
 #endif
 
-#define FP_VERSION      2u   /* 2: NODE_STATUS seq + health, COMMAND */
+#define FP_VERSION      3u   /* 3: NODE_STATUS levels, the C5 scans; 2: seq + health, COMMAND */
 #define FP_MAX_PAYLOAD  64u
 #define FP_MAX_FRAME    (4u + FP_MAX_PAYLOAD)   /* VER+TYPE + payload + CRC16(2) */
 
@@ -86,6 +86,7 @@ typedef struct {
     uint32_t uptime_s;        /* C5 uptime */
     uint32_t heap_min;        /* C5 lowest free internal heap since boot, bytes */
     uint32_t faults;          /* C5 transport fault counters */
+    int8_t   levels[LP_LEVELS];   /* C5 dB above each channel's rest, LP_LEVEL_UNKNOWN when none */
     char     fw[LP_FW_LEN];   /* C5 firmware id; always NUL-terminated after a decode */
 } fp_node_status_t;
 

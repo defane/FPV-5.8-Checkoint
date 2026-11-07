@@ -52,11 +52,6 @@ void c3_link_push_config(const lp_config_t *c) {
     enqueue(b, lp_encode_config(b, sizeof b, LP_MSG_CONFIG_SET, c));
 }
 
-void c3_link_set_channel(uint8_t rf_index) {
-    uint8_t b[LP_MAX_FRAME];
-    enqueue(b, lp_encode_set_channel(b, sizeof b, rf_index));
-}
-
 void c3_link_send_command(lp_cmd_t cmd) {
     uint8_t b[LP_MAX_FRAME];
     enqueue(b, lp_encode_command(b, sizeof b, cmd));   /* 0 (nothing sent) for an unknown cmd */

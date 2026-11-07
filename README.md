@@ -1,7 +1,7 @@
 # FPV 5.8 Checkpoint
 
-A **"a drone just passed"** platform: a C5 detects a drone pass on the tuned
-5.8 GHz FPV channel and a C6 master times it and plays a coin sound, with a
+A **"a drone just passed"** platform: a C5 sweeps the 8 Raceband channels and
+detects a drone pass on any of them, and a C6 master times it and plays a coin sound, with a
 phone-friendly web UI to tune it and watch events. Each gate is a C5 wired to a
 C3 (or to the C6); a C3 with no master in reach serves its own web page with the
 passes. It scales to a multi-gate race-timing fleet.
@@ -31,12 +31,12 @@ passes. It scales to a multi-gate race-timing fleet.
 ## What it is
 
 - **ESP32-C5** (`firmware/detector`, Waveshare ESP32-C5-Zero) — runs the full C5VRX
-  receive chain and detects a pass from the tuned channel's C/N, reported over a
+  receive chain, sweeps R1 to R8 and detects a pass on any of them, reported over a
   UART link to its bridge. It has no local output: no picture
   (`CONFIG_C5VRX_VIDEO_OUTPUT=n`), no amplifier and no status LED.
 - **ESP32-C3** (`firmware/node`) — a node bridge: UART to the C5, ESP-NOW uplink to
   the C6 master; if no master is reachable at boot it falls back to a local
-  Wi-Fi SoftAP + web (band selection, results, the C5's health and its
+  Wi-Fi SoftAP + web (results, the C5's health and its
   calibrate/reboot commands).
 - **ESP32-C6** (`firmware/master`) — the optional **race-timing master**: UART to its
   own C5, the centralized speaker, a Wi-Fi AP web, and an ESP-NOW hub that
@@ -45,10 +45,10 @@ passes. It scales to a multi-gate race-timing fleet.
   has no USB console: [docs/fleet.md](docs/fleet.md#gate-health-and-remote-commands-no-console-in-production)).
 
 The web has **two roles**: **spectators** watch the live standings and status
-read-only (no login), while **admin** actions — pairing, gate order, channel
-assignment, reset, volume, a gate's calibration or reboot, and (on a degraded
-C3) detector tuning and band selection — require the admin password
-(`CONFIG_*_ADMIN_PASSWORD`, no username): the spectator/admin toggle in the
+read-only (no login), while **admin** actions — pairing, gate order, reset,
+volume, a gate's calibration or reboot, and (on a degraded C3) detector tuning
+— require the admin password
+(`CONFIG_*_ADMIN_PASSWORD`, no username): the admin toggle in the
 header opens a password dialog. The password never crosses the Wi-Fi: the page
 signs each admin request (HMAC-SHA256, per-session counter against replays)
 with a key derived from it (PBKDF2), the only form the firmware holds. A sniffed
@@ -63,7 +63,7 @@ components/
   checkpoint/    pass detection + the C5<->bridge UART link
   pass_detector/ pure-C pass detector (host-tested)
   audio_player/  I2S coin-sound player (the C6 speaker in a fleet)
-  link_proto/    pure-C C5<->bridge UART protocol (host-tested; incl. SET_CHANNEL)
+  link_proto/    pure-C C5<->bridge UART protocol (host-tested)
   fleet_proto/   pure-C C6<->C3 ESP-NOW protocol (host-tested)
   race_timing/   pure-C lap/sector timing engine (host-tested)
   espnow_link/   ESP-NOW transport carrying fleet_proto (C6 + C3)

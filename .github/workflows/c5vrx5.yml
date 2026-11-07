@@ -127,6 +127,9 @@ jobs:
             ../components/fleet_proto/fleet_proto.c ../components/link_proto/link_proto.c -o /tmp/test_fleet_proto
           /tmp/test_fleet_proto | tail -1
           # Race timing engine (components/race_timing): laps/sectors per channel.
+          cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/pass_detector/include test_scan_detector.c \
+            ../components/pass_detector/scan_detector.c ../components/pass_detector/pass_detector.c -lm -o /tmp/test_scan_detector
+          /tmp/test_scan_detector | tail -1
           cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/race_timing/include test_race_timing.c \
             ../components/race_timing/race_timing.c -o /tmp/test_race_timing
           /tmp/test_race_timing | tail -1

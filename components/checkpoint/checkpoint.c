@@ -1,12 +1,11 @@
 /* Checkpoint pass detection (checkpoint.h).
  *
- * A priority-1 task (under control/gain_obs at 3 and gain_fast at 4) reads
- * the C/N every 50 ms, feeds components/pass_detector with the tuned
- * channel's number in its band (R1..R8 -> 0..7) and, on a pass, prints a
- * PASS line and reports it over the UART link (checkpoint_link.c). No sample
- * while the receiver is not live (splash, calibration, paused) or the C/N is
- * unknown (gain settling, no noise reference, clipping): the detector then
- * ages the channel out.
+ * A priority-1 task (under control/gain_obs at 3 and gain_fast at 4) owns the
+ * receiver and sweeps R1-R8 all the time (scan_hop.c): nobody picks a channel, every
+ * drone on Raceband is seen. Each sweep goes to components/pass_detector's scan
+ * detector, and a pass prints a PASS line and goes over the UART link
+ * (checkpoint_link.c). It lets go of the receiver for a calibration and for a console
+ * bench (hop_bench.c), then starts over: no sample meanwhile.
  *
  * The detector has no local output: no amplifier (the coin sound is played
  * centrally by the C6 master) and no status LED (the C5's onboard WS2812 sits
@@ -16,16 +15,13 @@
  *
  * In production nobody opens this C5's USB console, so the bridge (a C3 node,
  * or the C6 master for its own gate) gets the console's T as health in STATS
- * and its B, F and a reset as link COMMANDs. Apart from those and SET_CHANNEL
- * (a retune, saved in the engine's settings like a console retune) the
- * checkpoint only reads the receiver; the console's K s (hop_bench.c) is a
- * bench-only exception. */
+ * and its B, F and a reset as link COMMANDs. */
 #include "checkpoint.h"
 #include "receiver.h"
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include "checkpoint_link.h"
-#include "cn_estimate.h"
 #include "driver/gpio.h"
 #include "esp_heap_caps.h"
 #include "esp_system.h"
@@ -33,99 +29,118 @@
 #include "hop_bench.h"
 #include "pass_detector.h"
 #include "rf.h"
+#include "scan_detector.h"
+#include "scan_hop.h"
 #include "sdkconfig.h"
 
-#define CHECKPOINT_TICK_MS   50u
+#define CHECKPOINT_WAIT_MS   100u   /* the receiver is someone else's */
 #define CHECKPOINT_PRIORITY  1u     /* below every receiver task */
-#define CHECKPOINT_STACK     3072u
+#define CHECKPOINT_STACK     4096u
+#define CHECKPOINT_HOLD_POLLS 40u   /* 10 ms each: a sweep is under 20 */
+#define CHECKPOINT_TRACE_SWEEPS 12u /* 5 lines/s */
 
-/* NVS "checkpoint"; a new layout gets a new version (old blobs ignored). The
- * three bytes after the version held the volume and mute of the removed local
- * sound: kept as padding, so saved detector settings still load. */
-#define PREFS_VERSION 1u
+/* NVS "checkpoint"; a new layout or meaning gets a new version (old blobs ignored).
+ * 2: dB of rise above a channel's rest, no longer of C/N. The three bytes after the
+ * version held the volume and mute of the removed local sound: kept as padding. */
+#define PREFS_VERSION 2u
 typedef struct {
     uint8_t version, reserved[3];
     pd_config_t det;
 } checkpoint_prefs_t;
 
 typedef struct {
-    pass_detector_t det;
+    scan_detector_t sd;
     pd_config_t wanted;              /* console copy; the task applies it */
-    volatile bool wanted_dirty, trace;
-    uint32_t valid, unknown, passes;
+    volatile bool wanted_dirty, trace, live;   /* live: sweeping, the levels are real */
+    uint32_t sweeps, no_data, passes;
     bool has_last;
     pd_event_t last;
-    const char *last_name;           /* its channel, e.g. "R3" */
+    uint8_t window[CONTROL_BYTES];
 } checkpoint_t;
 
 static checkpoint_t *s_cp;
 static portMUX_TYPE s_wanted_lock = portMUX_INITIALIZER_UNLOCKED;
+static volatile bool s_hold;
 
 static uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
 
 static void on_pass(checkpoint_t *cp, const pd_event_t *e)
 {
-    const fpv_channel_t *ch = rf_channel();
     ++cp->passes;
     cp->last = *e;
-    cp->last_name = ch->name;
     cp->has_last = true;
-    printf("PASS channel=%s freq=%u peak_cn_db=%.1f peak_ms=%lu at_ms=%lu delay_ms=%lu\n",
-           ch->name, ch->freq_mhz, e->peak_db, (unsigned long)e->peak_ms, (unsigned long)e->at_ms,
+    printf("PASS channel=R%u freq=%u peak_db=%.1f peak_ms=%lu at_ms=%lu delay_ms=%lu\n", e->channel + 1u,
+           rf_channel_freq(e->channel), e->peak_db, (unsigned long)e->peak_ms, (unsigned long)e->at_ms,
            (unsigned long)(e->at_ms - e->peak_ms));
     checkpoint_link_report_pass(e);
 }
 
-/* A live receiver sample, in dB; false when there is none. */
-static bool sample_cn(float *db)
+static void apply_wanted(checkpoint_t *cp)
 {
-    if (s_menu_active || s_scan_active || menu_status_active() || receiver_paused() || !receiver_active()) return false;
-    const int x10 = receiver_obs_cn_x10();
-    if (x10 == CN_UNKNOWN_X10) return false;
-    *db = (float)x10 / 10.0f;
-    return true;
+    if (!cp->wanted_dirty) return;
+    pd_config_t c;
+    taskENTER_CRITICAL(&s_wanted_lock);
+    c = cp->wanted;
+    cp->wanted_dirty = false;
+    taskEXIT_CRITICAL(&s_wanted_lock);
+    (void)pd_set_config(&cp->sd.det, &c);   /* validated by the console */
+}
+
+static void trace_line(const checkpoint_t *cp, uint32_t now)
+{
+    const scan_detector_t *sd = &cp->sd;
+    const unsigned top = sd_strongest(sd);
+    printf("CP_TRACE t_ms=%lu rise_db=%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f top=R%u state=%s\n", (unsigned long)now,
+           sd_rise_db(sd, 0), sd_rise_db(sd, 1), sd_rise_db(sd, 2), sd_rise_db(sd, 3), sd_rise_db(sd, 4),
+           sd_rise_db(sd, 5), sd_rise_db(sd, 6), sd_rise_db(sd, 7), top + 1u, pd_state_name(sd->det.ch[top].state));
+}
+
+/* Sweeps until a calibration or a bench wants the receiver. */
+static void scan_run(checkpoint_t *cp)
+{
+    const pd_config_t cfg = cp->sd.det.cfg;
+    sd_init(&cp->sd, &cfg);              /* the band may have changed meanwhile */
+    cp->live = true;
+    while (!s_hold && !calibration_in_startup()) {
+        uint16_t power[SCAN_CHANNELS];
+        pd_event_t events[SCAN_CHANNELS];
+        apply_wanted(cp);
+        scan_sweep(cp->window, power, &cp->no_data);
+        const uint32_t now = now_ms();
+        const unsigned n = sd_sweep(&cp->sd, power, now, events);
+        for (unsigned i = 0; i < n; i++) on_pass(cp, &events[i]);
+        if (cp->trace && cp->sweeps % CHECKPOINT_TRACE_SWEEPS == 0u) trace_line(cp, now);
+        if (++cp->sweeps % SCAN_YIELD_SWEEPS == 0u) vTaskDelay(1);
+    }
+    cp->live = false;
 }
 
 static void checkpoint_task(void *arg)
 {
     checkpoint_t *cp = arg;
-    uint32_t seen_epoch = s_control_epoch;
-    size_t seen_index = rf_channel_index();
     for (;;) {
-        vTaskDelay(pdMS_TO_TICKS(CHECKPOINT_TICK_MS));
-        const uint32_t now = now_ms();
-        const size_t index = rf_channel_index();
-        /* Retune, scan or calibration: whatever was in progress is not a pass. */
-        if (s_control_epoch != seen_epoch || index != seen_index) {
-            seen_epoch = s_control_epoch;
-            seen_index = index;
-            pd_reset_all(&cp->det);
-        }
-        if (cp->wanted_dirty) {
-            pd_config_t c;
-            taskENTER_CRITICAL(&s_wanted_lock);
-            c = cp->wanted;
-            cp->wanted_dirty = false;
-            taskEXIT_CRITICAL(&s_wanted_lock);
-            (void)pd_set_config(&cp->det, &c);   /* validated by the console */
-        }
-        const unsigned slot = (unsigned)(index % 8u);
-        float db;
-        if (!sample_cn(&db)) {
-            ++cp->unknown;
-            pd_expire(&cp->det, now);
-            if (cp->trace) printf("CP_TRACE t_ms=%lu ch=%s cn_db=unknown state=%s\n", (unsigned long)now,
-                                  rf_channel()->name, pd_state_name(cp->det.ch[slot].state));
+        apply_wanted(cp);
+        scan_saved_t saved;
+        if (s_hold || !scan_receiver_free() || !scan_take("CHECKPOINT", scan_gain(), &saved)) {
+            vTaskDelay(pdMS_TO_TICKS(CHECKPOINT_WAIT_MS));
             continue;
         }
-        ++cp->valid;
-        pd_event_t e;
-        const bool pass = pd_update(&cp->det, slot, db, now, &e);
-        if (cp->trace) printf("CP_TRACE t_ms=%lu ch=%s cn_db=%.1f smooth_db=%.1f peak_db=%.1f state=%s\n",
-                              (unsigned long)now, rf_channel()->name, db, cp->det.ch[slot].smooth,
-                              cp->det.ch[slot].peak, pd_state_name(cp->det.ch[slot].state));
-        if (pass) on_pass(cp, &e);
+        if (rf_set_channel(SCAN_BASE_CHANNEL) == ESP_OK) {
+            printf("CHECKPOINT scan=on R1-R8 gain=%u\n", scan_gain());
+            scan_run(cp);
+        } else {
+            printf("CHECKPOINT scan refused=retune\n");
+        }
+        (void)scan_give(&saved);
+        printf("CHECKPOINT scan=off\n");
     }
+}
+
+void checkpoint_scan_hold(bool hold)
+{
+    s_hold = hold;
+    if (!hold || !s_cp) return;
+    for (unsigned k = 0; k < CHECKPOINT_HOLD_POLLS && s_scan_active; k++) vTaskDelay(pdMS_TO_TICKS(10));
 }
 
 void checkpoint_start(void)
@@ -136,9 +151,9 @@ void checkpoint_start(void)
     checkpoint_prefs_t prefs;
     const bool saved = blob_load("checkpoint", &prefs, sizeof(prefs)) && prefs.version == PREFS_VERSION &&
                        pd_config_valid(&prefs.det);
-    const pd_config_t cfg = saved ? prefs.det : pd_config_default();
-    pd_init(&cp->det, &cfg);
-    cp->wanted = cp->det.cfg;
+    const pd_config_t cfg = saved ? prefs.det : sd_config_default();
+    sd_init(&cp->sd, &cfg);
+    cp->wanted = cfg;
     if (xTaskCreate(checkpoint_task, "checkpoint", CHECKPOINT_STACK, cp, CHECKPOINT_PRIORITY, NULL) != pdPASS) {
         free(cp);
         printf("CHECKPOINT disabled: no memory for the task\n");
@@ -155,16 +170,16 @@ void checkpoint_print(void)
 {
     checkpoint_t *cp = s_cp;
     if (!cp) { printf("CHECKPOINT off\n"); return; }
-    const pd_config_t *c = &cp->det.cfg;
-    const unsigned slot = (unsigned)(rf_channel_index() % 8u);
-    printf("CHECKPOINT source=cn state=%s smooth_db=%.1f peak_db=%.1f samples_valid=%lu unknown=%lu passes=%lu "
+    const pd_config_t *c = &cp->sd.det.cfg;
+    const unsigned top = sd_strongest(&cp->sd);
+    printf("CHECKPOINT source=scan live=%u gain=%u top=R%u rise_db=%.1f state=%s sweeps=%lu no_data=%lu passes=%lu "
            "alpha=%.2f active_db=%.1f hyst_db=%.1f drop_db=%.1f min_peak_db=%.1f refractory_ms=%lu stale_ms=%lu\n",
-           pd_state_name(cp->det.ch[slot].state), cp->det.ch[slot].smooth, cp->det.ch[slot].peak,
-           (unsigned long)cp->valid, (unsigned long)cp->unknown, (unsigned long)cp->passes, c->alpha, c->active_db,
+           cp->live, scan_gain(), top + 1u, sd_rise_db(&cp->sd, top), pd_state_name(cp->sd.det.ch[top].state),
+           (unsigned long)cp->sweeps, (unsigned long)cp->no_data, (unsigned long)cp->passes, c->alpha, c->active_db,
            c->hysteresis_db, c->drop_db, c->min_peak_db, (unsigned long)c->refractory_ms, (unsigned long)c->stale_ms);
     if (cp->has_last)
-        printf("CHECKPOINT last_pass channel=%s peak_cn_db=%.1f at_ms=%lu\n", cp->last_name,
-               cp->last.peak_db, (unsigned long)cp->last.at_ms);
+        printf("CHECKPOINT last_pass channel=R%u peak_db=%.1f peak_ms=%lu\n", cp->last.channel + 1u,
+               cp->last.peak_db, (unsigned long)cp->last.peak_ms);
 }
 
 static void prefs_save(const checkpoint_t *cp)
@@ -219,7 +234,7 @@ bool checkpoint_link_apply_config(const lp_config_t *o)
 void checkpoint_link_get_config(lp_config_t *out)
 {
     const checkpoint_t *cp = s_cp;
-    pd_config_t c = cp ? cp->wanted : pd_config_default();
+    pd_config_t c = cp ? cp->wanted : sd_config_default();
     config_to_lp(&c, out);
     out->volume_pct = 0;
     out->muted = 0;
@@ -229,20 +244,24 @@ void checkpoint_link_get_config(lp_config_t *out)
 void checkpoint_link_get_stats(lp_stats_t *out)
 {
     const checkpoint_t *cp = s_cp;
-    const int x10 = receiver_obs_cn_x10();
-    const unsigned slot = (unsigned)(rf_channel_index() % 8u);
+    const bool live = cp && cp->live;
+    const unsigned top = live ? sd_strongest(&cp->sd) : 0u;
     *out = (lp_stats_t){
-        .cn_x10   = (x10 == CN_UNKNOWN_X10) ? LP_CN_UNKNOWN : x10,
-        .channel  = (uint8_t)slot,
-        .state    = cp ? (uint8_t)cp->det.ch[slot].state : 0u,
+        .cn_x10   = live ? to_x10(sd_rise_db(&cp->sd, top)) : LP_CN_UNKNOWN,
+        .channel  = (uint8_t)top,
+        .state    = live ? (uint8_t)cp->sd.det.ch[top].state : 0u,
         .flags    = (uint8_t)((calibration_dc_needed(NULL, 0) ? LP_HEALTH_CAL_NEEDED : 0u) |
                               (calibration_in_startup() ? LP_HEALTH_CALIBRATING : 0u)),
-        .gain     = s_current_gain,
+        .gain     = live ? scan_gain() : s_current_gain,
         .passes   = cp ? cp->passes : 0u,
         .uptime_s = (uint32_t)(esp_timer_get_time() / 1000000),
         .heap_min = (uint32_t)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL),   /* the boot peak */
         .faults   = transport_fault_count(),
     };
+    for (unsigned ch = 0; ch < LP_LEVELS; ch++) {
+        const float rise = live ? sd_rise_db(&cp->sd, ch) : 0.0f;
+        out->levels[ch] = !live ? LP_LEVEL_UNKNOWN : rise > 127.0f ? 127 : rise < -127.0f ? -127 : (int8_t)lroundf(rise);
+    }
     snprintf(out->fw, sizeof(out->fw), "%s", firmware_id());   /* truncated to LP_FW_LEN, NUL-terminated */
 }
 
@@ -297,9 +316,9 @@ void checkpoint_help(void)
     printf("CHECKPOINT K + key (lower = down, upper = up; K stays open 5 s after each key, q closes):\n"
            "  a/A smoothing alpha -/+0.05   t/T activity threshold -/+1 dB   h/H hysteresis -/+0.5 dB\n"
            "  d/D pass drop -/+0.5 dB        m/M minimum peak -/+1 dB         r/R refractory -/+250 ms\n"
-           "  l live C/N trace on/off (20 lines/s)   0 defaults   k show\n"
+           "  l live rise of R1-R8 on/off (5 lines/s)   0 defaults   k show   g/G scan gain -/+4 (not saved)\n"
            "  s hop bench: time R1-R8 retunes, no detection for about 15 s (docs/bench.md)\n"
-           "  S scan prototype: start, then K S again to stop and print; g/G its gain -/+4 (docs/bench.md)\n"
+           "  S scan recording: start, then K S again to stop and print; no detection meanwhile (docs/bench.md)\n"
            "  z residue trace: what a strong channel leaves after a hop (docs/bench.md)\n"
            "  i antenna onboard/IPEX, C5-Zero only: drives GPIO 26 (not saved)\n");
     checkpoint_print();
@@ -327,7 +346,7 @@ bool checkpoint_key(char key)
         cp->trace = !cp->trace;
         printf("CHECKPOINT trace %s\n", cp->trace ? "ON" : "OFF");
         return true;
-    case '0': c = pd_config_default(); break;
+    case '0': c = sd_config_default(); break;
     case 'k': case '?': checkpoint_print(); return true;
     case 's': hop_bench_start(); return true;
     case 'S': scan_bench_toggle(); return true;

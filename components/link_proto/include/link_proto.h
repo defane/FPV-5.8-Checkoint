@@ -22,8 +22,8 @@ extern "C" {
 #endif
 
 #define LP_SOF      0xC5u
-#define LP_VERSION  2u   /* 2: STATS carries health instead of audio counters; COMMAND */
-#define LP_MAX_PAYLOAD 48u
+#define LP_VERSION  3u   /* 3: the C5 scans: STATS levels, EVENT_PASS age, no SET_CHANNEL */
+#define LP_MAX_PAYLOAD 56u
 #define LP_MAX_FRAME   (6u + LP_MAX_PAYLOAD)   /* SOF+VER+TYPE+LEN + payload + CRC16(2) */
 
 typedef enum {
@@ -33,7 +33,6 @@ typedef enum {
     LP_MSG_CONFIG_STATE = 4, /* C5 -> bridge: current configuration (answer/echo) */
     LP_MSG_EVENT_PASS = 5,   /* C5 -> bridge: a drone passed on a channel */
     LP_MSG_STATS = 6,        /* C5 -> bridge: periodic live C/N, detector state, health */
-    LP_MSG_SET_CHANNEL = 7,  /* bridge -> C5: retune to this RF channel index */
     LP_MSG_COMMAND = 8,      /* bridge -> C5: run an lp_cmd_t */
 } lp_type_t;
 
@@ -65,28 +64,33 @@ typedef struct {
 
 typedef struct {
     uint8_t  channel;           /* 0..7 */
-    int32_t  peak_db_x10;
-    uint32_t at_ms;
+    int32_t  peak_db_x10;       /* rise above the channel's rest *10 */
+    uint32_t at_ms;             /* the pass, on the C5's clock */
+    uint16_t age_ms;            /* how long ago that was when it was sent */
 } lp_event_t;
 
 /* lp_stats_t.flags */
 #define LP_HEALTH_CAL_NEEDED  0x01u  /* the DC servo cannot hold a row: run CAL_FULL, VTX off */
 #define LP_HEALTH_CALIBRATING 0x02u  /* a calibration (boot, F or B) owns the receiver */
 
+#define LP_LEVELS 8u                 /* R1..R8 */
+#define LP_LEVEL_UNKNOWN (-128)      /* not measured: calibrating, no scan */
+
 #define LP_FW_LEN 24u                /* firmware id incl. NUL, e.g. "5.0.0-dev+3201b7196ece" */
 
 /* The C5's live state and health, every CONFIG_CHECKPOINT_LINK_STATS_MS: what
  * the console's T would show an operator, reduced to what a web page needs. */
 typedef struct {
-    int32_t  cn_x10;            /* current C/N *10; LP_CN_UNKNOWN when none */
-    uint8_t  channel;           /* 0..7 */
-    uint8_t  state;             /* pd_state_t */
+    int32_t  cn_x10;            /* the strongest channel's level *10; LP_CN_UNKNOWN when none */
+    uint8_t  channel;           /* that channel, 0..7 */
+    uint8_t  state;             /* its pd_state_t */
     uint8_t  flags;             /* LP_HEALTH_* */
     uint8_t  gain;              /* current RX gain index */
     uint32_t passes;            /* passes detected since boot */
     uint32_t uptime_s;
     uint32_t heap_min;          /* lowest free internal heap since boot, bytes */
     uint32_t faults;            /* transport fault counters (TX empty, RX overflow, DMA, BitScrambler) */
+    int8_t   levels[LP_LEVELS]; /* dB above each channel's rest, LP_LEVEL_UNKNOWN when none */
     char     fw[LP_FW_LEN];     /* firmware id; always NUL-terminated after a decode */
 } lp_stats_t;
 
@@ -99,7 +103,6 @@ typedef struct {
         lp_event_t  event;      /* EVENT_PASS */
         lp_stats_t  stats;      /* STATS */
         uint8_t     role;       /* HELLO */
-        uint8_t     channel_index; /* SET_CHANNEL: RF channel index for rf_set_channel */
         uint8_t     command;    /* COMMAND: an lp_cmd_t (unknown values are not decoded) */
     };
 } lp_msg_t;
@@ -111,7 +114,6 @@ size_t lp_encode_config(uint8_t *buf, size_t cap, lp_type_t type, const lp_confi
 size_t lp_encode_config_req(uint8_t *buf, size_t cap);
 size_t lp_encode_event(uint8_t *buf, size_t cap, const lp_event_t *e);
 size_t lp_encode_stats(uint8_t *buf, size_t cap, const lp_stats_t *s);
-size_t lp_encode_set_channel(uint8_t *buf, size_t cap, uint8_t rf_index);
 size_t lp_encode_command(uint8_t *buf, size_t cap, lp_cmd_t cmd);   /* 0 for an unknown cmd */
 
 /* Streaming decoder: feed one received byte at a time. Returns true and fills

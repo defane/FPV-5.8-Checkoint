@@ -39,9 +39,8 @@ uint16_t lp_crc16(const uint8_t *data, size_t len) {
 #define LP_LEN_HELLO   1u
 #define LP_LEN_REQ     0u
 #define LP_LEN_CONFIG  30u
-#define LP_LEN_EVENT   9u
-#define LP_LEN_STATS   (24u + LP_FW_LEN)   /* = LP_MAX_PAYLOAD */
-#define LP_LEN_SETCH   1u
+#define LP_LEN_EVENT   11u
+#define LP_LEN_STATS   (32u + LP_FW_LEN)   /* = LP_MAX_PAYLOAD */
 #define LP_LEN_CMD     1u
 
 static bool cmd_known(uint8_t c) {
@@ -111,6 +110,8 @@ size_t lp_encode_event(uint8_t *buf, size_t cap, const lp_event_t *e) {
     pl[0] = e->channel;
     put_i32(pl + 1, e->peak_db_x10);
     put_u32(pl + 5, e->at_ms);
+    pl[9] = (uint8_t)(e->age_ms & 0xFFu);
+    pl[10] = (uint8_t)(e->age_ms >> 8);
     return frame(buf, cap, LP_MSG_EVENT_PASS, pl, LP_LEN_EVENT);
 }
 
@@ -125,15 +126,12 @@ size_t lp_encode_stats(uint8_t *buf, size_t cap, const lp_stats_t *s) {
     put_u32(pl + 12, s->uptime_s);
     put_u32(pl + 16, s->heap_min);
     put_u32(pl + 20, s->faults);
+    for (unsigned k = 0; k < LP_LEVELS; k++) pl[24 + k] = (uint8_t)s->levels[k];
     /* NUL-padded, never unterminated: the last byte is always 0. */
     unsigned i = 0;
-    for (; i + 1u < LP_FW_LEN && s->fw[i]; i++) pl[24 + i] = (uint8_t)s->fw[i];
-    for (; i < LP_FW_LEN; i++) pl[24 + i] = 0;
+    for (; i + 1u < LP_FW_LEN && s->fw[i]; i++) pl[32 + i] = (uint8_t)s->fw[i];
+    for (; i < LP_FW_LEN; i++) pl[32 + i] = 0;
     return frame(buf, cap, LP_MSG_STATS, pl, LP_LEN_STATS);
-}
-
-size_t lp_encode_set_channel(uint8_t *buf, size_t cap, uint8_t rf_index) {
-    return frame(buf, cap, LP_MSG_SET_CHANNEL, &rf_index, LP_LEN_SETCH);
 }
 
 size_t lp_encode_command(uint8_t *buf, size_t cap, lp_cmd_t cmd) {
@@ -181,6 +179,7 @@ static bool decode_payload(uint8_t type, uint8_t len, const uint8_t *p,
         out->event.channel = p[0];
         out->event.peak_db_x10 = get_i32(p + 1);
         out->event.at_ms = get_u32(p + 5);
+        out->event.age_ms = (uint16_t)(p[9] | ((uint16_t)p[10] << 8));
         return true;
     case LP_MSG_STATS:
         if (len != LP_LEN_STATS) return false;
@@ -194,13 +193,9 @@ static bool decode_payload(uint8_t type, uint8_t len, const uint8_t *p,
         out->stats.uptime_s = get_u32(p + 12);
         out->stats.heap_min = get_u32(p + 16);
         out->stats.faults   = get_u32(p + 20);
-        for (unsigned i = 0; i < LP_FW_LEN; i++) out->stats.fw[i] = (char)p[24 + i];
+        for (unsigned k = 0; k < LP_LEVELS; k++) out->stats.levels[k] = (int8_t)p[24 + k];
+        for (unsigned i = 0; i < LP_FW_LEN; i++) out->stats.fw[i] = (char)p[32 + i];
         out->stats.fw[LP_FW_LEN - 1u] = '\0';   /* a peer may not have terminated it */
-        return true;
-    case LP_MSG_SET_CHANNEL:
-        if (len != LP_LEN_SETCH) return false;
-        out->type = LP_MSG_SET_CHANNEL;
-        out->channel_index = p[0];
         return true;
     case LP_MSG_COMMAND:
         if (len != LP_LEN_CMD || !cmd_known(p[0])) return false;

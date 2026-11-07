@@ -20,29 +20,33 @@ flash FW=master-wave-c5` (or `idf.py -DIDF_TARGET=esp32c5 -DSDKCONFIG=sdkconfig.
 `firmware/master`, → `build-c5/master-c5.bin`). Later swap that C5 for a real C6
 with no change on the gate side.
 
-- **Protocols:** `components/link_proto` v2 (C5↔bridge UART: `CONFIG_*`,
-  `EVENT_PASS`, `STATS` with the C5's health, `SET_CHANNEL` which triggers an
-  `rf_set_channel` retune the C5 saves, `COMMAND`); `components/fleet_proto` v2
+- **Protocols:** `components/link_proto` v3 (C5↔bridge UART: `CONFIG_*`,
+  `EVENT_PASS` with the pass's age, `STATS` with the 8 channels' levels and the C5's
+  health, `COMMAND`); `components/fleet_proto` v3
   (C6↔C3 ESP-NOW: pairing, time beacons, `CONFIG`, `GATE_PASS`, `NODE_STATUS`
-  relaying that health, `COMMAND`); `components/espnow_link` (transport);
-  `components/race_timing` (laps/sectors per channel). A board left on a v1
+  relaying that, `COMMAND`); `components/espnow_link` (transport);
+  `components/race_timing` (laps/sectors per channel). A board left on an older
   firmware is not misread, it simply does not talk: **reflash every C5, C3 and the
   C6 together** after a protocol change.
 - **C6** (`c6_hub`): node table in NVS, periodic time beacons, the `race_timing`
   engine, **centralized sound**, and an **admin web** (AP) to pair, order the
-  gates, assign channels and see the timings.
+  gates and see the timings. Every C5 sweeps R1 to R8, so a gate has no channel: a pass
+  carries the channel it was seen on.
 - **Pairing:** C6 web → *pairing open*; an unpaired C3 broadcasts a
-  `PAIR_REQUEST`; the C6 assigns it a gate + channel (`PAIR_ACCEPT` + `CONFIG`),
-  persisted on both sides.
+  `PAIR_REQUEST`; the C6 assigns it a gate (`PAIR_ACCEPT` + `CONFIG`),
+  persisted on both sides. The channel those frames still carry is ignored.
 - **Degraded C3:** if the C6 is unreachable for `CONFIG_C3_FLEET_TIMEOUT_MS` at
-  boot, the C3 serves its own local AP + web (band selection → `SET_CHANNEL`,
-  pass display).
+  boot, the C3 serves its own local AP + web (pass display, the channels' levels,
+  detector settings).
+- **Channels panel:** the C6 page shows one row per gate, the degraded C3 page one
+  tile per channel, R1 to R8, with its level in dB above the channel's rest and a yellow
+  mark on a pass; `—` while the C5 is away or calibrating. A VTX left on keeps showing.
 - **Web roles:** two levels. A **spectator** sees timings/status read-only (no
-  login); **admin** actions (pairing, gate order, channel, reset, volume, a
-  gate's calibration or reboot; detector tuning and band selection on a degraded
+  login); **admin** actions (pairing, gate order, reset, volume, a
+  gate's calibration or reboot; detector tuning on a degraded
   C3) need the admin password (`CONFIG_*_ADMIN_PASSWORD`, no
-  username, any length): the header's spectator/admin toggle opens a password
-  dialog; toggling back to spectator forgets it. An empty password disables
+  username, any length): the header's admin toggle opens a password
+  dialog; turning it off forgets it. An empty password disables
   admin auth. See "Signed admin requests" below.
 - **Signed admin requests** (`components/web_auth`): the password never crosses
   the Wi-Fi and the firmware never holds it. The build turns it into
@@ -78,7 +82,10 @@ with no change on the gate side.
 - **Constraint:** the C6 and C3 APs **and** ESP-NOW share the **same Wi-Fi
   channel** (`CONFIG_*_AP_CHANNEL` / `CONFIG_C6_AP_CHANNEL`).
 - **Limit:** the time base (ESP-NOW beacons) aims for ~10 ms; not a sub-ms photo
-  finish.
+  finish. A pass is timed at its peak by the C5, and a lap by gate 0's C5 alone. A sector
+  also depends on when a remote gate's pass reaches its C3, after a 100 ms UART poll
+  (`LINK_READ_MS`): count ±0.1 s on it for now. The first passes after a boot teach the
+  master the local C5's clock, so a lap there can read a little short.
 
 ## Gate health and remote commands (no console in production)
 
@@ -99,8 +106,8 @@ page for a gate with no master.
   calibration that is already running.
 - **Guard:** a calibration blinds the gate for minutes and wants the VTXs off.
   The page asks for confirmation; then the bridge refuses, unless forced, any
-  gate whose C/N is above that C5's activity threshold (`active_db`, read from
-  its `CONFIG_STATE` echo), i.e. a VTX is probably on. The C6 also skips gates
+  gate whose strongest channel is above that C5's activity threshold (`active_db`,
+  read from its `CONFIG_STATE` echo), i.e. a VTX is probably on. The C6 also skips gates
   already calibrating (listed as *busy*); the C3 page disables its calibration
   buttons meanwhile. Reboot is not VTX-guarded.
 - **API:** C6 `POST /api/command` `{"gate": 0..15 | -1 (all), "cmd": "cal_full" |
@@ -109,9 +116,5 @@ page for a gate with no master.
   degraded C3's `POST /api/command` `{"cmd": ..., "force": 0|1}` (its one gate)
   replies `{"ok": true}`, `{"ok": false, "vtx": true, "cn_x10": x}` or
   `{"ok": false, "msg": "no C5 linked"}`.
-- **Channel persistence:** a channel set over the link (`SET_CHANNEL`) is saved by
-  the C5, and the C6 re-sends a node's `CONFIG` (gate, channel, detector settings)
-  when the node comes back online, so a rebooted gate returns to its assignment.
-- **Known limitation:** a retune over the link does not re-apply the receive
-  profile (filter class) of the new channel, as the console's `c`/`b` do through
-  `control.c`'s `after_retune()`; that needs a `control.c` change.
+- **Back online:** the C6 re-sends a node's `CONFIG` (gate, detector settings) when the
+  node comes back online, so a rebooted gate returns to its assignment.

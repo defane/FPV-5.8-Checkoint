@@ -34,14 +34,25 @@ static void json_safe(char *dst, const char *src, size_t cap)
     dst[i] = '\0';
 }
 
+/* One level per Raceband channel, dB x10, LP_CN_UNKNOWN when not measured. */
+static void put_levels(char *b, size_t cap, const int8_t *levels)
+{
+    int o = 0;
+    for (unsigned ch = 0; ch < LP_LEVELS; ch++) {
+        const bool known = levels && levels[ch] != LP_LEVEL_UNKNOWN;
+        o += snprintf(b + o, cap - o, "%s%d", ch ? "," : "", known ? levels[ch] * 10 : LP_CN_UNKNOWN);
+    }
+}
+
 static esp_err_t get_state(httpd_req_t *req)
 {
     c3_snapshot_t s;
     c3_store_snapshot(&s);
-    char fw[LP_FW_LEN];
+    char fw[LP_FW_LEN], levels[48];
     json_safe(fw, s.stats.fw, sizeof fw);
+    put_levels(levels, sizeof levels, s.has_stats ? s.stats.levels : NULL);
 
-    char body[2048];   /* worst case (16 events, every field at its widest): 1534 B */
+    char body[2048];   /* worst case (16 events, every field at its widest): 1586 B */
     int o = 0;
     o += snprintf(body + o, sizeof body - o,
                   "{\"has_config\":%s,\"config\":{\"alpha_milli\":%ld,\"active_db_x10\":%ld,"
@@ -56,7 +67,7 @@ static esp_err_t get_state(httpd_req_t *req)
                   "\"c5_alive\":%s,"
                   "\"has_stats\":%s,\"stats\":{\"cn_x10\":%ld,\"channel\":%u,\"state\":%u,"
                   "\"flags\":%u,\"cal_needed\":%s,\"calibrating\":%s,\"gain\":%u,\"passes\":%lu,"
-                  "\"uptime_s\":%lu,\"heap_min\":%lu,\"faults\":%lu,\"fw\":\"%s\"},"
+                  "\"uptime_s\":%lu,\"heap_min\":%lu,\"faults\":%lu,\"fw\":\"%s\",\"levels\":[%s]},"
                   "\"total_events\":%lu,\"events\":[",
                   c3_link_c5_alive() ? "true" : "false",
                   s.has_stats ? "true" : "false", (long)s.stats.cn_x10, s.stats.channel,
@@ -64,7 +75,7 @@ static esp_err_t get_state(httpd_req_t *req)
                   (s.stats.flags & LP_HEALTH_CAL_NEEDED) ? "true" : "false",
                   (s.stats.flags & LP_HEALTH_CALIBRATING) ? "true" : "false", s.stats.gain,
                   (unsigned long)s.stats.passes, (unsigned long)s.stats.uptime_s,
-                  (unsigned long)s.stats.heap_min, (unsigned long)s.stats.faults, fw,
+                  (unsigned long)s.stats.heap_min, (unsigned long)s.stats.faults, fw, levels,
                   (unsigned long)s.total_events);
     for (unsigned i = 0; i < s.n_events && o < (int)sizeof body; i++)
         o += snprintf(body + o, sizeof body - o,
@@ -151,8 +162,6 @@ static esp_err_t post_config(httpd_req_t *req)
 
     c3_store_set_config(&cur, true);
     c3_link_push_config(&cur);
-    const int32_t ch = json_i(buf, "channel", -1);   /* optional band selection */
-    if (ch >= 0) c3_link_set_channel((uint8_t)ch);
     ESP_LOGI(TAG, "config updated from web");
 
     httpd_resp_set_type(req, "application/json");

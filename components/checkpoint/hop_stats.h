@@ -21,6 +21,21 @@ static inline void hs_sort(uint32_t *v, size_t n)
     }
 }
 
+/* Mean IQ power of a window, DC removed, x256 (4-bit I and Q as measure_window). */
+static inline uint32_t hs_window_power(const uint8_t *s, size_t n)
+{
+    int32_t si = 0, sq = 0;
+    uint32_t sp = 0;
+    for (size_t k = 0; k < n; k++) {
+        const int q = (int8_t)((s[k] & 0x0fu) << 4) >> 4, i = (int8_t)(s[k] & 0xf0u) >> 4;
+        si += i;
+        sq += q;
+        sp += (uint32_t)(i * i + q * q);
+    }
+    const int64_t ac = (int64_t)sp * (int64_t)n - (int64_t)si * si - (int64_t)sq * sq;
+    return ac <= 0 ? 0u : (uint32_t)(ac * 256 / ((int64_t)n * (int64_t)n));
+}
+
 /* Sorts v in place. */
 static inline hs_spread_t hs_spread(uint32_t *v, size_t n)
 {

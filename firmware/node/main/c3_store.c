@@ -14,8 +14,8 @@ static c3_snapshot_t s_st;      /* guarded by s_lock */
 lp_config_t c3_config_default(void)
 {
     const lp_config_t c = {
-        .alpha_milli = 300, .active_db_x10 = 150, .hysteresis_db_x10 = 30,
-        .drop_db_x10 = 30, .min_peak_db_x10 = 250, .refractory_ms = 1500,
+        .alpha_milli = 250, .active_db_x10 = 80, .hysteresis_db_x10 = 30,
+        .drop_db_x10 = 30, .min_peak_db_x10 = 100, .refractory_ms = 1500,
         .stale_ms = 1000, .volume_pct = 60, .muted = 0,
     };
     return c;

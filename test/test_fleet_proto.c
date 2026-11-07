@@ -67,14 +67,15 @@ int main(void) {
         fp_node_status_t s = { .gate_index = 0, .channel = 36, .cn_x10 = LP_CN_UNKNOWN,
                                .state = 2, .passes = 9, .flags = LP_HEALTH_CAL_NEEDED,
                                .seq = 0xDEADBEEF, .gain = 76, .uptime_s = 3600,
-                               .heap_min = 131072, .faults = 3, .fw = "5.0.12+abcdef123456" };
+                               .heap_min = 131072, .faults = 3, .levels = {1, -2, 3, LP_LEVEL_UNKNOWN, 5, 6, 127, -127},
+                               .fw = "5.0.12+abcdef123456" };
         size_t n = fp_encode_node_status(buf, sizeof buf, &s);
         const fp_node_status_t *r = &m.node_status;
         bool ok = n && n <= FP_MAX_FRAME && fp_decode(buf, n, &m) && m.type == FP_MSG_NODE_STATUS &&
                   r->cn_x10 == LP_CN_UNKNOWN && r->passes == 9 && r->state == 2 &&
                   r->flags == LP_HEALTH_CAL_NEEDED && r->seq == 0xDEADBEEF && r->gain == 76 &&
                   r->uptime_s == 3600 && r->heap_min == 131072 && r->faults == 3 &&
-                  strcmp(r->fw, "5.0.12+abcdef123456") == 0;
+                  memcmp(r->levels, s.levels, LP_LEVELS) == 0 && strcmp(r->fw, "5.0.12+abcdef123456") == 0;
         CHECK(ok, "node_status roundtrip (negative cn, seq, C5 health, fw id)");
 
         memset(s.fw, 'x', sizeof s.fw);

@@ -1,9 +1,7 @@
-/* Checkpoint: "a drone has just passed" on the tuned channel, from the
- * receiver's noise-referenced C/N (receiver_obs_cn_x10, dB), reported over the
- * UART link (the sound is played by the C6 master). It only reads the receiver,
- * except what the bridge asks for over the link: a retune (SET_CHANNEL, saved)
- * and a calibration (filter_request / filter_request_full) or reboot (COMMAND).
- * No GPIO, DMA or gain write. */
+/* Checkpoint: "a drone has just passed" on any Raceband channel, from a continuous
+ * sweep of R1-R8, reported over the UART link (the sound is played by the C6 master).
+ * It owns the receiver like scan(), and lets go of it for a calibration
+ * (filter_request / filter_request_full, COMMAND) or a console bench. No GPIO or DMA. */
 #pragma once
 #include <stdbool.h>
 

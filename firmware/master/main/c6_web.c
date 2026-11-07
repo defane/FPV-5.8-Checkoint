@@ -48,13 +48,23 @@ static int put_health(char *b, size_t cap, uint32_t passes, uint8_t flags, uint8
                     safe_fw(fw, f));
 }
 
+/* One level per Raceband channel, dB x10, LP_CN_UNKNOWN when not measured. */
+static int put_levels(char *b, size_t cap, const int8_t *levels) {
+    int o = snprintf(b, cap, "\"levels\":[");
+    for (unsigned ch = 0; ch < LP_LEVELS; ch++) {
+        const bool known = levels && levels[ch] != LP_LEVEL_UNKNOWN;
+        o += snprintf(b + o, cap - o, "%s%d", ch ? "," : "", known ? levels[ch] * 10 : LP_CN_UNKNOWN);
+    }
+    return o + snprintf(b + o, cap - o, "],");
+}
+
 static esp_err_t get_state(httpd_req_t *req) {
     c6_store_snapshot(&s_snap);
     c6_hub_snapshot(&s_fleet);
     const c6_snapshot_t *s = &s_snap;
     const c6_fleet_t *f = &s_fleet;
 
-    /* Worst case (every field at its widest) 8852 B: header + local 394,
+    /* Worst case (every field at its widest) 9796 B: levels 59 x 16 gates, header + local 394,
      * 15 nodes x 392, 8 standings 838, 24 passes 1739; sized so it never truncates. */
     static char body[10240];   /* larger than the stack; this handler is serialised by httpd */
     const lp_stats_t *l = &s->local;
@@ -64,6 +74,7 @@ static esp_err_t get_state(httpd_req_t *req) {
                   "\"local\":{\"channel\":%u,\"cn_x10\":%ld,\"state\":%u,",
                   f->pairing ? "true" : "false", f->num_gates, s->has_local ? "true" : "false",
                   l->channel, (long)l->cn_x10, l->state);
+    o += put_levels(body + o, sizeof body - o, s->has_local ? l->levels : NULL);
     o += put_health(body + o, sizeof body - o, l->passes, l->flags, l->gain, l->uptime_s,
                     l->heap_min, l->faults, l->fw);
     o += snprintf(body + o, sizeof body - o,
@@ -87,6 +98,7 @@ static esp_err_t get_state(httpd_req_t *req) {
                       (int)n->rssi, (unsigned long)n->rx_frames,
                       (unsigned long)n->status_rx, (unsigned long)n->status_lost,
                       n->mac[0], n->mac[1], n->mac[2], n->mac[3], n->mac[4], n->mac[5]);
+        o += put_levels(body + o, sizeof body - o, n->online ? n->levels : NULL);
         o += put_health(body + o, sizeof body - o, n->passes, n->flags, n->gain, n->c5_uptime_s,
                         n->heap_min, n->faults, n->fw);
         o += snprintf(body + o, sizeof body - o, "}");
