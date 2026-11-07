@@ -215,7 +215,7 @@ python3 test_pcb.py      # hardware/ boards against the firmware's Kconfig pin d
 python3 test_scan_analyze.py   # tools/scan_analyze.py on synthetic recordings
 ```
 
-CI (`.github/workflows/c5vrx5.yml`) builds all three firmwares and runs the host
+CI (`.github/workflows/checkpoint.yml`) builds all three firmwares and runs the host
 tests (the upstream engine tests compile against `components/c5vrx_rx`). Sound:
 `python3 tools/coin_sound.py` (needs `assets/coin_source.mp3`, not versioned).
 `test/test_manual_calibration_runtime.py` already fails upstream with recent

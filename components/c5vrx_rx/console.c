@@ -14,8 +14,8 @@
 
 extern volatile const char *s_boot_stage;
 
-#ifndef C5VRX5_COMMIT
-#define C5VRX5_COMMIT "unknown"
+#ifndef CHECKPOINT_COMMIT
+#define CHECKPOINT_COMMIT "unknown"
 #endif
 
 /* "<version>+<commit 12>": PR channels reuse one version string, so the
@@ -23,7 +23,7 @@ extern volatile const char *s_boot_stage;
 const char *firmware_id(void)
 {
     static char id[64];
-    if (!id[0]) snprintf(id, sizeof(id), "%s+%.12s", esp_app_get_description()->version, C5VRX5_COMMIT);
+    if (!id[0]) snprintf(id, sizeof(id), "%s+%.12s", esp_app_get_description()->version, CHECKPOINT_COMMIT);
     return id;
 }
 
@@ -33,7 +33,7 @@ void firmware_print(void)
     char elf[65] = "";
     (void)esp_app_get_elf_sha256(elf, sizeof(elf));
     printf("FIRMWARE id=%s version=%s commit=%s elf_sha256=%s built=\"%s %s\" idf=%s cal_dump=1\n", firmware_id(), d->version,
-           C5VRX5_COMMIT, elf[0] ? elf : "unknown", d->date, d->time, d->idf_ver);
+           CHECKPOINT_COMMIT, elf[0] ? elf : "unknown", d->date, d->time, d->idf_ver);
 }
 
 static void status(void)

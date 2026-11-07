@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
-if(DEFINED C5VRX5_VERSION)
-    set(PROJECT_VER "${C5VRX5_VERSION}")
+if(DEFINED CHECKPOINT_VERSION)
+    set(PROJECT_VER "${CHECKPOINT_VERSION}")
 else()
     set(PROJECT_VER "5.0.0-dev")
 endif()

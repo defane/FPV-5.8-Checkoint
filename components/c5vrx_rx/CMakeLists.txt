@@ -35,20 +35,20 @@ set_source_files_properties(control.c PROPERTIES COMPILE_OPTIONS "-O2")
 # Firmware identity in every log (FIRMWARE line, fw= fields): CI passes the
 # exact head commit; local builds ask git at configure time and mark a dirty
 # tree. The ELF SHA-256 printed beside it identifies the binary itself.
-if(NOT C5VRX5_COMMIT)
+if(NOT CHECKPOINT_COMMIT)
     execute_process(COMMAND git rev-parse HEAD WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}"
-                    OUTPUT_VARIABLE C5VRX5_COMMIT OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET RESULT_VARIABLE git_rc)
-    if(git_rc EQUAL 0 AND C5VRX5_COMMIT)
+                    OUTPUT_VARIABLE CHECKPOINT_COMMIT OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET RESULT_VARIABLE git_rc)
+    if(git_rc EQUAL 0 AND CHECKPOINT_COMMIT)
         execute_process(COMMAND git status --porcelain --untracked-files=no WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}"
                         OUTPUT_VARIABLE git_dirty OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
         if(git_dirty)
-            set(C5VRX5_COMMIT "${C5VRX5_COMMIT}-dirty")
+            set(CHECKPOINT_COMMIT "${CHECKPOINT_COMMIT}-dirty")
         endif()
     else()
-        set(C5VRX5_COMMIT "unknown")
+        set(CHECKPOINT_COMMIT "unknown")
     endif()
 endif()
-target_compile_definitions(${COMPONENT_LIB} PRIVATE C5VRX5_COMMIT="${C5VRX5_COMMIT}")
+target_compile_definitions(${COMPONENT_LIB} PRIVATE CHECKPOINT_COMMIT="${CHECKPOINT_COMMIT}")
 
 # Filter capacitor, digital RX mode and DC DAC access use PHY internals recovered from this
 # exact ESP-IDF 6.0.2 libphy; any other PHY binary builds with them refused.

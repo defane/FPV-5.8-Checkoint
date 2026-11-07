@@ -1,4 +1,4 @@
-name: C5VRX-5 Build
+name: FPV 5.8 Checkpoint Build
 on:
   workflow_dispatch:
   push:
@@ -9,7 +9,7 @@ on:
       - 'test/**'
       - 'tools/**'
       - '!**/*.md'
-      - '.github/workflows/c5vrx5.yml'
+      - '.github/workflows/checkpoint.yml'
   pull_request:
     types: [opened, synchronize, reopened]
     paths:
@@ -18,11 +18,11 @@ on:
       - 'test/**'
       - 'tools/**'
       - '!**/*.md'
-      - '.github/workflows/c5vrx5.yml'
+      - '.github/workflows/checkpoint.yml'
 permissions:
   contents: read
 concurrency:
-  group: c5vrx5-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  group: checkpoint-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 jobs:
   build-psram:
@@ -157,13 +157,13 @@ jobs:
           python3 test/test_phase_repair_runtime.py
           python3 test/test_calibration_search_runtime.py
           python3 test/test_manual_calibration_runtime.py
-      - name: Build C5VRX-5
+      - name: Build Checkpoint C5 detector
         shell: bash
         run: |
           . "$IDF_PATH/export.sh"
           cd firmware/detector
-          idf.py -DC5VRX5_VERSION="${{ steps.version.outputs.version }}" \
-            -DC5VRX5_COMMIT="${{ github.event.pull_request.head.sha || github.sha }}" build
+          idf.py -DCHECKPOINT_VERSION="${{ steps.version.outputs.version }}" \
+            -DCHECKPOINT_COMMIT="${{ github.event.pull_request.head.sha || github.sha }}" build
       - name: Build Checkpoint C3 bridge
         shell: bash
         run: |
@@ -192,6 +192,6 @@ jobs:
           cd release && sha256sum * > SHA256SUMS
       - uses: actions/upload-artifact@v4
         with:
-          name: c5vrx5-${{ github.event.pull_request.head.sha || github.sha }}
+          name: checkpoint-${{ github.event.pull_request.head.sha || github.sha }}
           if-no-files-found: error
           path: release/

@@ -91,8 +91,9 @@ permitted GPL reuse. Credit external sources used by C5VRX with the same care.
   fork) stand in for the symbols the kept code calls, with the video-off
   behaviour. Other modifications by this fork: `transport.c` (+7 lines:
   `CONFIG_C5VRX_VIDEO_OUTPUT=n` routes `s_dac_gpio` to no pin), `console.c` (the
-  checkpoint `K`/`T` hooks and a reduced key table), `CMakeLists.txt`
-  (component packaging); added: `Kconfig.projbuild`, `checkpoint.h`,
+  checkpoint `K`/`T` hooks, a reduced key table, `C5VRX5_COMMIT` renamed
+  `CHECKPOINT_COMMIT`), `CMakeLists.txt` (component packaging, the same rename);
+  added: `Kconfig.projbuild`, `checkpoint.h`,
   `checkpoint_weak.c`. Every other engine file, `rf.c`, `receiver.c`, `gain.c`,
   `agc.c` and `*.bsasm` included, is byte-identical to upstream `6bc9e4b:main/`.
 - `components/checkpoint/`, `components/pass_detector/`,
@@ -372,13 +373,13 @@ When proposing a new CPU, source, DMA, DSP or DAC route:
 
 ### Workflows
 
-- `.github/workflows/c5vrx5.yml` ("C5VRX-5 Build") is the firmware workflow.
+- `.github/workflows/checkpoint.yml` ("FPV 5.8 Checkpoint Build") is the firmware workflow.
   It runs the host tests and builds firmware/detector, firmware/node and
   firmware/master with ESP-IDF v6.0.2. Its images stay workflow artifacts: this
   derivative publishes no GitHub Release, since one under the C5VRX name would
   read as an official release (`assets/BRANDING.md`).
 - Keep its concurrency group separated by event type and PR identity
-  (`c5vrx5-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}`):
+  (`checkpoint-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}`):
   a `github.ref`-only group let a merged PR's cleanup cancel the main build.
 
 The former C5VRX-3 Production CI (semantic `v3.x` releases, `pr-N`), the
