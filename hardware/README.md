@@ -99,6 +99,11 @@ they change nothing.
 - **Heat** in D2 on a master at full volume.
 - **Temporary C5-as-master set:** not supported, its amplifier pins differ.
 
+## Antenna
+
+[`antenna/`](antenna/README.md) holds a directive 5.8 GHz quasi-Yagi on FR-4, a separate board
+that reaches a C5-Zero through its IPEX connector. It has not been simulated or built.
+
 ## Regenerating
 
 [`generate_boards.py`](generate_boards.py) is the source of the boards: edit it, not the KiCad

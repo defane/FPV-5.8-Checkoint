@@ -186,7 +186,8 @@ Not needed yet: try the software gain first, it is free and set per gate. Come b
 when a gate needs to know more precisely where and when a drone passed:
 
 - **A directive or shielded antenna aimed at the gate** is the real gain: it narrows the zone
-  the C5 sees, so the pass peak gets sharper and the timing better.
+  the C5 sees, so the pass peak gets sharper and the timing better. `hardware/antenna/` holds
+  a first printed design, not simulated or built yet.
 - **A fixed attenuator** (20 dB, on an IPEX to SMA lead, rated to 6 GHz: many stop lower) only
   shifts the levels down: useful if the RF stage saturates before the gain setting can help.
 

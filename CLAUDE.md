@@ -53,6 +53,7 @@ firmware/detector/  ESP32-C5 app (RF + detection, report-only)
 firmware/node/      ESP32-C3 node bridge (UART + ESP-NOW relay, degraded Wi-Fi web)
 firmware/master/    ESP32-C6 master (UART + ESP-NOW hub + speaker + admin web + timing)
 hardware/           carrier PCBs, node (C5+C3) and master (C5+C6+amp): generator, KiCad files, Gerbers
+hardware/antenna/   5.8 GHz quasi-Yagi: gen_qyagi.py is its source, not simulated or built yet
 ```
 
 The console/boot calls into checkpoint are kept without a circular dependency
