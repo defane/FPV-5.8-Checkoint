@@ -139,7 +139,8 @@ python3 test_scan_analyze.py   # tools/scan_analyze.py on synthetic recordings
 
 ## Architecture
 
-- **Global schema** (elements + interactions): [docs/fleet.svg](docs/fleet.svg)
+![Fleet architecture: the C6 master with its own C5 gate and the speaker, C3 + C5 gates over ESP-NOW](docs/fleet.svg)
+
 - **Pin-level wiring, per set type:**
   - master **C6 + C5**: [docs/wiring-master.svg](docs/wiring-master.svg)
   - node **C3 + C5** (also a gate with no master: the C3 then serves the web): [docs/wiring-node.svg](docs/wiring-node.svg)

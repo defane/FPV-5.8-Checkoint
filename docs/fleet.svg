@@ -7,7 +7,7 @@
   </defs>
   <rect x="0" y="0" width="1200" height="780" fill="#ffffff"/>
   <text x="40" y="44" font-size="25" font-weight="700" fill="#0f172a">FPV 5.8 Checkpoint — fleet architecture</text>
-  <text x="40" y="68" font-size="14" fill="#64748b">Each gate is an ESP32-C5 detector. The C6 master aggregates its own C5 and remote C5/C3 nodes over ESP-NOW, times laps and plays the sound.</text>
+  <text x="40" y="68" font-size="14" fill="#64748b">Each gate is an ESP32-C5 sweeping R1-R8. The C6 master aggregates its own C5 and remote C5/C3 nodes over ESP-NOW, times laps and plays the sound.</text>
 
   <!-- ===================== MASTER SET ===================== -->
   <rect x="34" y="92" width="520" height="560" rx="14" fill="#f8fafc" stroke="#cbd5e1" stroke-dasharray="4 4"/>
@@ -76,7 +76,7 @@
   <text x="910" y="370" font-size="10" fill="#475569" text-anchor="middle">UART C5 6/8 · C3 5/4</text>
 
   <text x="765" y="470" font-size="12" fill="#64748b" text-anchor="middle">+ more gates…</text>
-  <text x="915" y="498" font-size="11" fill="#64748b" text-anchor="middle" font-style="italic">Degraded: a C3 that can't reach the C6 at boot serves its own AP + web (results + detector settings).</text>
+  <text x="915" y="498" font-size="11" fill="#64748b" text-anchor="middle" font-style="italic">Degraded: a C3 with no C6 at boot serves its own web (results, detector settings).</text>
 
   <!-- ESP-NOW links C3 -> C6 -->
   <line x1="690" y1="198" x2="500" y2="312" stroke="#2563eb" stroke-width="2.5" stroke-dasharray="7 4" marker-end="url(#aBlue)"/>
@@ -85,13 +85,13 @@
   <text x="590" y="266" font-size="10" fill="#475569" text-anchor="middle">fleet_proto · shared Wi-Fi channel</text>
 
   <!-- ===================== INTERACTIONS note + LEGEND ===================== -->
-  <text x="40" y="690" font-size="12" fill="#64748b">Flow: a drone crossing a gate → the C5 detects a C/N peak → reports over UART → the bridge timestamps it in fleet time →</text>
-  <text x="40" y="708" font-size="12" fill="#64748b">the C6 times the lap/sector per channel and plays the coin sound. The C6 assigns each gate a channel; SET_CHANNEL retunes its C5.</text>
+  <text x="40" y="690" font-size="12" fill="#64748b">Flow: a drone crossing a gate → its channel rises on the C5, timed at the peak → reported over UART → the bridge puts it in fleet time →</text>
+  <text x="40" y="708" font-size="12" fill="#64748b">the C6 times the lap/sector per channel and plays the coin sound. Every gate sees every channel: nobody picks one.</text>
 
   <g font-size="12" fill="#0f172a">
     <rect x="640" y="548" width="526" height="104" rx="8" fill="#f8fafc" stroke="#cbd5e1"/>
     <text x="656" y="570" font-weight="700">Links</text>
-    <line x1="656" y1="590" x2="690" y2="590" stroke="#16a34a" stroke-width="3"/><text x="698" y="594">UART — link_proto (passes, config, SET_CHANNEL)</text>
+    <line x1="656" y1="590" x2="690" y2="590" stroke="#16a34a" stroke-width="3"/><text x="698" y="594">UART — link_proto (passes, levels, config, commands)</text>
     <line x1="656" y1="612" x2="690" y2="612" stroke="#2563eb" stroke-width="3" stroke-dasharray="7 4"/><text x="698" y="616">ESP-NOW — fleet_proto (pairing, events, time)</text>
     <line x1="656" y1="634" x2="690" y2="634" stroke="#7c3aed" stroke-width="3"/><text x="698" y="638">Wi-Fi — admin / degraded web</text>
     <line x1="980" y1="634" x2="1014" y2="634" stroke="#0d9488" stroke-width="3"/><text x="1022" y="638">I2S — audio</text>
