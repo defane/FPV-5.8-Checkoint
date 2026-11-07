@@ -6,6 +6,8 @@ phone-friendly web UI to tune it and watch events. Each gate is a C5 wired to a
 C3 (or to the C6); a C3 with no master in reach serves its own web page with the
 passes. It scales to a multi-gate race-timing fleet.
 
+![Fleet architecture: the C6 master with its own C5 gate and the speaker, C3 + C5 gates over ESP-NOW](docs/fleet.svg)
+
 > **Derivative.** This project adapts the receive engine of
 > [C5VRX](https://github.com/Twotoz/C5VRX) — **C5VRX-5, by Twotoz and the C5VRX
 > contributors** (forked at upstream commit `6bc9e4b`, modified since
@@ -139,8 +141,7 @@ python3 test_scan_analyze.py   # tools/scan_analyze.py on synthetic recordings
 
 ## Architecture
 
-![Fleet architecture: the C6 master with its own C5 gate and the speaker, C3 + C5 gates over ESP-NOW](docs/fleet.svg)
-
+- **Global schema:** at the top of this page ([docs/fleet.svg](docs/fleet.svg)).
 - **Pin-level wiring, per set type:**
   - master **C6 + C5**: [docs/wiring-master.svg](docs/wiring-master.svg)
   - node **C3 + C5** (also a gate with no master: the C3 then serves the web): [docs/wiring-node.svg](docs/wiring-node.svg)
