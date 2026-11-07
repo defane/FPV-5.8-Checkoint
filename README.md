@@ -148,9 +148,9 @@ python3 test_scan_analyze.py   # tools/scan_analyze.py on synthetic recordings
 ## Pinout
 
 Each UART link is crossed (one side's TX to the other's RX) with a common
-ground. Pins are Kconfig defaults (`menuconfig`); the C6 defaults should be
-checked against your board's strapping pins. USB-Serial-JTAG (flashing/console)
-is reserved on every board.
+ground. Pins are Kconfig defaults (`menuconfig`). USB-Serial-JTAG (flashing/console)
+is reserved on every board. [`hardware/`](hardware/README.md) has carrier PCBs for
+both sets, with Gerbers ready to order.
 
 **ESP32-C5** (`firmware/detector`, detector — one per gate)
 

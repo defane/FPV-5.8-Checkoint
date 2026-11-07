@@ -52,6 +52,7 @@ components/
 firmware/detector/  ESP32-C5 app (RF + detection, report-only)
 firmware/node/      ESP32-C3 node bridge (UART + ESP-NOW relay, degraded Wi-Fi web)
 firmware/master/    ESP32-C6 master (UART + ESP-NOW hub + speaker + admin web + timing)
+hardware/           carrier PCBs, node (C5+C3) and master (C5+C6+amp): generator, KiCad files, Gerbers
 ```
 
 The console/boot calls into checkpoint are kept without a circular dependency
@@ -163,7 +164,9 @@ Pinout (Kconfig defaults; crossed UART, common ground):
 | C3 (node) | 5 / 4 → C5 | — |
 | C6 (master) | 4 / 5 → local C5 | 18/19/20/21 → 4 Ω speaker |
 
-C6 amp/UART pins are placeholders — check against the C6 board's strapping pins.
+C6 pins are checked against its datasheet (GPIO 4/5 strap only the SDIO edges) and frozen
+by the carrier boards (`hardware/README.md`): a default changed here means a new board, and
+`test/test_pcb.py` fails until then.
 **Temporary C5-as-master**: run the master on a spare C5 (`make flash
 FW=master-wave-c5`; amp on 9/8/7/10, UART 4/5). Protocols in depth, pairing, web
 roles (spectator vs admin password), degraded mode and the C5-as-master build:
@@ -208,6 +211,7 @@ cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/web_auth/include \
 cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/checkpoint test_hop_stats.c -o /tmp/t && /tmp/t
 node test_web_auth.mjs   # auth.js (page side of web_auth)
 python3 test_web_mock.py # tools/web_mock.py against the firmware's /api/state and buffers
+python3 test_pcb.py      # hardware/ boards against the firmware's Kconfig pin defaults
 python3 test_scan_analyze.py   # tools/scan_analyze.py on synthetic recordings
 ```
 

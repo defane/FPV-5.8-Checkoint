@@ -128,7 +128,7 @@
     <text transform="matrix(1 0 0 1 1002 326)" x="0" y="0" xml:space="preserve" font-family="ui-monospace, sans-serif" font-size="11" fill="#0f172a" text-anchor="end"><tspan x="0" y="0">OUT−</tspan></text>
     <text transform="matrix(1 0 0 1 560 446)" x="0" y="0" xml:space="preserve" font-family="system-ui, sans-serif" font-size="11" fill="#7c3aed" text-anchor="middle"><tspan x="0" y="0">Wi-Fi AP + admin web</tspan></text>
     <text transform="matrix(1 0 0 1 560 463)" x="0" y="0" xml:space="preserve" font-family="system-ui, sans-serif" font-size="11" fill="#7c3aed" text-anchor="middle"><tspan x="0" y="0">ESP-NOW hub for C3 nodes</tspan></text>
-    <text transform="matrix(1 0 0 1 40 560)" x="0" y="0" xml:space="preserve" font-family="system-ui, sans-serif" font-size="12" fill="#64748b"><tspan x="0" y="0">Crossed UART, common ground. C6 pins (UART 4/5, I2S 18-21) are defaults — verify against the C6 board&apos;s strapping pins.</tspan></text>
+    <text transform="matrix(1 0 0 1 40 560)" x="0" y="0" xml:space="preserve" font-family="system-ui, sans-serif" font-size="12" fill="#64748b"><tspan x="0" y="0">Crossed UART, common ground. C6 pins (UART 4/5, I2S 18-21) are defaults; GPIO 4/5 strap only the SDIO edges, no effect on a flash boot.</tspan></text>
     <text transform="matrix(1 0 0 1 40 580)" x="0" y="0" xml:space="preserve" font-family="system-ui, sans-serif" font-size="12" fill="#64748b"><tspan x="0" y="0">The C6 powers/plays the shared speaker; the gate C5 needs no amplifier in a fleet.</tspan></text>
   </g>
 </svg>
