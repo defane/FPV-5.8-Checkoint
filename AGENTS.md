@@ -373,25 +373,13 @@ When proposing a new CPU, source, DMA, DSP or DAC route:
 ### Workflows
 
 - `.github/workflows/c5vrx5.yml` ("C5VRX-5 Build") is the firmware workflow.
-  It runs the host tests, builds firmware/detector, firmware/node and
-  firmware/master with ESP-IDF v6.0.2 and publishes (the C5 is the released image):
-  - `c5vrx5-v5.0.<run number>` for a firmware change on `main` (immutable;
-    never replace published version assets), marked as the repository's
-    Latest release (an unchanged-input main run re-marks the newest one);
-  - a mutable `c5vrx5-pr-<number>` prerelease for every same-repository PR
-    (`opened`/`synchronize`/`reopened`); publish skips a PR that closed
-    during the build. Fork PRs never get write-capable publication.
-  - Unchanged `tools/firmware_input_hash.py` inputs keep the existing release,
-    so docs changes do not mint firmware.
+  It runs the host tests and builds firmware/detector, firmware/node and
+  firmware/master with ESP-IDF v6.0.2. Its images stay workflow artifacts: this
+  derivative publishes no GitHub Release, since one under the C5VRX name would
+  read as an official release (`assets/BRANDING.md`).
 - Keep its concurrency group separated by event type and PR identity
   (`c5vrx5-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}`):
   a `github.ref`-only group let a merged PR's cleanup cancel the main build.
-- `.github/workflows/pr-channel-cleanup.yml` deletes every `c5vrx5-pr-<number>`
-  release whose PR is no longer open. It sweeps on `pull_request_target` close
-  (no path filter, runs despite merge conflicts, never checks out PR code),
-  hourly and manually. A per-PR cleanup on the build's `pull_request` close
-  event is not reliable: GitHub does not deliver it for PRs with merge conflicts
-  or outside the path filter, which would leave closed-PR channels lingering.
 
 The former C5VRX-3 Production CI (semantic `v3.x` releases, `pr-N`), the
 C5VRX-4 alpha workflow and the PlatformIO workflow were retired with their

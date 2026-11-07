@@ -196,3 +196,10 @@ Receive engine: **C5VRX** by Twotoz and the C5VRX contributors —
 invite on the website). Reused material keeps its original copyright, license
 and credits; see `AGENTS.md` for the reuse policy and `assets/BRANDING.md` for
 branding terms.
+
+C5VRX-5 builds on C5VRX-2..4 (the continuous MODEM_DIAG to BitScrambler video path,
+Direct Gain V3-V5, the PAIR schedule and the U85Q study of PR #190), on zerowidth/C5VRX
+PR #3 (interference-burst gate, sampling-phase probe, off-grid channel tuning), on Louis
+Hitchcock's staged overload recovery (C5VRX #182/#184), and on ESPARGOS esp-sdr
+(GPL-3.0) for the C5 RX filter control. Espressif supplied the GDMA EOF fix
+(espressif/esp-idf#19091).

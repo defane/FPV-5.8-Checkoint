@@ -1,6 +1,7 @@
 # Assets
 
-Logos and photos in this folder belong to C5VRX (see `BRANDING.md`).
+The C5VRX name and logos are not under the GPL (see `BRANDING.md`), so this derivative
+carries no C5VRX logo or photo.
 
 ## Checkpoint coin sound
 
