@@ -25,7 +25,7 @@ CX = BW / 2                  # axis
 YG = 16.0                    # edge of the ground plane (the reflector)
 W50 = 3.0                    # 50 ohm microstrip
 W100 = 0.7                   # the balun's 100 ohm branches
-YT = 8.0                     # T junction
+YT = 9.5                     # T junction, past the PI
 YDRV = YG + 9.5              # dipole
 WD = 1.5                     # width of the dipole and directors
 L_ARM = 9.5                  # length of one arm
@@ -33,9 +33,13 @@ GAP = 3.0                    # the dipole's centre gap (= CPS spacing)
 L_DIR = 16.5
 YDIR = [YDRV + 9.0, YDRV + 18.0]
 XLOOP = 26.1                 # reach of the balun's delay (~lambda_g/2)
-YLOOP = 12.0
+YLOOP = YT + 4.0
 EDGE = 0.3                   # ground plane to the left and right board edges
 SILK = 1.2                   # text size of the spec block
+SMA_SPAN = 6.0               # outer span of the edge-launch SMA's ground legs (measured)
+SMA_GAP = 0.4                # copper gap between the line and a ground pad
+SMA_LEN = 5.0                # ground pad length from the board edge
+SMA_PIN = 1.27               # the SMA's centre pin width: 0.050", the usual one, until measured
 
 def r(x1, y1, x2, y2):
     return (min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2))
@@ -44,13 +48,16 @@ xl_in, xr_in = CX - GAP / 2, CX + GAP / 2          # 15.5 / 18.5
 h = W100 / 2
 top = []
 # --- 50 ohm microstrip, cut for the PI's series 0402 ---
-YS = 5.0   # centre of the series part
+YS = SMA_LEN + 2.1   # centre of the series part, past the SMA's pads
+Y1, Y2 = YS - 1.3, YS + 1.3   # the two shunts
 top += [r(xl_in, 0, xr_in, YS - 0.25), r(xl_in, YS + 0.25, xr_in, YT + h)]
 # --- the PI's shunts (DNP): a pad on the line, a ground pad with a via ---
-top += [r(xl_in - 0.6, 2.7, xl_in, 3.3), r(13.0, 2.6, 14.4, 3.4)]          # shunt, SMA side
-top += [r(xr_in, 6.0, xr_in + 0.6, 6.6), r(19.6, 5.9, 21.0, 6.7)]          # shunt, balun side
-# --- ground pads of the edge-launch SMA ---
-top += [r(10.0, 0, 12.0, 5.0), r(22.0, 0, 24.0, 5.0)]
+top += [r(xl_in - 0.6, Y1 - 0.3, xl_in, Y1 + 0.3), r(13.0, Y1 - 0.4, 14.4, Y1 + 0.4)]   # shunt, SMA side
+top += [r(xr_in, Y2 - 0.3, xr_in + 0.6, Y2 + 0.3), r(19.6, Y2 - 0.4, 21.0, Y2 + 0.4)]   # shunt, balun side
+# --- ground pads of the edge-launch SMA, on both sides: a leg up to 1.1 mm wide lands on them ---
+SMA_L = r(CX - SMA_SPAN / 2 - SMA_GAP, 0, xl_in - SMA_GAP, SMA_LEN)
+SMA_R = r(xr_in + SMA_GAP, 0, CX + SMA_SPAN / 2 + SMA_GAP, SMA_LEN)
+top += [SMA_L, SMA_R]
 # --- balun: direct left branch ---
 top += [r(xl_in - W100, YT - h, xl_in, YDRV - WD / 2)]
 # --- balun: right branch, with the delay ---
@@ -67,14 +74,16 @@ for y in YDIR:
 
 bot = [r(EDGE, 0, BW - EDGE, YG)]                      # ground = reflector
 
-fmask = [r(xl_in, 0, xr_in, 4.0),                          # SMA centre pin
-         r(10.0, 0, 12.0, 5.0), r(22.0, 0, 24.0, 5.0),     # SMA grounds
+# The centre pin solders on a strip of the 3 mm line, not all of it: the mask keeps the
+# solder away from the ground pads, and the line keeps its 50 ohm width.
+fmask = [r(CX - SMA_PIN / 2 - 0.2, 0, CX + SMA_PIN / 2 + 0.2, 4.0),   # SMA centre pin
+         SMA_L, SMA_R,                                     # SMA grounds
          r(16.6, YS - 0.85, 17.4, YS - 0.25), r(16.6, YS + 0.25, 17.4, YS + 0.85),  # series 0402
-         r(14.9, 2.7, 15.5, 3.3), r(13.8, 2.7, 14.4, 3.3),  # shunt 1
-         r(18.5, 6.0, 19.1, 6.6), r(19.6, 6.0, 20.2, 6.6)]  # shunt 2
-bmask = [r(10.0, 0, 12.0, 5.0), r(22.0, 0, 24.0, 5.0)]
+         r(14.9, Y1 - 0.3, 15.5, Y1 + 0.3), r(13.8, Y1 - 0.3, 14.4, Y1 + 0.3),  # shunt 1
+         r(18.5, Y2 - 0.3, 19.1, Y2 + 0.3), r(19.6, Y2 - 0.3, 20.2, Y2 + 0.3)]  # shunt 2
+bmask = [SMA_L, SMA_R]
 
-vias = [(13.4, 3.0), (20.6, 6.3), (11.0, 1.5), (11.0, 3.5), (23.0, 1.5), (23.0, 3.5)]
+vias = [(13.4, Y1), (20.6, Y2)] + [((p[0] + p[2]) / 2, y) for p in (SMA_L, SMA_R) for y in (1.5, 3.5)]
 VIA_DRILL = 0.3
 
 def c(v):  # 4.6 format, in mm
@@ -178,4 +187,38 @@ if shutil.which("rsvg-convert"):
     subprocess.run(["rsvg-convert", "-z", "16", "-b", "white", "-o", str(HERE / "qyagi58.png"), str(svg)], check=True)
 else:
     print("no rsvg-convert: the PNG preview is not updated")
+# A vector print at actual size, so the real connector can be laid on it. Not from the SVG:
+# its filters become a 72 dpi image in a PDF. A4, with a bar to check the printer's scale.
+from matplotlib.figure import Figure
+from matplotlib.patches import Circle, Polygon, Rectangle
+
+PAGE_W, PAGE_H = 210.0, 297.0
+OX, OY = (PAGE_W - BW) / 2, PAGE_H - 50.0 - BH           # the board's bottom left on the page
+fig = Figure(figsize=(PAGE_W / 25.4, PAGE_H / 25.4))
+ax = fig.add_axes((0, 0, 1, 1))
+ax.set_xlim(0, PAGE_W)
+ax.set_ylim(0, PAGE_H)
+ax.axis("off")
+
+
+def box(p, **kw):
+    ax.add_patch(Rectangle((OX + p[0], OY + p[1]), p[2] - p[0], p[3] - p[1], **kw))
+
+
+box((0, 0, BW, BH), fill=False, lw=0.4, ec="black")
+for p in top:
+    box(p, fc="0.8", ec="none")
+for p in fmask:
+    box(p, fc="0.45", ec="none")                         # bare copper: where parts solder
+for x, y in vias:
+    ax.add_patch(Circle((OX + x, OY + y), VIA_DRILL / 2, fc="white", ec="none"))
+sign = 1 if sum(area(p) for p in silk) > 0 else -1
+for p in sorted(silk, key=lambda p: area(p) * sign <= 0):   # outlines, then the counters
+    ax.add_patch(Polygon([(OX + x, OY + y) for x, y in p], fc="black" if area(p) * sign > 0 else "white", ec="none"))
+ax.plot([OX, OX + 50], [OY - 15, OY - 15], color="black", lw=0.8)
+for k in range(6):
+    ax.plot([OX + 10 * k] * 2, [OY - 16.5, OY - 13.5], color="black", lw=0.6)
+ax.text(OX, OY - 22, "This bar is 50 mm long: if not, print again at actual size (100 %).", fontsize=9)
+ax.text(OX, OY + BH + 6, f"qyagi58 {VERSION}, top side, actual size", fontsize=10)
+fig.savefig(HERE / "qyagi58-1to1.pdf", metadata={"Creator": None, "Producer": None, "CreationDate": None})
 print("ok", ZIP.name, f"{BW:g} x {BH:g} mm", sorted(files))

@@ -11,16 +11,19 @@ value, and the gain is unknown, which is why the silkscreen does not state one.
 
 To order: [`../gerbers/qyagi58-v2-gerbers.zip`](../gerbers/qyagi58-v2-gerbers.zip), 2 layers,
 FR-4, 1.6 mm, 1 oz copper, 34 × 47 mm.
+JLCPCB canceled both V1 and V2 (see Versions): use another fab, or ask them why before sending
+it there again.
 
 Its parts are in [`../BOM.csv`](../BOM.csv). To use it on a gate, take an IPEX to SMA lead to the C5-Zero's IPEX connector, with `K` then
 `i` on the bench or `CONFIG_CHECKPOINT_ANTENNA_IPEX=y`, then recalibrate (`docs/bench.md`).
 
 ## Versions
 
-This is **V2**, the design below. V1 is already on order: measure it before ordering V2, since
-what it shows may change V2's dimensions. It has no version on its silkscreen, and
-[`../gerbers/qyagi58-v1-gerbers.zip`](../gerbers/qyagi58-v1-gerbers.zip) is kept as the record
-of what was ordered, not to order again.
+This is **V2**, the design below, and the version to order. Neither version has been built:
+JLCPCB canceled both orders after its internal compliance assessment, without giving a reason.
+V1's zip,
+[`../gerbers/qyagi58-v1-gerbers.zip`](../gerbers/qyagi58-v1-gerbers.zip), only records that
+design: do not order it.
 
 | | V1 | V2 |
 | --- | --- | --- |
@@ -28,8 +31,12 @@ of what was ordered, not to order again.
 | `EDGE` (ground plane to the side edges) | 0, on the outline | 0.3 mm |
 | `SILK` (spec block) | size 1.0, capitals 0.73 mm | size 1.2, capitals 0.87 mm |
 | Silkscreen text | `50 Ω · pol. linéaire`, no version | `50 Ω · linear pol.`, `v2` in the title |
+| SMA ground pads | generic, 2 × 5 mm at x = 10-12 and 22-24 | for a 6.0 mm leg span, 1.5 × 5 mm, 0.4 mm off the line |
+| SMA centre pin | the whole 3 mm line bare | a 1.67 mm bare strip |
+| PI and T junction | series at y = 5, T at y = 8 | series at y = 7.1, T at y = 9.5: the pads moved in |
 
-Everything else is the same. The dipole and directors did not change, so V1 measures them too.
+Everything else is the same. V2 changed after its canceled order: as no board was made, it
+keeps its name.
 After an order, bump `VERSION` in the script before the next change.
 
 ## Design
@@ -40,11 +47,14 @@ corner and the antenna radiates towards +Y.
 - **Back:** ground plane from y = 0 to 16 mm, 0.3 mm in from the left and right edges. Its
   top edge is the reflector.
 - **Front, bottom to top:**
-  - a 3 mm wide 50 Ω microstrip from an edge-launch SMA;
-  - a PI footprint in 0402 on that line: the series part at y = 5 mm, where the line is
+  - a 3 mm wide 50 Ω microstrip from an edge-launch SMA, whose ground legs land on a pad on
+    each face, either side of the line. Its centre pin solders on a 1.67 mm strip of the line
+    (`SMA_PIN` 1.27 mm, the usual width, + 0.2 mm each side): the rest of the line stays under
+    the mask, away from the ground pads;
+  - a PI footprint in 0402 on that line: the series part at y = 7.1 mm, where the line is
     cut, **so it needs at least a 0 Ω**, and two shunts left unfitted, with a via to ground;
-  - a T junction at y = 8 mm into two 0.7 mm, 100 Ω branches. The right one detours to
-    x = 26.1, y = 12 for λg/2 of extra length: that is the 180° balun. Past the ground
+  - a T junction at y = 9.5 mm into two 0.7 mm, 100 Ω branches. The right one detours to
+    x = 26.1, y = 13.5 for λg/2 of extra length: that is the 180° balun. Past the ground
     edge the two branches become a CPS line, 3 mm apart;
   - the driven dipole at y = 25.5 mm: two 9.5 mm arms, a 3 mm gap, 22 mm overall, 1.5 mm wide;
   - two 16.5 × 1.5 mm directors at y = 34.5 and 43.5 mm.
@@ -61,8 +71,10 @@ corner and the antenna radiates towards +Y.
 3. **Silkscreen size.** The spec block is at size 1.2, so its capitals are 0.87 mm tall and it
    ends at x = 13.3, clear of the left branch at 14.8. Check that against the fab's minimum.
    Capitals of 1 mm need size 1.37, which runs into the branch, so the block would have to move.
-4. **SMA footprint.** The ground pads (2 × 5 mm at x = 10-12 and 22-24) are generic: fit them
-   to the real connector.
+4. **SMA footprint.** Fitted to an edge-launch SMA whose ground legs span 6.0 mm outside
+   (`SMA_SPAN`, measured on the connector at hand). Each pad runs from 0.4 mm off the line to
+   0.4 mm past the leg, so it takes legs up to 1.1 mm wide. Lay the connector on
+   `qyagi58-1to1.pdf` printed at actual size before ordering (its 50 mm bar checks the scale).
 5. **Tuning variants.** Dipole arms at ±0.3 mm, panelised, to choose from with a VNA.
 6. **Gain on the silkscreen:** only once measured.
 7. **Copper on the outline.** The ground plane still reaches the bottom edge, as do the
@@ -74,7 +86,7 @@ corner and the antenna radiates towards +Y.
 
 [`gen_qyagi.py`](gen_qyagi.py) is the source: change its parameters, not the Gerbers. Each run
 writes the zip, reads it back with gerbonara, fails if a layer, the drill file or the board size
-does not come back, and renders `qyagi58.svg` and `qyagi58.png`. Look at the render after each
+does not come back, and renders `qyagi58.svg`, `qyagi58.png` and `qyagi58-1to1.pdf`. Look at the render after each
 change.
 
 ```sh
