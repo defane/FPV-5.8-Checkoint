@@ -55,3 +55,6 @@ assets/coin_source.mp3
 # SolidCraft: the previous save, and the lock (host and user names) kept while a design is open.
 *.sc.bak
 .*~*.sc.lock*
+
+# Local scratch files dropped by hand (sources, downloads), never versioned.
+tmp/
