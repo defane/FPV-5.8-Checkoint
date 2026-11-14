@@ -99,6 +99,12 @@ they change nothing.
 [`antenna/`](antenna/README.md) holds a directive 5.8 GHz quasi-Yagi on FR-4, a separate board
 that reaches a C5-Zero through its IPEX connector. It has not been simulated or built.
 
+## Enclosure
+
+[`enclosure/`](enclosure/README.md) holds a 3D-printed box for a master set, with its LiPo
+cut-off, DC-DC converter and speaker, and an arm that points the antenna in 8 directions. Its
+source is a SolidCraft design. It has not been printed yet.
+
 ## Regenerating
 
 [`generate_boards.py`](generate_boards.py) is the source of the boards: edit it, not the KiCad

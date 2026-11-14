@@ -15,8 +15,27 @@ master,,4,Male pin header 1x9 2.54 mm,through hole,yes,any,,not needed with -M m
 master,,1,Male pin header 1x7 2.54 mm,through hole,yes,any,,usually supplied with the breakout
 master,,1,Speaker 4 Ohm 3 W,wires to the breakout's terminal,yes,any,,
 master,J1 J2,2,Power wire 22 AWG (or a 2-pin 5.08 mm terminal block),1.5 mm hole,yes,any,,4.6 to 5.5 V 2 A
-master,H1 H2 H3 H4,4,M3 screw,3.2 mm hole,optional,any,,
+master,H1 H2 H3 H4,4,M3 screw,3.2 mm hole,yes,any,,"into the plate's inserts in the enclosure, 6 to 8 mm long"
 antenna,,1,Edge-launch SMA jack for a 1.6 mm board,ground legs spanning 6.0 mm outside,yes,any,,each leg up to 1.1 mm wide: check it on the 1:1 print
 antenna,,1,Series link 0 Ohm,0402,yes,LCSC,C17168,required: the line is cut there
 antenna,,2,PI shunts,0402,no,,,left unfitted until tuning
-antenna,,1,IPEX to SMA lead rated to 6 GHz,to the C5-Zero's IPEX connector,yes,any,,the SMA end must mate with the antenna's jack
+antenna,,1,IPEX to SMA lead rated to 6 GHz,to the C5-Zero's IPEX connector,yes,any,,"without the enclosure; in it, the enclosure's pigtail and coax replace it"
+power,,1,LiPo low-voltage cut-off board with display and 2 buttons,"56 x 42.2 x 20 mm, 4 corner holes",yes,any,,"terminals up, display and buttons bottom right"
+power,,1,DC-DC buck converter,"43.6 x 21 x 15 mm, 2 holes on a diagonal",yes,any,,set it to 5.0 V before wiring the boards; 2 A for a master
+power,,1,XT60E-M panel-mount plug,"12 x 8 mm nose, M2.5 screws 20 mm apart",yes,AMASS,XT60E-M,the LiPo input
+power,,2,M2.5 x 8 screw and nut,,yes,any,,XT60E-M
+enclosure,,1,Box,print/box.3mf,yes,"printed, PETG",,print one plate first to check the 4.2 mm insert holes
+enclosure,,1,Lid,print/lid.3mf,yes,"printed, PETG",,
+enclosure,,3,"Plates: cut-off, DC-DC, master",print/plate-*.3mf,yes,"printed, PETG",,one file each
+enclosure,,2,Button pusher,print/button-pusher-x2.3mf,yes,"printed, PETG",,print it twice
+enclosure,,1,Dial post,print/dial-post.3mf,yes,"printed, PETG",,
+enclosure,,1,Antenna arm,print/antenna-arm.3mf,yes,"printed, PETG",,
+enclosure,,2,"Antenna clamp jaws: left, right",print/antenna-clamp-*.3mf,yes,"printed, PETG",,one file each
+enclosure,,16,M3 heat-set insert M3x5x5,"5 mm outside, 5 mm long",yes,any,,"10 plates, 4 lid, 2 dial post; 4.2 mm holes"
+enclosure,,1,M3 heat-set insert M3x6x5,"5 mm outside, 6 mm long",yes,any,,"the arm screw, in the dial post"
+enclosure,,6,M3 x 6 to 8 screw,,yes,any,,cut-off and DC-DC on their plates
+enclosure,,6,M3 x 8 screw,,yes,any,,"4 lid, 2 dial post from inside the box"
+enclosure,,1,M3 x 10 screw and washer,,yes,any,,the arm on the dial post
+enclosure,,2,M3 x 18 screw and nut,,yes,any,,the antenna clamps; the nuts sit in the arm
+enclosure,,1,IPEX to SMA bulkhead pigtail rated to 6 GHz,"6 mm thread 10 mm long, 8 mm nut",yes,any,,"SMA, not RP-SMA: from the C5-Zero to the right wall"
+enclosure,,1,Coax SMA male to SMA male rated to 6 GHz,up to 150 mm,yes,any,,wall to antenna; its plug on the wall must stand under 20 mm (a right-angle one clears the arm)
