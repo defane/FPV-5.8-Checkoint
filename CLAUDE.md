@@ -54,7 +54,7 @@ firmware/node/      ESP32-C3 node bridge (UART + ESP-NOW relay, degraded Wi-Fi w
 firmware/master/    ESP32-C6 master (UART + ESP-NOW hub + speaker + admin web + timing)
 hardware/           carrier PCBs, node (C5+C3) and master (C5+C6+amp): generator, KiCad files, Gerbers
 hardware/antenna/   5.8 GHz quasi-Yagi: gen_qyagi.py is its source, not simulated or built yet
-hardware/enclosure/ 3D-printed master box: enclosure.sc (SolidCraft, parametric) is its source, print/ its 3MF parts
+hardware/enclosure/ 3D-printed node/master box: enclosure.sc (SolidCraft, a configuration per set) is its source, print/ its 3MF parts
 ```
 
 The console/boot calls into checkpoint are kept without a circular dependency

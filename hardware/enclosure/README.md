@@ -1,7 +1,7 @@
 # Enclosure
 
-A 3D-printed box for a master set: the C5 + C6 carrier, its speaker, a LiPo cut-off and a
-DC-DC converter, with the antenna on an arm outside.
+A 3D-printed box for a node set (C5 + C3 carrier) or a master set (C5 + C6 carrier and its
+speaker), with a LiPo cut-off and a DC-DC converter, and the antenna on an arm outside.
 
 ![enclosure](enclosure.png)
 
@@ -14,29 +14,42 @@ and no support needed, but several dimensions come from a photo or are assumed (
 | File | What |
 | --- | --- |
 | [`enclosure.sc`](enclosure.sc) | the source: a [SolidCraft](https://github.com/tangency-labs/solidcraft) 0.41 design where every dimension is a named parameter with a comment |
-| [`print/`](print/) | the parts to print, as 3MF, each already laid on its print face |
+| [`print/common/`](print/common/) | the parts both sets share: plates 1 and 2, button pushers, dial post, arm, clamp jaws |
+| [`print/master/`](print/master/), [`print/node/`](print/node/) | the box, the lid and plate 3 of each set |
 
-After a change, export each printed body again with "lay on print faces": their print faces
-are set in the design. The envelopes of the modules, the antenna and its SMA jack are
-references, not parts.
+Every 3MF is already laid on its print face.
+
+The design has two configurations, `master` and `node`. They differ in:
+
+- **the carrier on plate 3:** 79 or 57 mm long (`carrier_l`);
+- **the speaker:** its frame and grille, master only;
+- **the room behind plate 3** (`back_room`): the node's box is 4.7 mm shorter.
+
+The box keeps the same width for both. A narrower node box would put the cut-off against the
+lid columns and the XT60.
+
+After a change, activate each configuration and export its printed bodies again, with "lay on
+print faces": their print faces are set in the design. The envelopes of the modules, the
+antenna and its SMA jack are references, not parts.
 
 ## Layout
 
-Inside 90 × 103 × 64 mm, outside 95 × 108 × 70 mm with the lid, without the arm.
+Inside 90 × 103 × 64 mm for a master (98.3 mm deep for a node), outside 95 × 108 × 70 mm with
+the lid (103.3 mm deep for a node), without the arm.
 
 - **Plates:** three of them slide down rails, front to back:
   1. the cut-off, its display and buttons facing the front window;
   2. the DC-DC converter;
-  3. the master carrier, its USB-C at the top, reachable with the lid off.
+  3. the carrier, its USB-C at the top, reachable with the lid off.
 
   Wires pass from one plate to the next through the notches at their top.
 - **Walls:**
   - front: a recess brings the window to 1 mm from the display, and two printed pushers
     reach the cut-off's buttons;
   - left: the XT60E-M for the LiPo;
-  - right: the SMA bulkhead under the master carrier, and the dial of the antenna arm;
-  - back: the speaker in its frame (28 × 31 mm, 15 mm deep), behind a grille.
-- **Vents:** grilles low and high, on both sides of the DC-DC and master compartments.
+  - right: the SMA bulkhead under the carrier, and the dial of the antenna arm;
+  - back, master only: the speaker in its frame (28 × 31 mm, 15 mm deep), behind a grille.
+- **Vents:** grilles low and high, on both sides of the DC-DC and carrier compartments.
 - **Lid:** 4 M3 screws into inserts; it also holds the plates down.
 
 ## Antenna arm
@@ -63,13 +76,14 @@ in its 4.2 mm holes (`insert_d`).
 
 1. Set the heat-set inserts (16 M3x5x5, 1 M3x6x5 in the dial post).
 2. Screw the dial post on from inside the box (2 M3 x 8), before plate 1 goes in.
-3. Fit the XT60E-M (2 M2.5 screws and nuts), the SMA bulkhead and the speaker.
+3. Fit the XT60E-M (2 M2.5 screws and nuts), the SMA bulkhead and, on a master, the speaker.
 4. Screw each module on its plate. Put the two pushers in their holes, then slide plate 1 in,
    then plates 2 and 3.
 5. Wire through the plate notches, then screw the lid on (4 M3 x 8).
 6. Clamp the antenna (2 M3 x 18, nuts in the arm), fit the arm (M3 x 10 and a washer).
 
-The parts and screws are listed in [`../BOM.csv`](../BOM.csv), rows `enclosure` and `power`.
+The parts and screws are listed in [`../BOM.csv`](../BOM.csv), rows `enclosure` and `power`
+(one set of each per box).
 
 ## Before printing
 
