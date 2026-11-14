@@ -62,9 +62,9 @@ the lid (103.3 mm deep for a node), without the arm.
 - **Pointing down:** the antenna then reaches 36 mm below the bottom of the box, so raise the box.
 - **Coax:** up to 150 mm from the bulkhead to the antenna. Its plug on the wall must stand
   under 20 mm, or the antenna hits it when pointing back. A right-angle plug clears it.
-- **Firmware:** build the detector with `CONFIG_CHECKPOINT_ANTENNA_IPEX=y`, then calibrate
-  again with every VTX off. Without it, the C5 listens on its onboard antenna, inside the
-  box.
+- **Firmware:** flash the C5 with `make flash FW=detector-ipex` (`CONFIG_CHECKPOINT_ANTENNA_IPEX=y`),
+  then calibrate again with every VTX off. Without it, the C5 listens on its onboard antenna,
+  inside the box.
 
 ## Printing
 

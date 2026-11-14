@@ -15,7 +15,8 @@ JLCPCB canceled both V1 and V2 (see Versions): use another fab, or ask them why 
 it there again.
 
 Its parts are in [`../BOM.csv`](../BOM.csv). To use it on a gate, take an IPEX to SMA lead to the C5-Zero's IPEX connector, with `K` then
-`i` on the bench or `CONFIG_CHECKPOINT_ANTENNA_IPEX=y`, then recalibrate (`docs/bench.md`).
+`i` on the bench or the `detector-ipex` firmware (`CONFIG_CHECKPOINT_ANTENNA_IPEX=y`), then
+recalibrate (`docs/bench.md`).
 
 ## Versions
 

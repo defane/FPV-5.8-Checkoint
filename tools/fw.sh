@@ -28,7 +28,7 @@ IDF_EXPORT="${IDF_EXPORT:-$HOME/esp/esp-idf-v6.0.2/export.sh}"
 # the base RAM/Wi-Fi/PHY tuning is never duplicated. To add a variant: drop a
 # resolve() case below + a sdkconfig.<tag>.defaults in the role dir, and list it
 # in FIRMWARES.
-FIRMWARES="detector detector-xiao-c5 detector-wave-c5-lcd node master master-wave-c5"
+FIRMWARES="detector detector-ipex detector-xiao-c5 detector-wave-c5-lcd node master master-wave-c5"
 
 # resolve <name> -> sets DIR CHIP SDKCFG DEFAULTS BUILDDIR BIN LABEL
 resolve() {
@@ -37,6 +37,11 @@ resolve() {
         detector)
             DIR=firmware/detector; CHIP=esp32c5; BIN=detector-c5.bin
             LABEL="RF detector  -- ESP32-C5-Zero / C5-LCD, 4 MB no-PSRAM (default)" ;;
+        detector-ipex)
+            DIR=firmware/detector; CHIP=esp32c5; BIN=detector-c5.bin
+            SDKCFG=sdkconfig.ipex; BUILDDIR=build-ipex
+            DEFAULTS="sdkconfig.defaults;sdkconfig.ipex.defaults"
+            LABEL="RF detector  -- ESP32-C5-Zero on its IPEX connector (external antenna)" ;;
         detector-xiao-c5)
             DIR=firmware/detector; CHIP=esp32c5; BIN=detector-c5.bin
             SDKCFG=sdkconfig.xiao-c5; BUILDDIR=build-xiao-c5
