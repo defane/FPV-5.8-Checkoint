@@ -3,7 +3,9 @@
  * firmware/test/test_dsp/test_main.c), then psd_compute and the band level on synthetic
  * captures, the moment-based IQ correction, psd_moments_add/psd_iq_irr_db and saturation, then
  * captures whose segments differ against a double-precision Welch reference (block floating
- * point), the DC-guard fill, and no IQ estimate from clipped captures after a reset.
+ * point), the DC-guard fill, no IQ estimate from clipped captures after a reset, then captures
+ * with a phase error and the LO's DC offset (the correction's phase term, the centred moments,
+ * the state's tracking and the health DC).
  * These check the formulas and the estimators, not the hardware. Build/run (see CLAUDE.md):
  *   cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/sdr_rx -I../components/sdr_rx/include test_sdr_dsp.c \
  *     ../components/sdr_rx/sdr_psd.c ../components/sdr_rx/sdr_level.c -lm -o /tmp/t && /tmp/t
@@ -61,6 +63,21 @@ static void synth(uint32_t *w, unsigned n, double amp, double f_hz, double phase
     }
 }
 
+/* A raw capture with the analog path's errors: the tone s = A e^{j(2 pi f t + phase)}, then
+ * I = Re s + dci and Q = g (cos(phi) Im s + sin(phi) Re s) + dcq (gain error g, phase error phi,
+ * the LO's DC offset in counts), each plus Gaussian noise of rms `noise`. */
+static void synth_iq(uint32_t *w, unsigned n, double amp, double f_hz, double phase, double g, double phi_deg,
+                     double dci, double dcq, double noise) {
+    const double phi = phi_deg * M_PI / 180.0;
+    for (unsigned j = 0; j < n; j++) {
+        const double a = 2.0 * M_PI * f_hz * j / RATE + phase;
+        const double re = amp * cos(a), im = amp * sin(a);
+        const double i = re + noise * gauss() + dci;
+        const double q = g * (cos(phi) * im + sin(phi) * re) + noise * gauss() + dcq;
+        w[j] = pack(clamp10(i), clamp10(q));
+    }
+}
+
 static _Alignas(16) uint8_t g_ws[PSD_WS_BYTES];
 static uint32_t g_cap[NCAP];
 
@@ -73,6 +90,10 @@ static const sdr_band_t LOW = {13, 20};   /* -19 MHz +-5 */
 static const sdr_band_t HIGH = {43, 50};  /* +18 MHz +-5 */
 static int16_t level(const psd_result_t *r, sdr_band_t b, uint8_t *flags) {
     return sdr_band_level_qdb(r, b, sdr_level_scale_q8(r), flags);
+}
+/* An R1 tone's image in R2's window, dB under the tone. */
+static double image_db(const psd_result_t *r) {
+    return (level(r, HIGH, NULL) - level(r, LOW, NULL)) / (double)SDR_QDB_PER_DB;
 }
 
 /* Error of fft_r4_sc16 vs the exact X/N, in LSB: rms and mean (bias). */
@@ -453,6 +474,79 @@ static void test_iq_no_estimate(void) {
     CHECK(silent.init && !(silent.ii > 0.0f) && !r.iq_applied, "a silent path has an estimate (ii 0), not applied");
 }
 
+/* What the PHY's own IQ calibration leaves, and the LO's leakage (sdr_rx tolerates up to
+ * CONFIG_SDR_RX_DC_CAL_NEEDED = 30 counts): the correction removes a phase error too, the moments
+ * are centred (a DC offset is no imbalance), the per-LO state follows the signal after a reset,
+ * and the health DC reads the capture's mean. */
+static void test_iq_errors(void) {
+    psd_result_t r;
+    /* A phase error alone (5 deg, gain 1), 8 captures: the correction's phase term puts the image
+     * >= 45 dB under the tone (without it -27 dB, with its sign flipped -21 dB). */
+    psd_iq_t iq = {0};
+    seed(41);
+    for (int c = 0; c < 8; c++) {
+        synth_iq(g_cap, NCAP, 256, +19e6, 2.0 * M_PI * uni(), 1.0, 5.0, 0, 0, 0.5);
+        psd(g_cap, &iq, &r);
+    }
+    double img = image_db(&r);
+    printf("     phase error 5 deg: image %.1f dB\n", img);
+    CHECK(r.iq_applied && img <= -45.0, "IQ correction with a 5 deg phase error: image <= -45 dB after 8 captures");
+
+    /* The LO's DC offset (+14/-9 counts) on quiet noise (rms 3), gain 1.05, phase 3 deg: centred
+     * moments keep every estimate plausible (uncentred, every one is refused, which flags the LO
+     * iq_bad); a tone over that DC then has its image >= 45 dB under it. */
+    psd_iq_t dc = {0};
+    unsigned applied = 0;
+    seed(42);
+    for (int c = 0; c < 50; c++) {
+        synth_iq(g_cap, NCAP, 0, 0, 0, 1.05, 3.0, 14, -9, 3.0);
+        psd(g_cap, &dc, &r);
+        applied += r.iq_applied;
+    }
+    for (int c = 0; c < 8; c++) {
+        synth_iq(g_cap, NCAP, 256, +19e6, 2.0 * M_PI * uni(), 1.05, 3.0, 14, -9, 0.5);
+        psd(g_cap, &dc, &r);
+    }
+    img = image_db(&r);
+    printf("     DC +14/-9: %u/50 quiet estimates applied, then image %.1f dB\n", applied, img);
+    CHECK(applied == 50, "quiet captures with a +14/-9 count DC: every IQ estimate is applied (centred moments)");
+    CHECK(img <= -45.0, "a tone over that DC, gain 1.05, phase 3 deg: image <= -45 dB");
+
+    /* The FULL verify's moments of a balanced path with that DC (64 captures, rms 15): >= 35 dB
+     * as without it (uncentred they read ~14 dB, and every LO would be recalibrated). */
+    sdr_moments_t m = {0};
+    seed(43);
+    for (int c = 0; c < 64; c++) {
+        synth_iq(g_cap, NCAP, 0, 0, 0, 1.0, 0.0, 14, -9, 15.0);
+        psd_moments_add(g_cap, NCAP, NFFT, &m);
+    }
+    const psd_iq_t mean = psd_moments_mean(&m);
+    printf("     moments IRR, balanced with DC +14/-9: %.1f dB\n", (double)psd_iq_irr_db(&mean));
+    CHECK(psd_iq_irr_db(&mean) >= 35.0f, "psd_moments_add: a balanced path with a +14/-9 count DC reads >= 35 dB");
+
+    /* After a reset the first capture is quiet (ADC noise: an estimate close to identity), then a
+     * tone through a Q x1.2 path: the state follows it, the image is >= 45 dB under it after 30
+     * captures (a state frozen at its first estimate stays near the raw -21 dB: -29 dB here). */
+    psd_iq_t tr = {0};
+    seed(44);
+    synth_iq(g_cap, NCAP, 0, 0, 0, 1.0, 0.0, 0, 0, 3.0);
+    psd(g_cap, &tr, &r);
+    for (int c = 0; c < 30; c++) {
+        synth_iq(g_cap, NCAP, 256, +19e6, 2.0 * M_PI * uni(), 1.2, 0.0, 0, 0, 0.5);
+        psd(g_cap, &tr, &r);
+    }
+    img = image_db(&r);
+    printf("     tracking after a quiet first capture: image %.1f dB\n", img);
+    CHECK(img <= -45.0, "the IQ state follows the signal after a reset: image <= -45 dB after 30 captures");
+
+    /* The health DC (sdr_rx sums it per LO against DC_CAL_NEEDED): the capture's mean raw I/Q. */
+    seed(45);
+    synth_iq(g_cap, NCAP, 0, 0, 0, 1.0, 0.0, 14, -9, 3.0);
+    psd(g_cap, NULL, &r);
+    printf("     health DC: dc_i %.2f dc_q %.2f\n", (double)r.dc_i, (double)r.dc_q);
+    CHECK(fabsf(r.dc_i - 14.0f) < 0.5f && fabsf(r.dc_q + 9.0f) < 0.5f, "dc_i/dc_q read the capture's DC (+14/-9 counts)");
+}
+
 int main(void) {
     CHECK(psd_init(g_ws, sizeof(g_ws) - 1) == ESP_ERR_INVALID_SIZE, "psd_init refuses a short workspace");
     CHECK(psd_init(g_ws, sizeof(g_ws)) == ESP_OK, "psd_init on a PSD_WS_BYTES workspace");
@@ -464,6 +558,7 @@ int main(void) {
     test_saturation();
     test_segments();
     test_iq_no_estimate();
+    test_iq_errors();
     printf("%d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }
