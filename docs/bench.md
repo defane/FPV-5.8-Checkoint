@@ -30,7 +30,8 @@ Startup prints, in order:
 - `CHECKPOINT prefs=saved|defaults gain=40` (a C5VRX-era record reads `defaults`).
 - One `SDR cal lo=5677 ms=41 irr_db=37.4 verify_gain=60 tries=1 dc=6 sat=0` per LO: each
   LO is calibrated (~41 ms), then its image rejection is verified from 64 captures at a
-  temporary gain of 60, at least 30 dB or up to 3 calibrations (`tries`).
+  temporary gain of 60, at least 25 dB (`CONFIG_SDR_RX_IRR_MIN_DB`) or up to 3
+  calibrations (`tries`).
   `irr_db=skip_saturated` means too many clipped captures: a VTX too close, verify skipped;
   `irr_db=skip_faults` means the captures failed (8 failed captures end a verify try).
 - `SDR ready lo=5677,5751,5825,5899 gain=40 verify_tries=3 cal_ms=… boot_ms=… chip_rev=v…`
@@ -289,7 +290,7 @@ Report the `SDR cal`, `SDRBENCH`, `SDRRESIDUE`, `SDRIMAGE` and `SDRNOISE` lines 
 
 **B0, boot.** Flash, reset 5 times, `T` each time.
 - Pass: `SDR ready` within 2.0 s of the reset (0.5 s more if a verify retried); 4 `SDR cal`
-  lines with `irr_db` 30 or more and `tries` 3 or less; on `T`: `faults=0`, `heap_min` 20000
+  lines with `irr_db` 25 or more and `tries` 3 or less; on `T`: `faults=0`, `heap_min` 20000
   or more, `heap_ok=1`, `cal_needed=0`; no crash or `task_wdt` in 10 min; VTX on, its
   channel 20 dB or more over the others. Record the four `*_stack_free`.
 - Then the verify's positive control, in a build dir and sdkconfig of its own, so the
@@ -302,7 +303,7 @@ Report the `SDR cal`, `SDRBENCH`, `SDRRESIDUE`, `SDRIMAGE` and `SDRNOISE` lines 
   … verify_tries=1`: the first calibration is kept whatever it reads. Reboot 10 times; after
   each, `K` `x` on R1 (the floor run, then the VTX on R1), and record the pair
   (the boot `irr_db` of LO 5677, `K` `x`'s `irr_off_db`). Pass: every pair within 5 dB, and
-  every `irr_off_db` under 30 with an `irr_db` under 30. widscan58 saw about half of its
+  every `irr_off_db` under 25 with an `irr_db` under 25. widscan58 saw about half of its
   first calibrations bad, so some pairs should be. Afterwards reflash the normal build
   (`python tools/flash.py PORT`; its boot prints `verify_tries=3`) and delete
   `firmware/detector/build-verify1` and `firmware/detector/sdkconfig.verify1`.
