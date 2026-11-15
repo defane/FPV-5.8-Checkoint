@@ -1,7 +1,9 @@
 /* Host test for the sdr_rx DSP (components/sdr_rx): the radix-4 FFT kernel against a
  * double-precision DFT and metrics_db/metrics_code_q8 (after widscan58, CapnBry, a9fff97,
  * firmware/test/test_dsp/test_main.c), then psd_compute and the band level on synthetic
- * captures, the moment-based IQ correction, psd_moments_add/psd_iq_irr_db and saturation.
+ * captures, the moment-based IQ correction, psd_moments_add/psd_iq_irr_db and saturation, then
+ * captures whose segments differ against a double-precision Welch reference (block floating
+ * point), the DC-guard fill, and no IQ estimate from clipped captures after a reset.
  * These check the formulas and the estimators, not the hardware. Build/run (see CLAUDE.md):
  *   cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/sdr_rx -I../components/sdr_rx/include test_sdr_dsp.c \
  *     ../components/sdr_rx/sdr_psd.c ../components/sdr_rx/sdr_level.c -lm -o /tmp/t && /tmp/t
@@ -313,6 +315,144 @@ static void test_saturation(void) {
     CHECK(r.saturated == 0, "saturation: 510 and -511 are not rail hits");
 }
 
+/* Double-precision Welch reference of a band level, dBFS, with psd_compute's conventions: per
+ * segment (at most 4) the mean removed, a periodic Hann window, Q negated (the conjugation), the
+ * DFT, bins in natural order (nfft/2 is the LO); a full-scale complex tone puts 1 in its bin and
+ * the band sum is divided by the ENBW; masked bins (valid[k] == 0) are filled with the mean. */
+static double ref_band_db(const uint32_t *w, unsigned n, unsigned nfft, sdr_band_t b, const uint8_t *valid) {
+    static double p[256];
+    unsigned segs = n / nfft;
+    if (segs > 4) segs = 4;
+    double s1 = 0, s2 = 0;
+    for (unsigned j = 0; j < nfft; j++) {
+        const double h = 0.5 - 0.5 * cos(2 * M_PI * j / nfft);
+        s1 += h;
+        s2 += h * h;
+    }
+    memset(p, 0, sizeof(p));
+    for (unsigned s = 0; s < segs; s++) {
+        const uint32_t *seg = w + s * nfft;
+        double mi = 0, mq = 0;
+        for (unsigned j = 0; j < nfft; j++) {
+            mi += radio_word_i(seg[j]);
+            mq += radio_word_q(seg[j]);
+        }
+        mi /= nfft;
+        mq /= nfft;
+        for (unsigned k = 0; k < nfft; k++) {
+            double re = 0, im = 0;
+            for (unsigned j = 0; j < nfft; j++) {
+                const double h = 0.5 - 0.5 * cos(2 * M_PI * j / nfft);
+                const double i = h * (radio_word_i(seg[j]) - mi), q = -h * (radio_word_q(seg[j]) - mq);
+                const double a = -2 * M_PI * (double)((j * k) % nfft) / nfft;
+                re += i * cos(a) - q * sin(a);
+                im += i * sin(a) + q * cos(a);
+            }
+            p[(k + nfft / 2) % nfft] += re * re + im * im;
+        }
+    }
+    const double amp = RADIO_FULL_SCALE * s1, enbw = nfft * s2 / (s1 * s1);
+    double sum = 0;
+    unsigned used = 0, total = 0;
+    for (int k = b.r0; k <= b.r1; k++) {
+        total++;
+        if (valid[k]) {
+            sum += p[k];
+            used++;
+        }
+    }
+    if (used && used < total) sum = sum * total / used;
+    return 10 * log10(sum / (segs * amp * amp) / enbw);
+}
+
+/* The +-5 MHz window around offset_hz from the LO at nfft bins of 80 MHz. */
+static sdr_band_t band_at(unsigned nfft, double offset_hz) {
+    const double bin = RATE / nfft, c = nfft / 2 + offset_hz / bin, half = 5e6 / bin;
+    return (sdr_band_t){(int16_t)ceil(c - half), (int16_t)floor(c + half)};
+}
+
+/* Segments of one capture differ (a burst that starts or ends mid-capture): psd_compute's block
+ * floating point gives each segment its own input shift and rescales the accumulator when a
+ * later segment needs a coarser unit. Checked against the double-precision reference. */
+static void test_segments(void) {
+    static uint32_t cap[4 * 128];
+    double worst = 0, worst_weak = 0;
+    unsigned cases = 0;
+    for (unsigned nfft = 64; nfft <= 128; nfft *= 2) {
+        const sdr_band_t tone_band = band_at(nfft, -19e6), other_band = band_at(nfft, +18e6);
+        for (unsigned order = 0; order < 2; order++)
+            for (unsigned a = 0; a < 3; a++)
+                for (uint32_t s = 0; s < 4; s++) {
+                    const double amp = a == 0 ? 100.0 : a == 1 ? 250.0 : 400.0;
+                    seed(5000 + 97 * nfft + 31 * order + 7 * a + s);
+                    for (unsigned g = 0; g < 4; g++) {
+                        /* order 0: quiet first (the rescale), 1: strong first (finer later segments) */
+                        const bool strong = order == 0 ? g > 0 : g < 3;
+                        synth(cap + g * nfft, nfft, strong ? amp : 0.0, +19e6, 0.9 * g + 0.3 * s, 1.0, 1.0);
+                    }
+                    psd_result_t r;
+                    if (psd_compute(cap, 4 * nfft, nfft, 4, (float)RATE, true, 40e6f, 1, NULL, &r) != ESP_OK) {
+                        worst = 99;
+                        continue;
+                    }
+                    const int32_t sq8 = sdr_level_scale_q8(&r);
+                    const double tone = sdr_band_level_qdb(&r, tone_band, sq8, NULL) / (double)SDR_QDB_PER_DB;
+                    const double other = sdr_band_level_qdb(&r, other_band, sq8, NULL) / (double)SDR_QDB_PER_DB;
+                    const double d1 = fabs(tone - ref_band_db(cap, 4 * nfft, nfft, tone_band, r.valid));
+                    const double d2 = fabs(other - ref_band_db(cap, 4 * nfft, nfft, other_band, r.valid));
+                    if (d1 > worst) worst = d1;
+                    if (d2 > worst_weak) worst_weak = d2;
+                    cases++;
+                }
+    }
+    printf("     mixed segments: %u captures, tone window worst %.3f dB, other window worst %.3f dB\n", cases, worst,
+           worst_weak);
+    CHECK(worst <= 0.25, "mixed segments (quiet/strong, nfft 64 and 128): tone window within 0.25 dB of Welch");
+    CHECK(worst_weak <= 0.5, "mixed segments: the other window within 0.5 dB of Welch");
+
+    /* A window over the DC guard: its masked bins are filled with the mean of the others, so
+     * flat noise reads as in a window of the same width away from DC (one without the fill reads
+     * 10 log10(6/9) = -1.8 dB). Linear means over 200 captures. */
+    const sdr_band_t over_dc = {28, 36}, away = {40, 48};
+    double lin_dc = 0, lin_away = 0;
+    unsigned masked = 0;
+    seed(6000);
+    for (unsigned c = 0; c < 200; c++) {
+        synth(g_cap, NCAP, 0.0, 0.0, 0.0, 1.0, 20.0);
+        psd_result_t r;
+        psd(g_cap, NULL, &r);
+        uint8_t f = 0;
+        lin_dc += pow(10.0, level(&r, over_dc, &f) / (10.0 * SDR_QDB_PER_DB));
+        masked += f == SDR_RD_DC_MASKED;
+        lin_away += pow(10.0, level(&r, away, NULL) / (10.0 * SDR_QDB_PER_DB));
+    }
+    const double fill_db = 10 * log10(lin_dc / lin_away);
+    printf("     DC window vs away from DC, flat noise: %+.3f dB\n", fill_db);
+    CHECK(masked == 200 && fabs(fill_db) <= 0.5, "a window over the DC guard reads flat noise within 0.5 dB (fill)");
+}
+
+/* After a reset (sdr_rx's dsp_reset zeroes the states), captures that all clip leave no estimate:
+ * sdr_rx counts an LO as IQ-bad only from an estimate that exists (init) and is not applied. */
+static void test_iq_no_estimate(void) {
+    psd_iq_t iq = {0};
+    psd_result_t r;
+    bool none = true;
+    seed(31);
+    for (int c = 0; c < 20; c++) {
+        synth(g_cap, NCAP, 600.0, +19e6, 0.4 * c, 1.05, 4.0); /* over the rails: every capture clips */
+        psd(g_cap, &iq, &r);
+        none &= r.saturated > 0 && !iq.init && !r.iq_applied;
+    }
+    CHECK(none, "clipped captures after a reset: no IQ estimate (init 0), none applied");
+    synth(g_cap, NCAP, 200.0, +19e6, 0.1, 1.05, 4.0);
+    psd(g_cap, &iq, &r);
+    CHECK(r.saturated == 0 && iq.init && r.iq_applied, "the first unclipped capture makes and applies one");
+    psd_iq_t silent = {0};
+    for (unsigned j = 0; j < NCAP; j++) g_cap[j] = 0;
+    psd(g_cap, &silent, &r);
+    CHECK(silent.init && !(silent.ii > 0.0f) && !r.iq_applied, "a silent path has an estimate (ii 0), not applied");
+}
+
 int main(void) {
     CHECK(psd_init(g_ws, sizeof(g_ws) - 1) == ESP_ERR_INVALID_SIZE, "psd_init refuses a short workspace");
     CHECK(psd_init(g_ws, sizeof(g_ws)) == ESP_OK, "psd_init on a PSD_WS_BYTES workspace");
@@ -322,6 +462,8 @@ int main(void) {
     test_levels();
     test_irr();
     test_saturation();
+    test_segments();
+    test_iq_no_estimate();
     printf("%d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }

@@ -14,7 +14,8 @@
  * (requested code kept, clamped per apply; no librftest), CACHE-only recalibration (5 GHz) with a
  * per-LO recalibration, the bank layout of spec 2.3, radio_capture under the PHY lock with a
  * settle-wait out-param, split errors and a stale check after PHY tracking's recalibration, a
- * shutdown flag and the reboot; no spurs, caps, ONCE/EVERY, idle/sleep, regwatch or tune-skip API.
+ * temperature read before a full channel setup (tsens_settle), a shutdown flag and the reboot;
+ * no spurs, caps, ONCE/EVERY, idle/sleep, regwatch or tune-skip API.
  * This file keeps its GPL-3.0-or-later notice; the repository as a whole is GPL-3.0-only.
  *
  * Private libphy ABI used (re-verify at the next IDF bump; CMakeLists.txt pins the archive):
@@ -30,7 +31,8 @@
  *   +0/+1024 (temperature now / at the last calibration);
  * - +288 is load-bearing: pll_retune writes it, and PHY tracking's recalibration ends with
  *   phy_chip_set_chan(+288, +291), so the tracker retunes our LO rather than a stale one;
- * - the wrapped call sites (CMakeLists.txt): phy_set_rfpll_freq -> ets_delay_us(300),
+ * - the wrapped call sites (CMakeLists.txt): phy_set_rfpll_freq -> ets_delay_us(300) (and
+ *   every esp_rom_delay_us, its alias: tsens_settle keeps the sensor's 300 us out of a tune),
  *   phy_wr_rx_gain_mem -> phy_write_gain_mem, phy_set_chan_misc_new -> phy_wifi_set_tx_gain_new,
  *   phy_bb_init and phy_cal_param_track -> phy_set_rx_gain_cal_dc (3 calls each),
  *   phy_set_rx_gain_cal_dc/_iq -> phy_chip_set_chan_ana. target_power_backoff ->
@@ -43,6 +45,7 @@
 #include "esp_attr.h"
 #include "esp_phy_init.h"
 #include "esp_private/phy.h"
+#include "esp_private/sar_periph_ctrl.h"
 #include "esp_rom_sys.h"
 #include "esp_system.h"
 #include "esp_timer.h"
@@ -165,8 +168,20 @@ void radio_force_recal(void) {
  *   stock sequence had 2 off-frequency captures, raised-floor bursts).
  * - phy_wifi_set_tx_gain_new (~85 us): the TX gain table.
  * Spectra (floor, lines, DC) match the full sequence at 5677-5899 MHz;
- * PLAN.md, tune time on the C5. */
+ * PLAN.md, tune time on the C5.
+ * The wrapper gates on the value alone, and esp_rom_delay_us is a linker alias of
+ * ets_delay_us (esp32c5.rom.api.ld), so it resolves to the wrapper too: every 300 us
+ * delay while rx_tuning is skipped. Besides the PLL wait, a full channel setup has one
+ * more: phy_chip_set_chan reads the temperature sensor (phy_tsens_temp_read, into
+ * phy_param +0, which PHY tracking compares with +1024), and a read that switches the
+ * sensor's range waits 300 us before reading again (temperature_sensor_hal.c). tsens_settle()
+ * does that read just before, with its wait. */
 static volatile bool rx_tuning;
+
+/* Outside rx_tuning, under the PHY lock: any range switch happens here with its settle, so
+ * the read inside the channel setup ~0.1 ms later is in range. A register read otherwise. */
+static void tsens_settle(void) { (void)temp_sensor_get_raw_value(NULL); }
+
 extern void __real_ets_delay_us(uint32_t us);
 IRAM_ATTR void __wrap_ets_delay_us(uint32_t us) {
     if (rx_tuning && us == 300) return;
@@ -362,6 +377,7 @@ static IRAM_ATTR esp_err_t tune_locked(uint32_t lo_khz) {
         s_foreign_at_tune = c5_foreign_dc_count();
         return ESP_OK;
     }
+    if (full || !pll_only) tsens_settle();
     rx_tuning = true;
     if (full || !pll_only) {
         /* Channel setup rebuilds the gain table: record it for the PLL-only tunes. */
@@ -558,6 +574,7 @@ esp_err_t radio_borrow_cal(uint32_t lo_khz, uint32_t cal_from_khz) {
             const unsigned mhz = lo_khz / 1000u;
             cal_gen++;          /* no gain slot keeps a table built from the borrowed areas */
             calibrated_mhz = 0; /* any later tune restores the LO's own entry */
+            tsens_settle();
             rx_tuning = true;
             phy_set_chanfreq(mhz, CHANNEL_MODE);
             gain_mhz = mhz;

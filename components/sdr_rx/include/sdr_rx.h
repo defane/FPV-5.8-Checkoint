@@ -68,6 +68,7 @@ typedef struct {
     uint32_t tune_us_avg, tune_us_max, cap_us_avg, wait_us_avg, dsp_us_avg, dsp_us_max;
     uint16_t dc_max;                   /* worst |DC| (counts, max of I and Q means) over the plan's LOs */
     uint8_t iq_bad_mask;               /* LOs whose IQ estimate was implausible for most captures */
+    uint8_t cap_bad_mask;              /* LOs whose captures (or PSDs) failed for most of their hops */
     /* state */
     uint8_t gain, gain_max;
     uint8_t nhops;

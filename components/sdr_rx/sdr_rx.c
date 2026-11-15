@@ -35,15 +35,20 @@
 #define WINDOW_US 1000000          /* health window */
 #define CAL_NEEDED_WINDOWS 3u
 #define VERIFY_MIN_OK 32u          /* unsaturated captures a verify needs */
+#define VERIFY_MAX_ERRORS 4u       /* failed captures in a row that end a verify: no IRR to measure, and
+                                    * a dead dump (20 ms per timeout) must not run a recalibration into
+                                    * the task watchdog (~0.5 s for 4 LOs instead of ~5 s) */
 #define BENCH_NFFT 64u             /* sdr_bench_moments_add */
 
 _Static_assert(PSD_WS_BYTES <= SDR_BANK_PSD_BYTES, "psd workspace in the bank");
-_Static_assert(SDR_RX_MAX_HOPS <= 8u, "iq_bad_mask is 8 bits");
+_Static_assert(SDR_RX_MAX_HOPS <= 8u, "iq_bad_mask and cap_bad_mask are 8 bits");
 
 /* Per-LO sums of the health window. */
 typedef struct {
     float dc_i, dc_q;  /* sums of the captures' mean I/Q, counts */
-    uint32_t caps, iq_off;
+    uint32_t hops;     /* hops of this LO that advanced (every one but a stale capture's) */
+    uint32_t caps;     /* of them, with a capture and a PSD */
+    uint32_t iq_off;   /* of those, with an IQ estimate that was not applied (implausible) */
 } lo_window_t;
 
 /* Scan-task state (heap, sdr_rx_init). */
@@ -163,7 +168,9 @@ static uint32_t capture_dc(const uint32_t *w, unsigned n) {
 /* The FULL verify of one freshly calibrated LO (spec 2.8): at the verify gain, where the
  * receiver's noise is over the ADC's, plain I/Q moment sums of VERIFY_CAPTURES captures give
  * the raw path's image rejection; under IRR_MIN_DB, that LO is calibrated again (at most
- * VERIFY_TRIES calibrations). Returns false when no capture worked at all. */
+ * VERIFY_TRIES calibrations). VERIFY_MAX_ERRORS failed captures in a row end it (irr_db=
+ * skip_faults), so a dead dump costs ~0.1 s per LO whatever VERIFY_CAPTURES is. Returns false
+ * when no capture worked at all. */
 static bool verify_lo(engine_t *e, unsigned h, uint32_t cal_ms) {
     const uint32_t lo = e->plan.hop[h].lo_khz;
     unsigned tries = 1, ok = 0, sat = 0, errors = 0;
@@ -173,6 +180,7 @@ static bool verify_lo(engine_t *e, unsigned h, uint32_t cal_ms) {
         sdr_moments_t m = {0};
         ok = sat = errors = 0;
         dc = 0;
+        unsigned in_row = 0; /* failed captures in a row (a stale one neither counts nor breaks it) */
         (void)radio_gain_now(CONFIG_SDR_RX_VERIFY_GAIN);
         for (unsigned c = 0; c < CONFIG_SDR_RX_VERIFY_CAPTURES; c++) {
             const uint32_t *w;
@@ -187,8 +195,10 @@ static bool verify_lo(engine_t *e, unsigned h, uint32_t cal_ms) {
             if (err != ESP_OK) {
                 count_capture_error(err);
                 errors++;
+                if (++in_row >= VERIFY_MAX_ERRORS) break;
                 continue;
             }
+            in_row = 0;
             if (psd_moments_add(w, e->ncap, e->nfft, &m)) {
                 sat++;
                 continue;
@@ -321,21 +331,24 @@ esp_err_t sdr_rx_init(const sdr_rx_config_t *cfg) {
     return err;
 }
 
-/* Once a second, at a rotation end. Out of IRAM: it is not on the hop's path. */
+/* Once a second, at a rotation end. Out of IRAM: it is not on the hop's path. A window spans a
+ * second or more and ends on a rotation end, so every plan LO had hops in it: one whose captures
+ * mostly failed (cap_bad) is a deaf channel pair, as bad as a DC or IQ fault. */
 static __attribute__((noinline)) void window_close(engine_t *e, int64_t now) {
     const uint32_t hops = e->w_hops ? e->w_hops : 1u, rots = e->w_rot ? e->w_rot : 1u;
     const int64_t span = now - e->w_start;
     uint32_t dc_max = 0;
-    uint8_t iq_bad = 0;
+    uint8_t iq_bad = 0, cap_bad = 0;
     for (unsigned h = 0; h < e->plan.nhops; h++) {
         const lo_window_t *w = &e->lo[h];
+        if (2u * w->caps < w->hops) cap_bad |= (uint8_t)(1u << h);
         if (!w->caps) continue;
         const float mi = fabsf(w->dc_i / (float)w->caps), mq = fabsf(w->dc_q / (float)w->caps);
         const uint32_t dc = (uint32_t)lrintf(mi > mq ? mi : mq);
         if (dc > dc_max) dc_max = dc;
         if (2u * w->iq_off > w->caps) iq_bad |= (uint8_t)(1u << h);
     }
-    const bool bad = dc_max > CONFIG_SDR_RX_DC_CAL_NEEDED || iq_bad;
+    const bool bad = dc_max > CONFIG_SDR_RX_DC_CAL_NEEDED || iq_bad || cap_bad;
     e->bad_windows = bad ? (uint8_t)(e->bad_windows < 255u ? e->bad_windows + 1u : 255u) : 0u;
     if (e->bad_windows >= CAL_NEEDED_WINDOWS) s_cal_needed = true; /* until a recalibration */
     const uint8_t gain_max = (uint8_t)radio_gain_max();
@@ -353,6 +366,7 @@ static __attribute__((noinline)) void window_close(engine_t *e, int64_t now) {
     o->dsp_us_max = e->w_dsp_max;
     o->dc_max = (uint16_t)(dc_max > 65535u ? 65535u : dc_max);
     o->iq_bad_mask = iq_bad;
+    o->cap_bad_mask = cap_bad;
     o->gain_max = gain_max;
     portEXIT_CRITICAL(&s_mux);
     const int64_t rot_start = e->rot_start;
@@ -400,6 +414,8 @@ IRAM_ATTR void sdr_rx_step(sdr_hop_t *out) {
     (void)tune(e, e->plan.hop[next].lo_khz);
     const int64_t t3 = esp_timer_get_time();
     out->recalibrated |= radio_recals() != recals;
+    lo_window_t *w = &e->lo[h];
+    w->hops++;
     if (err == ESP_OK) {
         psd_result_t psd;
         const esp_err_t de = psd_compute(words, e->ncap, e->nfft, SEGMENTS, (float)RATE_HZ, CONJUGATE, USABLE_HZ,
@@ -416,11 +432,13 @@ IRAM_ATTR void sdr_rx_step(sdr_hop_t *out) {
                 r->level_qdb = sdr_band_level_qdb(&psd, hop->band[j], scale_q8, &r->flags);
             }
             out->n = (uint8_t)n;
-            lo_window_t *w = &e->lo[h];
             w->dc_i += psd.dc_i;
             w->dc_q += psd.dc_q;
             w->caps++;
-            if (!psd.iq_applied) w->iq_off++;
+            /* Only an estimate that exists and is implausible: after a reset, captures that all
+             * clip (a VTX by the gate) leave no estimate at all, which is no calibration fault.
+             * A dead or silent path is unsaturated, so it has one (ii = 0) and still counts. */
+            if (e->iq[h].init && !psd.iq_applied) w->iq_off++;
         }
     }
     const int64_t t4 = esp_timer_get_time();
@@ -504,13 +522,14 @@ void sdr_rx_print(void) {
     printf("SDR plan=%s lo=%s gain=%u/%u rot_hz_x10=%u rot_us=%" PRIu32 "/%" PRIu32 " tune_us=%" PRIu32 "/%" PRIu32
            " cap_us=%" PRIu32 " wait_us=%" PRIu32 " dsp_us=%" PRIu32 "/%" PRIu32 " faults=%" PRIu32
            " timeout=%" PRIu32 " short=%" PRIu32 " overrun=%" PRIu32 " dsp=%" PRIu32 " stale=%" PRIu32
-           " recal=%" PRIu32 " foreign_dc=%" PRIu32 " dc_max=%u iq_bad=0x%x cal_needed=%u calibrating=%u"
-           " init_failed=%u phy=%s\n",
+           " recal=%" PRIu32 " foreign_dc=%" PRIu32 " dc_max=%u iq_bad=0x%x cap_bad=0x%x cal_needed=%u"
+           " calibrating=%u init_failed=%u phy=%s\n",
            s_mode == SDR_PLAN_SINGLE ? "single" : "pairs", lo, (unsigned)h.gain, (unsigned)h.gain_max,
            (unsigned)h.rot_hz_x10, h.rot_us_avg, h.rot_us_max, h.tune_us_avg, h.tune_us_max, h.cap_us_avg,
            h.wait_us_avg, h.dsp_us_avg, h.dsp_us_max, sdr_rx_fault_count(), h.cap_timeouts, h.cap_short,
            h.cap_overrun, h.dsp_errors, h.stale_caps, h.recals, h.foreign_dc, (unsigned)h.dc_max,
-           (unsigned)h.iq_bad_mask, h.cal_needed, h.calibrating, h.init_failed, sdr_rx_phy_version());
+           (unsigned)h.iq_bad_mask, (unsigned)h.cap_bad_mask, h.cal_needed, h.calibrating, h.init_failed,
+           sdr_rx_phy_version());
 }
 
 /* ---- bench (sdr_rx_bench.h): scan task only, between steps ---- */

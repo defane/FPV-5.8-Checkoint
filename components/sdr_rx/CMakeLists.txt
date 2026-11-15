@@ -21,6 +21,7 @@ target_link_options(${COMPONENT_LIB} INTERFACE "-T${CMAKE_CURRENT_LIST_DIR}/sram
 target_link_options(${COMPONENT_LIB} INTERFACE
     "-Wl,--wrap=phy_chip_set_chan_ana"   # c5_recalibrate measures at the LO, not the reference channels
     "-Wl,--wrap=ets_delay_us"            # skip the redundant 300 us wait in phy_set_rfpll_freq while tuning
+                                         # (esp_rom_delay_us is its alias: every 300 us one while tuning)
     "-Wl,--wrap=phy_wifi_set_tx_gain_new" # skip the TX gain table (~85 us) in channel setup while tuning
     "-Wl,--wrap=phy_set_rx_gain_cal_dc"  # count PHY tracking's recalibrations (cache invalidation)
     "-Wl,--wrap=phy_write_gain_mem")     # record the 84-entry RX gain table for the PLL-only replay
