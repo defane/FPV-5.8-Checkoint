@@ -171,7 +171,7 @@ both sets, with Gerbers ready to order.
 | Link UART RX ← bridge TX | 8 | C5-Zero header pin (GPIO 15 is not broken out) |
 | Amplifier / status LED | — | none on a detector: the C6 master plays the sound |
 | forbidden | 13,14 (USB) · 16-22 (flash) · 26 (antenna) | console, flash, C5-Zero antenna switch |
-| free | 0-5, 7, 9-12, 23-25, 27 | the sdr_rx engine uses no GPIO; 7 is a strapping pin; 27 is the C5-Zero's WS2812 (unused) |
+| free | 0-5, 7, 9-12, 23-25, 27 | the sdr_rx engine uses no GPIO; 2, 7, 25, 27 (and 28, BOOT) are strapping pins: free after boot, no external pull or load that holds them at reset; 27 is the C5-Zero's WS2812 (unused) |
 
 **ESP32-C3** (`firmware/node`, node bridge)
 

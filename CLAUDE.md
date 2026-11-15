@@ -102,9 +102,10 @@ README "Pinout" + `docs/wiring-*.svg`.
 | 13, 14 | USB-Serial-JTAG (console, flashing) | forbidden |
 | 16–22 | SPI flash | forbidden |
 | 26 | antenna switch (C5-Zero): high IPEX, low onboard | never driven by default; only `CONFIG_CHECKPOINT_ANTENNA_IPEX` or `K` `i`, C5-Zero only |
-| 27 | C5-Zero onboard WS2812 | free since the dump engine uses no GPIO; the detector still has no LED (follow-up) |
+| 27 | C5-Zero onboard WS2812 | free since the dump engine uses no GPIO; strapping pin; the detector still has no LED (follow-up) |
 | 28 | BOOT button | input, strapping |
-| 0–5, 7, 9–12, 23–25 | free | 7 is a strapping pin (never SD) |
+| 0, 1, 3–5, 9–12, 23, 24 | free | |
+| 2, 7, 25 | free, strapping | free after boot; no external pull or load that holds them at reset |
 
 GDMA: the detector uses none (the engine polls the dump with the CPU).
 
@@ -115,7 +116,8 @@ readings per second per channel, each with its own µs time, as a rise in dB abo
 channel's own rest (`scan_detector.c`, `sd_feed()`). Smoothing is time-based: a median
 of 3, then an average whose `alpha` is the weight per 17.5 ms reference sweep
 (τ = −17.5 ms / ln(1 − α), 61 ms at 0.25); the rests follow the smoothed level and never
-move on a saturated capture; a gap over 100 ms re-primes a channel. The pass time on the
+move on a saturated capture; after a gap over 100 ms a channel waits for a full median
+again, then its average resumes (re-primes after a gap over `stale_ms`). The pass time on the
 wire is the smoothed peak (the console's `PASS` line adds a delay estimate). States
 `IDLE → RISING → PEAK_PASSED → COOLDOWN`; re-arm needs the refractory period
 elapsed AND the level under `active_db - hysteresis_db`. The glue is
@@ -143,8 +145,8 @@ esp32c6) is UART-wired to its own C5 (gate 0) and aggregates remote gates over
 **ESP-NOW**; a remote gate is a C5 UART-wired to a **C3** (`firmware/node`).
 Protocols (both v3; reflash every board together after a change):
 `components/link_proto` (C5↔bridge UART: config, passes, `STATS` with the 8 levels and
-the C5's health (CAL_NEEDED = an LO's DC or IQ out of range, no engine or a stalled scan;
-faults = capture faults), `LP_MSG_COMMAND` calibrate/reboot),
+the C5's health (CAL_NEEDED = an LO's DC or IQ out of range or its captures failing, no
+engine or a stalled scan; faults = capture faults), `LP_MSG_COMMAND` calibrate/reboot),
 `components/fleet_proto` over `components/espnow_link` (pairing, beacons,
 `GATE_PASS`, `NODE_STATUS` relaying the health, `FP_MSG_COMMAND`),
 `components/race_timing`. The C6 admin web (and a degraded C3's page) shows each

@@ -31,9 +31,14 @@ channel (`components/checkpoint/cp_scan.c`, `checkpoint.c`; pure C:
   state machine and what the web pages show. There is no signal floor: the 10-bit
   samples resolve the noise.
 - **Gaps:** no reading while a calibration or a console bench runs. A channel with no
-  reading for over 100 ms restarts its median and its average from the next one, and
-  after a requested calibration (`F`, `B`, `K` `i`, a link command), a gain change or a
-  bench the rests are learnt again: nothing rings for 3 s, as at boot.
+  reading for over 100 ms restarts its median and holds its next two readings until the
+  median is full again, so a lone burst right after the gap stays a lone burst; its average
+  then goes on from where it was, so a VTX parked across a PHY-tracking recalibration
+  (~0.2 s) rings nothing. After a gap longer than `stale_ms` the state machine has
+  forgotten the channel, and the average starts again from that median. A late reading
+  (over twice the usual interval) counts in the average as one on time. After a requested
+  calibration (`F`, `B`, `K` `i`, a link command), a gain change or a bench the rests are
+  learnt again: nothing rings for 3 s, as at boot.
 - **State machine** per channel: `IDLE → RISING → PEAK_PASSED → COOLDOWN` (see
   `pass_detector.h`). A hovering drone only rings once: to re-arm, the refractory period
   must have elapsed **and** the level must have dropped back under

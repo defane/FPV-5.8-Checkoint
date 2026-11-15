@@ -101,7 +101,11 @@ with no change on the gate side.
   when a remote gate's pass reaches its C3: the C5 now reads its UART every 10 ms, but the
   bridges still poll every 100 ms (`LINK_READ_MS`), so count ±0.1 s on a remote gate's
   sector until they change too (a C3 and C6 reflash). The first passes after a boot teach
-  the master the local C5's clock, so a lap there can read a little short.
+  the master the local C5's clock, so a lap there can read a little short. The master also
+  takes any pass from its C5 that is older than the one before as that C5's reboot and
+  learns the clock again: two drones on different channels whose passes ring out of peak
+  order can make one gate-0 lap read a few tens of ms long and the next as much short (a
+  C6 change: time gate 0 from the pass's age, as the C3 does).
 
 ## Gate health and remote commands (no console in production)
 
@@ -114,8 +118,10 @@ page for a gate with no master.
   (relayed in `NODE_STATUS`): a calibration badge (OK / calibration needed / calibrating),
   RX gain, passes since boot, C5 uptime, lowest free heap, the capture fault counters
   and the firmware id. *Calibration needed* (`CAL_NEEDED`) is an LO's DC offset or IQ
-  estimate out of range for 3 s, no engine (its start failed), or a stalled scan (no
-  rotation for 1 s outside a calibration or a bench). *Calibrating* is a calibration,
+  estimate out of range, or most of its captures failing, for 3 s; no engine (its start
+  failed); or a stalled scan (no rotation for 1 s outside a calibration or a bench). A
+  channel with no reading for 1 s while the gate scans (its LO's captures fail) shows an
+  unknown level, not a rise of 0. *Calibrating* is a calibration,
   the rests' learning (3 s) or a console bench: the gate is blind. The faults count
   capture timeouts, short or overrun dumps, DSP errors and scan stalls, since boot. A C5
   silent for **3 s** is shown as absent: no stale health, and commands to it fail.

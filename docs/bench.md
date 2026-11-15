@@ -31,16 +31,21 @@ Startup prints, in order:
 - One `SDR cal lo=5677 ms=41 irr_db=37.4 verify_gain=60 tries=1 dc=6 sat=0` per LO: each
   LO is calibrated (~41 ms), then its image rejection is verified from 64 captures at a
   temporary gain of 60, at least 30 dB or up to 3 calibrations (`tries`).
-  `irr_db=skip_saturated` means too many clipped captures: a VTX too close, verify skipped.
-- `SDR ready lo=5677,5751,5825,5899 gain=40 cal_ms=… boot_ms=… chip_rev=v…`, expected within
+  `irr_db=skip_saturated` means too many clipped captures: a VTX too close, verify skipped;
+  `irr_db=skip_faults` means the captures failed (4 failed in a row end the verify).
+- `SDR ready lo=5677,5751,5825,5899 gain=40 verify_tries=3 cal_ms=… boot_ms=… chip_rev=v…`
+  (`verify_tries` is the build's `CONFIG_SDR_RX_VERIFY_TRIES`: 1 only in B0's control), expected within
   about 2 s of the reset; `tools/flash.py --check` waits for it. Passes can ring 3 s later,
   once the rests are learnt.
 - `HB t_s=… stage=… live=… rot_hz_x10=… faults=… cal=…` every 5 s, from the USB reader,
   whatever the rest does.
 
 A failed step prints `BOOT failed step=nvs|radio err=…` or `SDR init failed: no detection;
-console stays up`; the console and the download key keep working, and the bridges see
-*calibration needed* and one fault.
+console stays up`; the console and the download key keep working. After `BOOT failed` the
+UART link is never started, so the bridges show the gate as absent (no C5 status) and
+commands to it fail; only the USB console tells why. After `SDR init failed` the bridges see
+*calibration needed* with unknown levels and at least one fault, plus one per failed verify
+capture (4 per LO, so 17, when the dump never answers).
 
 `T` prints four lines:
 
@@ -52,12 +57,15 @@ console stays up`; the console and the download key keep working, and the bridge
   trims a stack.
 - `SDR plan=pairs lo=… gain=40/83 rot_hz_x10=… rot_us=avg/max tune_us=avg/max cap_us=…
   wait_us=… dsp_us=avg/max faults=… timeout=… short=… overrun=… dsp=… stale=… recal=…
-  foreign_dc=… dc_max=… iq_bad=0x… cal_needed=… calibrating=… init_failed=… phy=…`: the
+  foreign_dc=… dc_max=… iq_bad=0x… cap_bad=0x… cal_needed=… calibrating=… init_failed=… phy=…`: the
   engine over the last second, and counters since boot. `rot_hz_x10` is the refresh per
   channel × 10. `faults` (capture timeouts, short or overrun dumps, DSP errors) must stay
   0. `stale` counts captures dropped after a PHY-tracking recalibration: not a fault, each
   comes with `foreign_dc` +3. `cal_needed=1`: an LO's DC offset (`dc_max` over 30 counts)
-  or its IQ estimate stayed out of range for 3 s; recalibrate (`F`, VTX off).
+  or its IQ estimate (`iq_bad`, one bit per LO) stayed out of range for 3 s; recalibrate
+  (`F`, VTX off). The same for an LO whose captures failed on most hops for 3 s (`cap_bad`,
+  with `timeout`, `short` or `overrun` climbing): its two channels are deaf, and the bridges
+  show their levels as unknown.
 - `CHECKPOINT source=sdr live= learning= bench= engine_failed= stalled= stalls= gain= top=
   rise_db= state= rotations= readings= passes= alpha= tau_ms= active_db= …`, and
   `CHECKPOINT last_pass …` once a pass rang.
@@ -283,17 +291,24 @@ Report the `SDR cal`, `SDRBENCH`, `SDRRESIDUE`, `SDRIMAGE` and `SDRNOISE` lines 
   lines with `irr_db` 30 or more and `tries` 3 or less; on `T`: `faults=0`, `heap_min` 20000
   or more, `heap_ok=1`, `cal_needed=0`; no crash or `task_wdt` in 10 min; VTX on, its
   channel 20 dB or more over the others. Record the four `*_stack_free`.
-- Then the verify's positive control. Build with `CONFIG_SDR_RX_VERIFY_TRIES=1` (that line
-  in a `sdkconfig.local.defaults` next to `sdkconfig.defaults`, the generated sdkconfig
-  deleted, `tools/fw.sh build detector`, `python tools/flash.py PORT`): the first
-  calibration is kept whatever it reads. Reboot 10 times; after each, `K` `x` on R1 (the
-  floor run, then the VTX on R1), and record the pair
+- Then the verify's positive control, in a build dir and sdkconfig of its own, so the
+  production sdkconfig never holds it (ESP-IDF keeps a value an existing sdkconfig already
+  has, and `flash.py`'s drift check only compares what a defaults file sets): put
+  `CONFIG_SDR_RX_VERIFY_TRIES=1` in a scratch file, say `/tmp/verify1.defaults`, then
+  `( cd firmware/detector && idf.py -B build-verify1 -DSDKCONFIG=sdkconfig.verify1
+  "-DSDKCONFIG_DEFAULTS=sdkconfig.defaults;/tmp/verify1.defaults" build )` and `python
+  tools/flash.py PORT --build firmware/detector/build-verify1`. The boot prints `SDR ready
+  … verify_tries=1`: the first calibration is kept whatever it reads. Reboot 10 times; after
+  each, `K` `x` on R1 (the floor run, then the VTX on R1), and record the pair
   (the boot `irr_db` of LO 5677, `K` `x`'s `irr_off_db`). Pass: every pair within 5 dB, and
   every `irr_off_db` under 30 with an `irr_db` under 30. widscan58 saw about half of its
-  first calibrations bad, so some pairs should be. Remove the line afterwards.
+  first calibrations bad, so some pairs should be. Afterwards reflash the normal build
+  (`python tools/flash.py PORT`; its boot prints `verify_tries=3`) and delete
+  `firmware/detector/build-verify1` and `firmware/detector/sdkconfig.verify1`.
 - If not: no `SDR ready`, send the `SDR init` or `BOOT failed` lines. Levels flat with
-  the VTX on: set `CONFIG_SDR_RX_PROMISC_FILTER_ALL=y`. Control failed: keep
-  `CONFIG_SDR_RX_VERIFY_TRIES=1` (the verify then only logs) and report the pairs.
+  the VTX on: set `CONFIG_SDR_RX_PROMISC_FILTER_ALL=y`. Control failed: report the pairs;
+  the fallback is `CONFIG_SDR_RX_VERIFY_TRIES=1` in `sdkconfig.defaults` (the verify then
+  only logs; delete the generated sdkconfig and rebuild).
 
 **B1, rate.** `K` `s`, VTX off.
 - Pass: PLL `per_channel_hz_x10` 4000 or more (target about 5000), `tune_us` median 300 or
