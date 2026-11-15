@@ -31,14 +31,15 @@ menu "Checkpoint detector"
             stands more than 15 dB under its partner's is held, not fed. After a
             jump into the rails (a VTX switched on or armed beside the antenna,
             its average still low), the source is the channel whose last 3
-            readings show it, and its partner is held until the run ends. A
-            hover (a run of saturated captures over 150 ms) holds 30 ms longer
-            after each one. A channel held over 0.5 s starts again from the
-            level it comes back at, once its fresh average has settled (0.3 s
-            at the default alpha, ringing nothing meanwhile): armed under the
-            release; over it, relatively armed there, or in COOLDOWN until it
-            falls under the release with CHECKPOINT_REARM_DROP_DB at 0. Off,
-            every reading is fed as it comes, the phantoms included. The rules:
+            readings show it (their median), and its partner is held until the
+            run ends. A hover (a run of saturated captures over 150 ms) holds
+            30 ms longer after each one. A channel held over 0.5 s starts
+            again from the level it comes back at, once its fresh average has
+            settled (0.3 s at the default alpha, ringing nothing meanwhile):
+            armed under the release; over it, relatively armed there, or in
+            COOLDOWN until it falls under the release with
+            CHECKPOINT_REARM_DROP_DB at 0. Off, every reading is fed as it
+            comes, the phantoms included. The rules:
             docs/detector.md, "Pair ghost guard", and scan_detector.h.
 
             Its limits:
@@ -53,6 +54,12 @@ menu "Checkpoint detector"
             - It grows with the link gain too: the IPEX connector with a better
               antenna, or a directional one, clips from further out (about
               870 ms at 5 m/s with about 8 dB more, host model).
+            - A jump names its source only while the partner reads more than
+              15 dB under the source on the rails, about 40 dB over the floor
+              at most. A partner higher than that (a quad left powered about
+              1 m from the antenna while another is armed beside it) leaves the
+              source held for its whole run: its own onset rings nothing, the
+              partner's laps are kept (host model).
             - It keys on the saturated flag only: a compression before the
               ADC rails (no rail hit, no flag) is not covered. Bench B11
               checks whether the board does that.

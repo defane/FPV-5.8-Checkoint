@@ -167,34 +167,35 @@ static bool hop_saturated(scan_detector_t *sd, unsigned hop, bool sat, int64_t t
     return *last && t_us - *last <= SD_HOLD_TAIL_US && *last - *run >= SD_HOLD_HOVER_US;
 }
 
-/* The lowest and the median of a channel's last 3 readings into sd_feed_hop; false until it has 3. */
-static bool raw3(const scan_detector_t *sd, unsigned ch, int16_t *lo, int16_t *med)
+/* The median of a channel's last 3 readings into sd_feed_hop; false until it has 3. */
+static bool raw3(const scan_detector_t *sd, unsigned ch, int16_t *med)
 {
     if (sd->raw_n[ch] < 3u) return false;
     const int16_t *h = sd->raw[ch];
-    const int16_t m = h[0] < h[1] ? h[0] : h[1];
-    *lo = m < h[2] ? m : h[2];
     *med = median3(h[0], h[1], h[2]);
     return true;
 }
 
 /* Which reading of a guarded capture of two channels to hold: bit i for r[i] (see scan_detector.h).
- * A jump into the rails names its source for the rest of the run: its last 3 readings all stand
- * more than SD_HOLD_DOM_DB over its partner's median (the products top their source on a few % of
- * captures, by 12.5 dB at most in the host model) and more than SD_HOLD_JUMP_DB over its own average
- * (a drone flown in leads its average by 9 dB at most at 20 m/s, 15 at 60 m/s, host model: the
- * smoothed levels then hold the same channel). Otherwise the smoothed levels decide. */
+ * A jump into the rails names its source for the rest of the run: the median of its last 3
+ * readings stands more than SD_HOLD_DOM_DB over its partner's and more than SD_HOLD_JUMP_DB over its
+ * own average (a drone flown in leads its average by 9 dB at most at 20 m/s, 15 at 60 m/s, host
+ * model: the smoothed levels then hold the same channel). The products never pass for their source:
+ * they top it by 12.8 dB at most on a capture (host DSP), so they would need two of the source's 3
+ * readings over its median. Not the lowest of the 3: a clipping source's FM dips 6-22 dB on a
+ * quarter of its readings, which kept it from being named for up to 18 captures. Otherwise the
+ * smoothed levels decide. */
 static unsigned pair_hold(scan_detector_t *sd, unsigned hop, unsigned ca, unsigned cb)
 {
     const sd_channel_t *a = &sd->c[ca], *b = &sd->c[cb];
     if (hop < SD_HOPS_MAX) {
-        int16_t lo[2], med[2];
-        if (raw3(sd, ca, &lo[0], &med[0]) && raw3(sd, cb, &lo[1], &med[1])) {
+        int16_t med[2];
+        if (raw3(sd, ca, &med[0]) && raw3(sd, cb, &med[1])) {
             const int32_t dom = (int32_t)(SD_HOLD_DOM_DB * QDB_PER_DB);
             for (unsigned i = 0; i < 2u; i++) {
                 const sd_channel_t *s = i ? b : a;
-                if (s->primed && (int32_t)lo[i] > (int32_t)med[1u - i] + dom &&
-                    (float)lo[i] / QDB_PER_DB > s->smooth_db + SD_HOLD_JUMP_DB)
+                if (s->primed && (int32_t)med[i] > (int32_t)med[1u - i] + dom &&
+                    (float)med[i] / QDB_PER_DB > s->smooth_db + SD_HOLD_JUMP_DB)
                     sd->sat_src[hop] = (uint8_t)(1u + i);
             }
         }

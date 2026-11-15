@@ -99,14 +99,26 @@ under the strong channel, a few % of captures above it ([host]).
   while its average is still low. The smoothed levels alone then hold the wrong channel
   when the partner stands up: the source is held, frozen low for the whole run, and the
   partner is fed its products (it rang a phantom 150 ms after the onset, [host]). When the
-  last 3 readings of a channel all stand more than 15 dB over its partner's median and
+  median of a channel's last 3 readings stands more than 15 dB over its partner's and
   more than `SD_HOLD_JUMP_DB` (20 dB) over its own average, it is the run's source: its
-  partner is held until the run ends. The products top their source by 12.5 dB at most
-  ([host], 4000 captures per clip depth), so they never pass for it. A drone flown
-  in leads its average by 9 dB at most at 20 m/s, 15 dB at 60 m/s ([host] reading model),
+  partner is held until the run ends. The products top their source by 12.8 dB at most
+  on a capture ([host] DSP), so they never pass for it: that would take two of the
+  source's 3 readings over their median. The median, not the lowest of the 3: a clipping
+  source's FM dips 6–22 dB on a quarter of its readings, which kept it unnamed for up to
+  18 captures while a partner at the floor was fed its products (a phantom on 1–3 % of
+  the onsets within 10 cm, [host] DSP readings; none with the median). A drone flown in
+  leads its average by 9 dB at most at 20 m/s, 16 dB at 60 m/s ([host] reading model),
   so it never takes this path: the host evaluation below (its scenarios and its seven
   model variants) gives the same results to the byte. With the partner up, the source is
-  still held on its first few clipped captures (2 mostly, 5 at most, [host]), never after.
+  still held on its first clipped capture ([host] check 29; with the FM spread 1.5
+  captures on average, 5 at most).
+- **The jump rule's limit.** It needs the partner more than 15 dB under the source's
+  rails reading, so about 40 dB over the floor at most (the rails stand 54–58 dB over
+  it). Over that, a quad left powered about 1 m from the antenna while another is armed
+  beside it, the source is held for its whole run as by the smoothed levels alone, and
+  its own onset rings nothing; every lap of the partner is still kept ([host], the rails
+  55 dB over the floor: the source rang in 16 of 20 runs with the partner 44 dB up, in
+  none from 46 dB).
 - When a held channel is fed again, its median restarts on fresh readings. If it stood
   `min_peak_db` up when the hold began (a real pass under way), its average catches up
   to the fresh median less `drop_db`, upwards only, so a catch-up never rings by itself.
@@ -150,7 +162,9 @@ reading model):
 - a VTX switched on 0.3 m away for 0.1–0.3 s while a pilot on its partner laps 18 or
   25 dB up, or at the floor (check 29, 120 runs, both channel orders): every lap kept, no
   phantom, and the source rings its own pass. By the smoothed levels alone: a phantom in
-  44 runs (all 40 with the pilot at the floor), and no pass of the source in 80.
+  44 runs (all 40 with the pilot at the floor), and no pass of the source in 80. The same
+  with the DSP's FM spread in the reading model (120 more runs); naming the source from
+  the lowest of its 3 readings, there, rang a phantom in 4.
 
 **Its limits.**
 

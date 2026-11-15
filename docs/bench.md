@@ -96,8 +96,9 @@ from the `CHECK` line, or pass `--heap-min-warn 20000`.
   readings, so this is what the detector sees. A 25 mW VTX clips within about 30 cm of the
   onboard antenna at gain 40 ([board] 2026-11-15).
 - `held=` counts, per channel R1 to R8, the readings the pair guard held since the previous
-  line ([detector.md](detector.md#pair-ghost-guard)): only the weaker channel of a clipping
-  LO, never the strong one.
+  line ([detector.md](detector.md#pair-ghost-guard)): mostly the weaker channel of a
+  clipping LO. A VTX that jumps into the rails beside the antenna is itself held for its
+  first capture or few (more only with its partner over about 40 dB).
 - **If the levels stay flat with a strong VTX**, report it: the first suspect is the Wi-Fi
   promiscuous filter (`CONFIG_SDR_RX_PROMISC_FILTER_ALL=y`, bench B0).
 - Stop the trace (`K` `l`) before the quality measurements.

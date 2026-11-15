@@ -44,10 +44,12 @@
  * armed beside the antenna clips while its average is still low (at the floor, or more than
  * SD_HOLD_DOM_DB under a partner that stands up), and the smoothed levels alone would hold the
  * source itself, frozen low for the whole run, and feed its products to the partner. So when the
- * last 3 readings of a channel all stand more than SD_HOLD_DOM_DB over its partner's median and
- * more than SD_HOLD_JUMP_DB over its own average, it is the run's source: its partner is held until
- * the saturated run ends. A drone flown in never leads its average that much (host model), so
- * there both rules hold the same channel. When a held channel is fed again, its median
+ * median of a channel's last 3 readings stands more than SD_HOLD_DOM_DB over its partner's and more
+ * than SD_HOLD_JUMP_DB over its own average, it is the run's source: its partner is held until the
+ * saturated run ends. A drone flown in never leads its average that much (host model), so there
+ * both rules hold the same channel. The rule needs the partner more than SD_HOLD_DOM_DB under the
+ * source's rails reading (about 40 dB over the floor at most): a partner higher than that leaves the
+ * source held as by the smoothed levels alone. When a held channel is fed again, its median
  * restarts on fresh readings; if it stood min_peak_db up as its hold began (a real pass under way),
  * its average catches up to the fresh median less drop_db (never down, so a catch-up never rings by
  * itself). After a hold longer than SD_HOLD_LONG_US, what it did while blind is unknown: once its

@@ -1025,11 +1025,14 @@ int main(void)
      *     once. By the smoothed levels alone, with R5 up, R6 was held for the whole run (its average
      *     still low) and R5 fed R6's products; with R5 at the floor, R5 was fed them until R6's average
      *     caught up: a phantom R5 pass in 44 of these 120 runs (all 40 at the floor) and no R6 pass in
-     *     80. Once R6's last 3 readings show it is the source, R5 is held
-     *     until the run ends: R6 is held on its first clipped captures only (2 mostly, 5 at most here,
-     *     none with R5 at the floor), R5 rings its four laps and nothing else, and R6 rings its own
-     *     pass. Mirrored (R5 switched on, R6 lapping) the same. Flown in over 0.5 s, R6 is never held,
-     *     as before. */
+     *     80. Once the median of R6's last 3 readings shows it is the source, R5 is held until the run
+     *     ends: R6 is held on its first clipped capture only (none with R5 at the floor), R5 rings its
+     *     four laps and nothing else, and R6 rings its own pass. Mirrored (R5 switched on, R6 lapping)
+     *     the same. Flown in over 0.5 s, R6 is never held, as before. With the DSP's FM spread
+     *     (PAIR_FM_X), a quarter of the source's readings dip 6-22 dB: R6 is held for 1.4-1.6
+     *     readings on average, 5 at most. Named from the lowest of its 3 readings (befea2e), it was
+     *     held 2.0-2.4 readings on average, up to 5, and up to 8 with the FM spread, and the floor
+     *     partner, fed the products meanwhile, rang a phantom in 4 of the 120 FM runs. */
     {
         unsigned runs = 0, ok_laps = 0, ok_src = 0, ok_held = 0, worst_src = 0;
         static const double bases[3] = {18.0, 25.0, 0.0}, clips[2] = {0.1, 0.3};
@@ -1043,7 +1046,7 @@ int main(void)
                         runs++;
                         ok_laps += step_laps(&o) == 0xFu;
                         ok_src += o.n_src == 1u;
-                        ok_held += o.held_src <= 8u && o.held + 8u >= (unsigned)(clips[c] * 490.0);   /* 8 captures at most */
+                        ok_held += o.held_src <= 2u && o.held + 8u >= (unsigned)(clips[c] * 490.0);   /* 8 captures at most */
                         if (o.held_src > worst_src) worst_src = o.held_src;
                     }
         unsigned ramp_ok = 0;
@@ -1058,6 +1061,24 @@ int main(void)
         CHECK(ok_laps == runs && ok_src == runs && ok_held == runs,
               "a step into the rails: its partner is held, every lap kept, no phantom, the source rings its pass");
         CHECK(ramp_ok == 10u, "flown in, the smoothed levels hold the partner as before (the source never held)");
+        unsigned fm_runs = 0, fm_laps = 0, fm_src = 0, fm_held = 0, fm_worst = 0;
+        for (int mirror = 0; mirror < 2; mirror++)
+            for (unsigned b = 0; b < 3u; b++)
+                for (unsigned c = 0; c < 2u; c++)
+                    for (uint64_t k = 0; k < 10u; k++) {
+                        const step_t p = {.base = bases[b], .after = bases[b], .clip_s = clips[c], .mirror = mirror, .fm = 1,
+                                          .rearm = 16.0f};
+                        step_out_t o;
+                        step_run(&p, 3900 + 10u * b + k, &o);
+                        fm_runs++;
+                        fm_laps += step_laps_from(&o, 6.0) == 0xEu;   /* 11, 17 and 23 s */
+                        fm_src += o.n_src == 1u;
+                        fm_held += o.held_src <= 6u && o.held + 8u >= (unsigned)(clips[c] * 490.0);
+                        if (o.held_src > fm_worst) fm_worst = o.held_src;
+                    }
+        printf("     with the FM spread, %u runs: all laps and no phantom in %u, the source's pass in %u, held right in %u "
+               "(the source at most %u readings)\n", fm_runs, fm_laps, fm_src, fm_held, fm_worst);
+        CHECK(fm_laps == fm_runs && fm_src == fm_runs && fm_held == fm_runs, "the same with the DSP's FM spread");
     }
 
     /* 30. Check 28's long hold with the DSP's FM spread (PAIR_FM_X), which check 28's 1 dB model hides:
