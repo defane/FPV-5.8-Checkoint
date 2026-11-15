@@ -28,9 +28,12 @@ menu "Checkpoint detector"
             (a 25 mW VTX within about 30 cm of the onboard antenna at gain 40).
 
             On, a saturated capture's reading of a channel whose smoothed level
-            stands more than 15 dB under its partner's is held, not fed; a hover
-            (a run of saturated captures over 150 ms) holds it 30 ms longer after
-            each one, and a hold over 0.5 s resumes in COOLDOWN. Off, every
+            stands more than 15 dB under its partner's is held, not fed. After a
+            jump into the rails (a VTX switched on or armed beside the antenna,
+            its average still low), the source is the channel whose last 3
+            readings show it, and its partner is held until the run ends. A
+            hover (a run of saturated captures over 150 ms) holds 30 ms longer
+            after each one, and a hold over 0.5 s resumes in COOLDOWN. Off, every
             reading is fed as it comes, the phantoms included. The rules:
             docs/detector.md, "Pair ghost guard", and scan_detector.h.
 

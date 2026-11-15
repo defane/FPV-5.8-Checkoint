@@ -93,8 +93,20 @@ under the strong channel, a few % of captures above it ([host]).
   rails.
 - On such a capture, the reading of a channel whose smoothed level stands more than
   `SD_HOLD_DOM_DB` (15 dB) under its partner's is **held**: not fed, its median, average,
-  rest and state frozen. The comparison uses the smoothed levels, never the capture's own
-  readings: those are the strong drone's products. The strong channel is never held.
+  rest and state frozen. The comparison uses the smoothed levels, not one capture's
+  readings: the products top their source on a few % of captures ([host]).
+- **A jump into the rails.** A VTX switched on or armed beside the antenna clips at once,
+  while its average is still low. The smoothed levels alone then hold the wrong channel
+  when the partner stands up: the source is held, frozen low for the whole run, and the
+  partner is fed its products (it rang a phantom 150 ms after the onset, [host]). When the
+  last 3 readings of a channel all stand more than 15 dB over its partner's median and
+  more than `SD_HOLD_JUMP_DB` (20 dB) over its own average, it is the run's source: its
+  partner is held until the run ends. The products top their source by 12.5 dB at most
+  ([host], 4000 captures per clip depth), so they never pass for it. A drone flown
+  in leads its average by 9 dB at most at 20 m/s, 15 dB at 60 m/s ([host] reading model),
+  so it never takes this path: the host evaluation below (its scenarios and its seven
+  model variants) gives the same results to the byte. With the partner up, the source is
+  still held on its first few clipped captures (2 mostly, 5 at most, [host]), never after.
 - When a held channel is fed again, its median restarts on fresh readings. If it stood
   `min_peak_db` up when the hold began (a real pass under way), its average catches up
   to the fresh median less `drop_db`, upwards only, so a catch-up never rings by itself.
@@ -110,7 +122,7 @@ it comes, the ghosts included. Its Kconfig help lists the limits below. The cons
 the host evaluation's: retune them from bench B11's data, not from the host model.
 
 **What the host model shows** ([host], 20 runs a point; `test/test_pair_ghost.c` runs
-the bench case on the repository's DSP, `test/test_scan_detector.c` checks 22–26 a
+the bench case on the repository's DSP, `test/test_scan_detector.c` checks 22–26 and 29 a
 reading model):
 
 - a lone 600 mW drone passing 0.1–0.5 m away at 20 m/s: 80 ghost passes in 80 runs
@@ -121,7 +133,11 @@ reading model):
   420 kept of 420 (without the guard the ghost took the pass at +200 ms: 1 kept of 20 at
   30 dB); 45 dB weaker at the same instant it cannot be measured at all (0 of 20);
 - the timing cost: a partner peaking within ±50 ms of a clipping drone is timed from the
-  readings around the clip window, mean −24 to +23 ms, 73 ms at worst.
+  readings around the clip window, mean −24 to +23 ms, 73 ms at worst;
+- a VTX switched on 0.3 m away for 0.1–0.3 s while a pilot on its partner laps 18 or
+  25 dB up, or at the floor (check 29, 120 runs, both channel orders): every lap kept, no
+  phantom, and the source rings its own pass. By the smoothed levels alone: a phantom in
+  44 runs (all 40 with the pilot at the floor), and no pass of the source in 80.
 
 **Its limits.**
 

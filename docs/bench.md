@@ -477,6 +477,11 @@ boot prints `pair_guard=1`), logged (`flash.py --log`). In this order:
    +7 dB at most on the other LOs with R6 at the ceiling, [board] 2026-11-15).
 7. **B-g7, hover.** R6 held 10 s at 6 cm while R5 passes at 1 m every 3 s. Expect no R5
    lap, no phantom, and R5 *unknown* in `STATS` (the C3's page) during the hold.
+8. **B-g8, a step into the rails.** R5's VTX held still at 1 m (about 25 dB up), then R6's
+   VTX switched on (battery plugged in, or out of pit mode) with the drone held at 6 cm,
+   for about 0.3 s and for about 2 s, 5 times each, `K` `l` on. Expect no R5 `PASS`, R6's
+   `held=` a few readings per onset at most, R5's `held=` rising, and one R6 `PASS` per
+   onset. Then the same with R5 off.
 
 - Retune the constants (`SD_HOLD_*` in `scan_detector.h`) from these numbers, not from the
   host model. Missed rises (B-g2) or leaks (B-g6) need another guard: report them.
@@ -495,7 +500,7 @@ boot prints `pair_guard=1`), logged (`flash.py --log`). In this order:
 | B8 XIAO | | | | |
 | B9 IPEX | | | TODO, deferred (see B9) | |
 | B10 link | | | | badge times, download key 5/5 |
-| B11 pair guard | | | | B-g4 R6/R5 `pairs_qdb` per distance; B-g2 R5's rise before the first saturated capture; B-g1 R5 `PASS`/30, R6 `PASS`/30; B-g3 saturated share per pass; B-g5 `PASS` counts and `peak_ms`, guard on/off; B-g6 worst rise on the other LOs; B-g7 R5 laps, phantoms |
+| B11 pair guard | | | | B-g4 R6/R5 `pairs_qdb` per distance; B-g2 R5's rise before the first saturated capture; B-g1 R5 `PASS`/30, R6 `PASS`/30; B-g3 saturated share per pass; B-g5 `PASS` counts and `peak_ms`, guard on/off; B-g6 worst rise on the other LOs; B-g7 R5 laps, phantoms; B-g8 R5 `PASS`, R6 `held=` per onset |
 
 B6 (c), far drones (`peak_db` of each pass, `—` if none rang):
 

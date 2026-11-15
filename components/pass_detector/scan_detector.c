@@ -42,6 +42,9 @@ void sd_relearn(scan_detector_t *sd)
     sd->learn_end_us = 0;
     memset(sd->sat_run_us, 0, sizeof(sd->sat_run_us));
     memset(sd->sat_last_us, 0, sizeof(sd->sat_last_us));
+    memset(sd->sat_src, 0, sizeof(sd->sat_src));
+    memset(sd->raw_n, 0, sizeof(sd->raw_n));
+    memset(sd->raw_i, 0, sizeof(sd->raw_i));
     sd->held_mask = 0;
     sd->fresh_mask = 0;
 }
@@ -140,11 +143,53 @@ static bool hop_saturated(scan_detector_t *sd, unsigned hop, bool sat, int64_t t
     if (hop >= SD_HOPS_MAX) return sat;
     int64_t *run = &sd->sat_run_us[hop], *last = &sd->sat_last_us[hop];
     if (sat) {
-        if (!*last || t_us - *last > SD_HOLD_TAIL_US) *run = t_us;   /* a new run */
+        if (!*last || t_us - *last > SD_HOLD_TAIL_US) {   /* a new run, no source known yet */
+            *run = t_us;
+            sd->sat_src[hop] = 0;
+        }
         *last = t_us;
         return true;
     }
     return *last && t_us - *last <= SD_HOLD_TAIL_US && *last - *run >= SD_HOLD_HOVER_US;
+}
+
+/* The lowest and the median of a channel's last 3 readings into sd_feed_hop; false until it has 3. */
+static bool raw3(const scan_detector_t *sd, unsigned ch, int16_t *lo, int16_t *med)
+{
+    if (sd->raw_n[ch] < 3u) return false;
+    const int16_t *h = sd->raw[ch];
+    const int16_t m = h[0] < h[1] ? h[0] : h[1];
+    *lo = m < h[2] ? m : h[2];
+    *med = median3(h[0], h[1], h[2]);
+    return true;
+}
+
+/* Which reading of a guarded capture of two channels to hold: bit i for r[i] (see scan_detector.h).
+ * A jump into the rails names its source for the rest of the run: its last 3 readings all stand
+ * more than SD_HOLD_DOM_DB over its partner's median (the products top their source on a few % of
+ * captures, by 12.5 dB at most in the host model) and more than SD_HOLD_JUMP_DB over its own average
+ * (a drone flown in leads its average by 9 dB at most at 20 m/s, 15 at 60 m/s, host model: the
+ * smoothed levels then hold the same channel). Otherwise the smoothed levels decide. */
+static unsigned pair_hold(scan_detector_t *sd, unsigned hop, unsigned ca, unsigned cb)
+{
+    const sd_channel_t *a = &sd->c[ca], *b = &sd->c[cb];
+    if (hop < SD_HOPS_MAX) {
+        int16_t lo[2], med[2];
+        if (raw3(sd, ca, &lo[0], &med[0]) && raw3(sd, cb, &lo[1], &med[1])) {
+            const int32_t dom = (int32_t)(SD_HOLD_DOM_DB * QDB_PER_DB);
+            for (unsigned i = 0; i < 2u; i++) {
+                const sd_channel_t *s = i ? b : a;
+                if (s->primed && (int32_t)lo[i] > (int32_t)med[1u - i] + dom &&
+                    (float)lo[i] / QDB_PER_DB > s->smooth_db + SD_HOLD_JUMP_DB)
+                    sd->sat_src[hop] = (uint8_t)(1u + i);
+            }
+        }
+        if (sd->sat_src[hop]) return sd->sat_src[hop] == 1u ? 2u : 1u;   /* the source's partner */
+    }
+    if (!a->primed || !b->primed) return 0;               /* the smoothed levels, not these readings */
+    if (a->smooth_db < b->smooth_db - SD_HOLD_DOM_DB) return 1u;
+    if (b->smooth_db < a->smooth_db - SD_HOLD_DOM_DB) return 2u;
+    return 0;
 }
 
 /* A held channel fed again: its median restarts on fresh readings, a real pass under way catches
@@ -172,15 +217,17 @@ unsigned sd_feed_hop(scan_detector_t *sd, unsigned hop, const sd_reading_t *r, u
 {
     unsigned rang = 0, hold = 0;
     if (n > SD_HOP_READINGS) n = SD_HOP_READINGS;
+    for (unsigned i = 0; i < n; i++) {                          /* every reading, held or not */
+        const unsigned ch = r[i].channel;
+        if (ch >= PD_CHANNELS || r[i].level_qdb == SD_LEVEL_NONE) continue;
+        sd->raw[ch][sd->raw_i[ch]] = r[i].level_qdb;
+        sd->raw_i[ch] = sd->raw_i[ch] >= 2u ? 0u : (uint8_t)(sd->raw_i[ch] + 1u);
+        if (sd->raw_n[ch] < 3u) sd->raw_n[ch]++;
+    }
     const bool sat = n && (r[0].flags & SD_FLAG_SATURATED);   /* one flag per capture */
     if (n == 2u && r[0].channel < PD_CHANNELS && r[1].channel < PD_CHANNELS && r[0].channel != r[1].channel &&
-        hop_saturated(sd, hop, sat, r[0].t_us)) {
-        const sd_channel_t *a = &sd->c[r[0].channel], *b = &sd->c[r[1].channel];
-        if (a->primed && b->primed) {                          /* the smoothed levels, not these readings */
-            if (a->smooth_db < b->smooth_db - SD_HOLD_DOM_DB) hold = 1u;
-            else if (b->smooth_db < a->smooth_db - SD_HOLD_DOM_DB) hold = 2u;
-        }
-    }
+        hop_saturated(sd, hop, sat, r[0].t_us))
+        hold = pair_hold(sd, hop, r[0].channel, r[1].channel);
     for (unsigned i = 0; i < n; i++) {
         const unsigned ch = r[i].channel;
         if (ch >= PD_CHANNELS || r[i].level_qdb == SD_LEVEL_NONE) continue;   /* sd_feed ignores these too */

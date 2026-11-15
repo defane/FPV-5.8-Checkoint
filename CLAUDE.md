@@ -79,7 +79,7 @@ Every firmware builds only `main`'s dependency closure (`set(COMPONENTS main)`):
   usb_reader 10 (the download key). Benches run in the scan task, never in the console.
 - RAM: static IRAM, data and BSS must end below `0x40820000` (`sram_guard.ld` fails the
   link otherwise) with an 8 KiB margin: `_iram_end`, `_data_end`, `_bss_end` ≤
-  `0x4081E000` (`riscv32-esp-elf-nm`; `_bss_end` is `0x4081ab78` today). Buffers go on
+  `0x4081E000` (`riscv32-esp-elf-nm`; `_bss_end` is `0x4081ae88` today). Buffers go on
   the heap or in the bank's regions (`sdr_bench_scratch()`); checkpoint state is
   heap-allocated (`checkpoint_start()`), so do not add static `.bss` buffers. Nothing but
   the scan task touches `0x40820000`–`0x4083FFFF` (the RF dump bank), never during a
@@ -120,7 +120,9 @@ move on a saturated capture; after a gap over 100 ms a channel waits for a full 
 again, then its average resumes (re-primes after a gap over `stale_ms`). Each hop goes
 through the pair ghost guard (`sd_feed_hop()`, `CONFIG_CHECKPOINT_PAIR_GUARD`, default y): on
 a saturated capture the reading of a channel 15 dB under its partner (smoothed) is held, as
-the rails' products ring ghosts on it (docs/detector.md "Pair ghost guard"). The pass time on the
+the rails' products ring ghosts on it; after a jump into the rails (a VTX switched on beside the
+antenna) the source's partner, named by the last 3 readings (docs/detector.md "Pair ghost
+guard"). The pass time on the
 wire is the smoothed peak (the console's `PASS` line adds a delay estimate). States
 `IDLE → RISING → PEAK_PASSED → COOLDOWN`; re-arm needs the refractory period
 elapsed AND either the level under `active_db - hysteresis_db` or its 1 s average

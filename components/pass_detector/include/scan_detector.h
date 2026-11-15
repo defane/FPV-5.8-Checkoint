@@ -38,8 +38,15 @@
  * phantom passes on the bench. So on a saturated capture (and, within a saturated run that has
  * lasted SD_HOLD_HOVER_US, until SD_HOLD_TAIL_US after its last saturated capture), the reading of
  * a channel whose smoothed level stands more than SD_HOLD_DOM_DB under its partner's is held: not
- * fed, its state frozen. The comparison is on the smoothed levels, never on the capture's own
- * readings: those are the strong channel's products. When a held channel is fed again, its median
+ * fed, its state frozen. The comparison is on the smoothed levels, not on one capture's readings:
+ * the products top their source on a few % of captures. Except after a jump: a VTX switched on or
+ * armed beside the antenna clips while its average is still low (at the floor, or more than
+ * SD_HOLD_DOM_DB under a partner that stands up), and the smoothed levels alone would hold the
+ * source itself, frozen low for the whole run, and feed its products to the partner. So when the
+ * last 3 readings of a channel all stand more than SD_HOLD_DOM_DB over its partner's median and
+ * more than SD_HOLD_JUMP_DB over its own average, it is the run's source: its partner is held until
+ * the saturated run ends. A drone flown in never leads its average that much (host model), so
+ * there both rules hold the same channel. When a held channel is fed again, its median
  * restarts on fresh readings; if it stood min_peak_db up as its hold began (a real pass under way),
  * its average catches up to the fresh median less drop_db (never down, so a catch-up never rings by
  * itself); after a hold longer than SD_HOLD_LONG_US it resumes in COOLDOWN (what follows is the tail
@@ -65,6 +72,7 @@ extern "C" {
 #define SD_HOP_READINGS   2u          /* readings of one capture, at most (= SDR_RX_PER_HOP) */
 #define SD_HOPS_MAX       8u          /* hops of a plan, at most (= SDR_RX_MAX_HOPS) */
 #define SD_HOLD_DOM_DB    15.0f       /* a saturated capture's reading is held this far under its partner */
+#define SD_HOLD_JUMP_DB   20.0f       /* a channel's last 3 readings this far over its average: it jumped */
 #define SD_HOLD_TAIL_US   30000       /* a saturated run: saturated captures this close; a hover's tail */
 #define SD_HOLD_HOVER_US  150000      /* a run this long is a hover (a pass clips ~80 ms at 0.3 m) */
 #define SD_HOLD_LONG_US   500000      /* a longer hold resumes in COOLDOWN */
@@ -98,6 +106,10 @@ typedef struct {
     /* pair guard (sd_feed_hop) */
     int64_t sat_run_us[SD_HOPS_MAX];  /* per hop: start of its saturated run */
     int64_t sat_last_us[SD_HOPS_MAX]; /* per hop: its last saturated capture, 0 = none */
+    uint8_t sat_src[SD_HOPS_MAX];     /* per hop: 1 + the reading index a jump showed to be the source, this run */
+    int16_t raw[PD_CHANNELS][3];      /* each channel's last 3 readings into sd_feed_hop, held ones too */
+    uint8_t raw_n[PD_CHANNELS];       /* valid entries of raw, saturates at 3 */
+    uint8_t raw_i[PD_CHANNELS];       /* next write slot of raw, cycles 0..2 */
     int64_t held_since_us[PD_CHANNELS];
     float held_rise_db[PD_CHANNELS];  /* pd's smoothed rise as the hold began */
     uint8_t held_mask;                /* channels whose last reading was held */

@@ -1,6 +1,6 @@
 # The scan detector runs for every reading (~4000 a second): in IRAM, away from flash cache
-# misses, as widscan58 (CapnBry, a9fff97) put its lap feed in IRAM. About 5.7 KB of text:
-# scan_detector.o 3682 B (the pair guard's sd_feed_hop 1030 B of it), pass_detector.o 2000 B
+# misses, as widscan58 (CapnBry, a9fff97) put its lap feed in IRAM. About 6.4 KB of text:
+# scan_detector.o 4436 B (the pair guard's sd_feed_hop 1786 B of it), pass_detector.o 2000 B
 # (the relative re-arm about 500 B of it) ([build] riscv32-esp-elf-size, IDF 6.0.2,
 # 2026-11-15). The first thing to drop if static RAM gets short (components/sdr_rx/sram_guard.ld).
 [mapping:cp_detector]

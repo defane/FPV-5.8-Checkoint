@@ -287,6 +287,95 @@ static void pair_run(const pdrone_t *hi, const pdrone_t *lo, int guard, uint64_t
     }
 }
 
+/* A pilot that laps a pair channel while the other one clips (the reading model above): the pilot
+ * stands `base` dB over the floor from 4 s (none: 0) and passes +20 dB over it (sigma 150 ms) at 5,
+ * 11, 17 and 23 s; from STEP_CLIP_S, `after` dB instead. The other drone clips the capture from
+ * STEP_CLIP_S for clip_s, switched on and off at once (a VTX armed by the antenna) or flown in and
+ * out over 0.5 s (ramp). The pilot is R5 and the clipping drone R6, or the other way round (mirror).
+ * Every run has the relative re-arm at `rearm`. */
+#define STEP_CLIP_S 13.5
+typedef struct {
+    double base, after, clip_s;
+    int ramp, mirror;
+    float rearm;
+} step_t;
+typedef struct {
+    unsigned n, n_src, held, held_src;   /* the pilot's passes and held readings; the clipping drone's */
+    double t[8];                         /* the pilot's pass times (peak_ms), s */
+    pd_channel_t probe;                  /* the pilot's pd state 0.1 s after the clip */
+    float probe_rest_db;
+} step_out_t;
+
+static void step_run(const step_t *p, uint64_t s, step_out_t *o)
+{
+    static scan_detector_t sd;
+    memset(o, 0, sizeof(*o));
+    const pd_config_t c = sd_config_default();
+    sd_init(&sd, &c);
+    pd_set_rearm(&sd.det, p->rearm);
+    seed(s);
+    const unsigned pilot = p->mirror ? PAIR_HI : PAIR_LO, src = p->mirror ? PAIR_LO : PAIR_HI;
+    const double end = STEP_CLIP_S + p->clip_s;
+    bool probed = false;
+    for (int64_t t = T0_US; t < T0_US + S(26.0); t += RATE_A_US) {
+        for (unsigned hop = 0; hop < 4u; hop++) {
+            const int64_t th = t + (int64_t)hop * RATE_A_US / 4;
+            const double ts = (double)(th - T0_US) * 1e-6;
+            double rp = PAIR_FLOOR + gauss(1.2f), rs = PAIR_FLOOR + gauss(1.2f);
+            uint8_t fl = 0;
+            if (hop == PAIR_HOP && ts >= 4.0) {
+                const double base = ts < STEP_CLIP_S ? p->base : p->after;
+                double v = base > 0.0 ? base : -999.0;
+                for (int k = 0; k < 4; k++) {
+                    const double x = (ts - (5.0 + 6.0 * k)) / 0.15;
+                    v = fmax(v, (base > 0.0 ? base : 0.0) + 20.0 * exp(-0.5 * x * x));
+                }
+                const double a = PAIR_FLOOR + v + gauss(1.0f);
+                if (ts >= STEP_CLIP_S && ts < end) {
+                    fl = SD_FLAG_SATURATED;
+                    rs = PAIR_CLIP_DBFS + 5.0 + gauss(0.3f);
+                    rp = psum(psum(rp, a - 3.0), rs + clip_x());
+                } else {
+                    rp = psum(rp, a);
+                    const double away = ts < STEP_CLIP_S ? STEP_CLIP_S - ts : ts - end;
+                    if (p->ramp && away < 0.5) rs = psum(rs, PAIR_CLIP_DBFS - 1.0 - 60.0 * away + gauss(1.0f));
+                }
+            }
+            if (hop == PAIR_HOP && ts >= end + 0.1 && !probed) {
+                probed = true;
+                o->probe = sd.det.ch[pilot];
+                o->probe_rest_db = sd.c[pilot].rest_db;
+            }
+            sd_reading_t rd[2];   /* slot 0 the hop's lower channel (R5 on PAIR_HOP), 1 its upper */
+            rd[pilot & 1u] = (sd_reading_t){th, qdb((float)rp), (uint8_t)(2u * hop + (pilot & 1u)), fl};
+            rd[src & 1u] = (sd_reading_t){th, qdb((float)rs), (uint8_t)(2u * hop + (src & 1u)), fl};
+            pd_event_t ev[2];
+            const unsigned got = sd_feed_hop(&sd, hop, rd, 2, ev, NULL);
+            for (unsigned i = 0; i < 2; i++) {
+                if (!(got & (1u << i))) continue;
+                if (ev[i].channel == pilot && o->n < 8u) o->t[o->n++] = ev[i].peak_ms / 1000.0 - T0_US / 1e6;
+                o->n_src += ev[i].channel == src;
+            }
+        }
+        sd_rotation(&sd, t + 3 * RATE_A_US / 4);
+    }
+    o->held = sd.held[pilot];
+    o->held_src = sd.held[src];
+}
+
+/* The laps of a step run the pilot rang (one pass within 0.3 s of each, nothing else), as a bit per
+ * lap at 5, 11, 17 and 23 s; bit 4: a pass far from every lap (a phantom). */
+static unsigned step_laps(const step_out_t *o)
+{
+    unsigned bits = 0;
+    for (unsigned i = 0; i < o->n; i++) {
+        const int k = (int)lround((o->t[i] - 5.0) / 6.0);
+        if (k >= 0 && k < 4 && fabs(o->t[i] - (5.0 + 6.0 * k)) < 0.3 && !(bits & (1u << k))) bits |= 1u << k;
+        else bits |= 1u << 4;
+    }
+    return bits;
+}
+
 int main(void)
 {
     static run_t r, q;   /* large: off the stack */
@@ -906,6 +995,47 @@ int main(void)
         }
         CHECK(rang == 0, "check 25 with the relative re-arm on: still no R5 lap, no phantom, no tail");
         s_rearm_db = 0.0f;
+    }
+
+    /* 29. A step onset: a VTX switched on or armed beside the antenna clips at once, while its average
+     *     is still at the floor. R5 laps (5, 11, 17, 23 s), 18 or 25 dB up between laps (relatively
+     *     re-armed) or at the floor; R6 clips from 13.5 s for 0.1 or 0.3 s, switched on and off at
+     *     once. By the smoothed levels alone, with R5 up, R6 was held for the whole run (its average
+     *     still low) and R5 fed R6's products; with R5 at the floor, R5 was fed them until R6's average
+     *     caught up: a phantom R5 pass in 44 of these 120 runs (all 40 at the floor) and no R6 pass in
+     *     80. Once R6's last 3 readings show it is the source, R5 is held
+     *     until the run ends: R6 is held on its first clipped captures only (2 mostly, 5 at most here,
+     *     none with R5 at the floor), R5 rings its four laps and nothing else, and R6 rings its own
+     *     pass. Mirrored (R5 switched on, R6 lapping) the same. Flown in over 0.5 s, R6 is never held,
+     *     as before. */
+    {
+        unsigned runs = 0, ok_laps = 0, ok_src = 0, ok_held = 0, worst_src = 0;
+        static const double bases[3] = {18.0, 25.0, 0.0}, clips[2] = {0.1, 0.3};
+        for (int mirror = 0; mirror < 2; mirror++)
+            for (unsigned b = 0; b < 3u; b++)
+                for (unsigned c = 0; c < 2u; c++)
+                    for (uint64_t k = 0; k < 10u; k++) {
+                        const step_t p = {.base = bases[b], .after = bases[b], .clip_s = clips[c], .mirror = mirror, .rearm = 16.0f};
+                        step_out_t o;
+                        step_run(&p, 2900 + 10u * b + k, &o);
+                        runs++;
+                        ok_laps += step_laps(&o) == 0xFu;
+                        ok_src += o.n_src == 1u;
+                        ok_held += o.held_src <= 8u && o.held + 8u >= (unsigned)(clips[c] * 490.0);   /* 8 captures at most */
+                        if (o.held_src > worst_src) worst_src = o.held_src;
+                    }
+        unsigned ramp_ok = 0;
+        for (uint64_t k = 0; k < 10u; k++) {
+            const step_t p = {.base = 25.0, .after = 25.0, .clip_s = 0.3, .ramp = 1, .rearm = 16.0f};
+            step_out_t o;
+            step_run(&p, 2990 + k, &o);
+            ramp_ok += o.held_src == 0u && o.held > 140u && step_laps(&o) == 0xFu && o.n_src == 1u;
+        }
+        printf("     step onset, %u runs: all laps and no phantom in %u, the source's pass in %u, held right in %u "
+               "(the source at most %u readings); flown in: %u/10\n", runs, ok_laps, ok_src, ok_held, worst_src, ramp_ok);
+        CHECK(ok_laps == runs && ok_src == runs && ok_held == runs,
+              "a step into the rails: its partner is held, every lap kept, no phantom, the source rings its pass");
+        CHECK(ramp_ok == 10u, "flown in, the smoothed levels hold the partner as before (the source never held)");
     }
 
     printf("%d/%d scan_detector checks passed\n", g_pass, g_pass + g_fail);
