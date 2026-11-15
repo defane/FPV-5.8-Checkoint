@@ -8,34 +8,30 @@ passes. It scales to a multi-gate race-timing fleet.
 
 ![Fleet architecture: the C6 master with its own C5 gate and the speaker, C3 + C5 gates over ESP-NOW](docs/fleet.svg)
 
-> **Derivative.** This project adapts the receive engine of
-> [C5VRX](https://github.com/Twotoz/C5VRX) — **C5VRX-5, by Twotoz and the C5VRX
-> contributors** (forked at upstream commit `6bc9e4b`, modified since
-> 2026-10-29). The upstream RF chain
-> (MODEM_DIAG → BitScrambler → PARLIO → AGC and its control/calibration) is
-> reused in the `components/c5vrx_rx` component, unchanged except for a 7-line
-> `CONFIG_C5VRX_VIDEO_OUTPUT=n` pin routing in `transport.c`. **Modified for this
-> video-off detector:** the component drops the upstream video menu/OSD/splash
-> (`menu.c`, `menu_ui.c`, `menu_raster.c` and their font, logo and DAC-test
-> headers), the field experiments (`experimental.c`, `experimental_phy.c`), the
-> flight log (`flightlog.c`) and the bench labs (`sense_lab.c`,
-> `calibration_bench.c`); `menu_stub.c` and `pruned_stubs.c` stand in for them
-> with the video-off behaviour, and `console.c` has the checkpoint hooks and a
-> reduced key table (`AGENTS.md` "Repository sources" lists every change). This
-> repository adds the pass detector, the coin sound (on the C6 master), and the
-> C5↔C3/C6 platform around it.
-> Visit the [official C5VRX website](https://twotoz.github.io/C5VRX/) for the
-> original project; its Discord invite is available there. Licensed
-> **GPL-3.0-only** (see `LICENSE`), without any warranty (sections 15–17), like
-> C5VRX; the C3 and C6 web pages show this notice in their footer. This is
-> **not** an official C5VRX release and is not endorsed by its authors.
+> **Derivative and credits.** The detector's receive engine (`components/sdr_rx`) is ported from
+> [widscan58](https://github.com/CapnBry/widscan58) by **CapnBry** (commit `a9fff97`: radio, calibration
+> cache, PSD/FFT, level metrics, LO planner, linker guard), whose radio layer is derived from
+> [esp-sdr](https://github.com/ESPARGOS/esp-sdr) by **ESPARGOS** (commit `a8eaac1`: the PHY I/Q dump
+> capture, RX path, gain and analog filter control). Those files keep their GPL-3.0-or-later notices.
+> This project was forked from [C5VRX](https://github.com/Twotoz/C5VRX) — **C5VRX-5, by Twotoz and the C5VRX
+> contributors** (upstream `6bc9e4b`); the C5VRX receive engine was removed on this branch (issue #2), but
+> C5VRX research is still used: the C5 PHY I/Q dump format first decoded by C5VRX-1, the console
+> structure, the firmware id and NVS helpers, the Raceband scan benches and the off-grid tuning finding
+> (zerowidth PR #3). Visit the [official C5VRX website](https://twotoz.github.io/C5VRX/) for the original
+> project; its Discord invite is available there. This repository adds the pass detector, the coin
+> sound (on the C6 master), and the C5↔C3/C6 platform around it. GPL-3.0-only (see `LICENSE`), without
+> any warranty (sections 15–17); the C3 and C6 web pages show this notice in their footer. Not an
+> official release of C5VRX, esp-sdr or widscan58, and not endorsed by their authors.
 
 ## What it is
 
-- **ESP32-C5** (`firmware/detector`, Waveshare ESP32-C5-Zero) — runs the full C5VRX
-  receive chain, sweeps R1 to R8 and detects a pass on any of them, reported over a
-  UART link to its bridge. It has no local output: no picture
-  (`CONFIG_C5VRX_VIDEO_OUTPUT=n`), no amplifier and no status LED.
+- **ESP32-C5** (`firmware/detector`, Waveshare ESP32-C5-Zero) — runs the **sdr_rx**
+  engine (`components/sdr_rx`): snapshots of the PHY's I/Q dump at 80 MS/s, one LO for
+  two channels (5677/5751/5825/5899 MHz), a 4 × 64-point integer PSD with moment-based
+  I/Q correction and the ±5 MHz band power of each channel, ~500 times a second per
+  channel (widscan58's measurement; not yet measured on this board). It detects a pass
+  on any of R1 to R8 and reports it over a UART link to its bridge. It has no local
+  output: no picture, no amplifier and no status LED.
 - **ESP32-C3** (`firmware/node`) — a node bridge: UART to the C5, ESP-NOW uplink to
   the C6 master; if no master is reachable at boot it falls back to a local
   Wi-Fi SoftAP + web (results, the C5's health and its
@@ -61,9 +57,9 @@ request still allows offline guessing, so choose a long random password
 
 ```
 components/
-  c5vrx_rx/      upstream C5VRX receive engine, pruned for a video-off detector (RF chain unchanged)
-  checkpoint/    pass detection + the C5<->bridge UART link
-  pass_detector/ pure-C pass detector (host-tested)
+  sdr_rx/        receive engine (C5 only): dump capture, LO pairs, PSD + IQ correction (pure-C parts host-tested)
+  checkpoint/    the scan task, console and benches, pass detection + the C5<->bridge UART link
+  pass_detector/ pure-C pass detector and scan detector (host-tested)
   audio_player/  I2S coin-sound player (the C6 speaker in a fleet)
   link_proto/    pure-C C5<->bridge UART protocol (host-tested)
   fleet_proto/   pure-C C6<->C3 ESP-NOW protocol (host-tested)
@@ -119,8 +115,14 @@ The raw commands:
 
 # Host tests
 cd test
+cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/sdr_rx -I../components/sdr_rx/include test_sdr_dsp.c \
+   ../components/sdr_rx/sdr_psd.c ../components/sdr_rx/sdr_level.c -lm -o /tmp/t && /tmp/t
+cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/sdr_rx -I../components/sdr_rx/include test_sdr_plan.c \
+   ../components/sdr_rx/sdr_plan.c -o /tmp/t && /tmp/t
 cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/pass_detector/include \
    test_pass_detector.c ../components/pass_detector/pass_detector.c -lm -o /tmp/t && /tmp/t
+cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/pass_detector/include test_scan_detector.c \
+   ../components/pass_detector/scan_detector.c ../components/pass_detector/pass_detector.c -lm -o /tmp/t && /tmp/t
 cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/audio_player/include \
    test_audio_resample.c -lm -o /tmp/t && /tmp/t
 cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/link_proto/include \
@@ -134,11 +136,17 @@ cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/status_led/include \
 cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/web_auth/include \
    test_web_auth.c ../components/web_auth/web_auth.c -o /tmp/t && /tmp/t
 cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/checkpoint \
-   test_hop_stats.c -o /tmp/t && /tmp/t
+   test_hop_stats.c -lm -o /tmp/t && /tmp/t
 node test_web_auth.mjs   # the page side (auth.js), Node 18+
 python3 test_web_mock.py # tools/web_mock.py against the firmware's /api/state and buffers
+python3 test_pcb.py      # hardware/ boards against the firmware's Kconfig pin defaults
 python3 test_scan_analyze.py   # tools/scan_analyze.py on synthetic recordings
+python3 test_flash_tool.py     # tools/flash.py: download key, --check, logs
 ```
+
+After editing a `firmware/detector/sdkconfig*.defaults`, delete the generated
+`firmware/detector/sdkconfig` (and the variants' `sdkconfig.<variant>`, never the
+`*.defaults`) and run `tools/fw.sh clean`: ESP-IDF never reapplies the defaults.
 
 ## Architecture
 
@@ -162,7 +170,8 @@ both sets, with Gerbers ready to order.
 | Link UART TX → bridge RX | 6 | to a C3 (node) or the C6 (master) |
 | Link UART RX ← bridge TX | 8 | C5-Zero header pin (GPIO 15 is not broken out) |
 | Amplifier / status LED | — | none on a detector: the C6 master plays the sound |
-| forbidden | 0-5, 25, 27 (IQ) · 13,14 (USB) · 16-22 (flash) · 26 (antenna) | receiver-owned |
+| forbidden | 13,14 (USB) · 16-22 (flash) · 26 (antenna) | console, flash, C5-Zero antenna switch |
+| free | 0-5, 7, 9-12, 23-25, 27 | the sdr_rx engine uses no GPIO; 7 is a strapping pin; 27 is the C5-Zero's WS2812 (unused) |
 
 **ESP32-C3** (`firmware/node`, node bridge)
 
@@ -187,22 +196,51 @@ The C6 AP, the C3 APs and ESP-NOW must share the **same Wi-Fi channel**
 ## Safety
 
 > [!WARNING]
-> This is experimental and built on an experimental FPV receiver. Bugs, signal
-> loss or automatic receive-chain changes can cause sudden loss of video or
-> sync even after an apparently successful test. Do not rely on it as your only
-> means of maintaining safe control of an aircraft.
+> This is experimental and built on an experimental receive engine. Bugs, signal
+> loss or automatic receive-chain changes can cause missed or false passes even
+> after an apparently successful test. Do not rely on it as your only means of
+> maintaining safe control of an aircraft.
 
 ## Attribution
 
-Receive engine: **C5VRX** by Twotoz and the C5VRX contributors —
-<https://github.com/Twotoz/C5VRX> · <https://twotoz.github.io/C5VRX/> (Discord
-invite on the website). Reused material keeps its original copyright, license
-and credits; see `AGENTS.md` for the reuse policy and `assets/BRANDING.md` for
-branding terms.
+Receive engine (`components/sdr_rx`): **widscan58** by CapnBry —
+<https://github.com/CapnBry/widscan58>, commit `a9fff97`. Ported from its
+`firmware/src/radio/` (`radio.h`; `c5/radio_c5.c`, `recal_c5.c`, `sram_guard.ld`,
+`hot_iram.lf`), `firmware/src/dsp/` (`psd.c`, `fft_r4_sc16.h`, `fft_twiddle_q15.h`) and
+`firmware/src/scan/` (`metrics.c`, `planner.c`, the hop of `scanner.c`); the bench
+methods of `components/checkpoint/cp_bench.c` (tune timing, settle, image rejection,
+noise per FFT size) follow its measurement log (`PLAN.md`). Its radio layer is derived
+from **esp-sdr** by ESPARGOS — <https://github.com/ESPARGOS/esp-sdr>, commit `a8eaac1`
+(`main/families/c5_c6_c61/receiver.c`, `main/targets/esp32c5/`,
+`main/common/rx_recalibration.c`, `main/common/burst_gain.h`). The ported files keep
+their GPL-3.0-or-later notices and list their changes in their headers.
 
-C5VRX-5 builds on C5VRX-2..4 (the continuous MODEM_DIAG to BitScrambler video path,
-Direct Gain V3-V5, the PAIR schedule and the U85Q study of PR #190), on zerowidth/C5VRX
-PR #3 (interference-burst gate, sampling-phase probe, off-grid channel tuning), on Louis
-Hitchcock's staged overload recovery (C5VRX #182/#184), and on ESPARGOS esp-sdr
-(GPL-3.0) for the C5 RX filter control. Espressif supplied the GDMA EOF fix
-(espressif/esp-idf#19091).
+History: this project was forked from **C5VRX** by Twotoz and the C5VRX contributors —
+<https://github.com/Twotoz/C5VRX> · <https://twotoz.github.io/C5VRX/> (Discord
+invite on the website), at upstream `6bc9e4b`. The C5VRX-5 receive engine ran the
+detector until issue #2 and is removed on this branch (`main` keeps it until a board
+bench validates sdr_rx). Still used from C5VRX-5: the console structure and its
+download-key reboot (`components/checkpoint/cp_console.c`, the reboot of
+`components/sdr_rx/sdr_radio_c5.c`), the firmware id and NVS helpers
+(`components/checkpoint/fw_id.c`, `cp_nvs.c`), `tools/flash.py` and
+`tools/enter_download.py`, and the off-grid tuning finding of zerowidth/C5VRX PR #3.
+The Raceband scan benches this fork first built on the C5VRX engine (issue #1) give
+`cp_bench.c` the shape of its scan recording and residue trace. Reused material keeps
+its original copyright, license and credits; see `AGENTS.md` for the reuse policy and
+`assets/BRANDING.md` for branding terms.
+
+Research provenance: the PHY I/Q dump engine was first decoded in C5VRX-1 (librftest
+`adctrig`, registers `0x600a9004/08/18`, bank `0x40830000`, 10-bit I/Q words: upstream
+`legacy/c5vrx1/research/adc-dump-format.md`), and C5VRX-3/5 drove it continuously
+(`enable_continuous_modem`, upstream `main/rf.c:119-147`). sdr_rx takes a different
+route: one-shot snapshots, as esp-sdr and widscan58 trigger them. Source: raw source 15,
+after the PHY's ADC-rate/RX-filter stage. Rate: 80 MS/s. Size: 256 words per capture
+(3.2 µs). Ownership: CPU-polled, no DMA, no ring, no DAC. Word format: I bits 0–9,
+Q bits 10–19, signed.
+
+For the history, C5VRX-5 builds on C5VRX-2..4 (the continuous MODEM_DIAG to
+BitScrambler video path, Direct Gain V3-V5, the PAIR schedule and the U85Q study of
+PR #190), on zerowidth/C5VRX PR #3 (interference-burst gate, sampling-phase probe,
+off-grid channel tuning), on Louis Hitchcock's staged overload recovery (C5VRX
+#182/#184), and on ESPARGOS esp-sdr (GPL-3.0) for the C5 RX filter control. Espressif
+supplied the GDMA EOF fix (espressif/esp-idf#19091).

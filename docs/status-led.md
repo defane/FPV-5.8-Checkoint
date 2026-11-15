@@ -3,7 +3,7 @@
 Each board with an addressable WS2812 shows its state via the
 `components/status_led` component: a pure-C state→colour core (host-tested,
 `test/test_status_led.c`) + a WS2812 driver over the RMT bytes encoder (no
-external dependency), a priority-1 render task started after the splash, ~15%
+external dependency), a priority-1 render task started at boot, ~15%
 brightness. At boot the task plays a **🔴 red → 🟢 green → 🔵 blue self-test**
 (~0.4 s each): a glance confirms a new board's wiring, pin and colour order (and
 tells the WS2812 apart from a separate power LED).
@@ -32,11 +32,11 @@ Per role:
 
 No-colour cases:
 
-- **detector** (C5): **no status LED**. The C5-Zero's onboard WS2812 is on
-  **GPIO27**, one of the receiver's I/Q-loopback pins (`RF_IQ_GPIO_NUMS`); the
-  receive chain comes first, so the LED is disabled
-  (`CONFIG_STATUS_LED_ENABLE=n`). *(The C5 has no GPIO29 — the Waveshare pinout's
-  "GP29" is wrong.)*
+- **detector** (C5): **no status LED**, by choice. The C5-Zero's onboard WS2812 is on
+  **GPIO27**, free since the sdr_rx engine uses no GPIO (the C5VRX engine used it as
+  an I/Q-loopback pin), but `status_led` is not in the detector's build
+  (`COMPONENTS main`): driving it is a follow-up. *(The C5 has no GPIO29 — the
+  Waveshare pinout's "GP29" is wrong.)*
 - **ESP32-C3 SuperMini**: no addressable WS2812 (only a mono blue LED on GPIO8 +
   a red power LED). The colour scheme does not apply — use a C3-Zero for a node
   with a status LED.

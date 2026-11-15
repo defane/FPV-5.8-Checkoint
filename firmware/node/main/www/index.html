@@ -90,7 +90,7 @@
       <div class="stat"><b id="h_gain">—</b><span>gain</span></div>
       <div class="stat"><b id="h_up">—</b><span>C5 uptime</span></div>
       <div class="stat"><b id="h_heap">—</b><span>min free heap</span></div>
-      <div class="stat"><b id="h_faults">—</b><span>transport faults</span></div>
+      <div class="stat"><b id="h_faults">—</b><span>capture faults</span></div>
     </div>
     <div class="muted" style="margin-top:10px;font-size:.85rem;word-break:break-all">firmware <span id="h_fw" style="color:#e7ebf0">—</span></div>
     <div class="admin-only">
@@ -121,7 +121,7 @@
   <h2>Recent passes</h2>
   <ul id="events" class="card"></ul>
 </main>
-<footer class="muted" style="padding:0 16px 20px;text-align:center;font-size:.75rem">FPV 5.8 Checkpoint, based on C5VRX by Twotoz and the C5VRX contributors · GPL-3.0-only, without any warranty · license and source: <a class="muted" href="https://github.com/defane/FPV-5.8-Checkoint">github.com/defane/FPV-5.8-Checkoint</a></footer>
+<footer class="muted" style="padding:0 16px 20px;text-align:center;font-size:.75rem">FPV 5.8 Checkpoint · receive engine from widscan58 (CapnBry) and esp-sdr (ESPARGOS), forked from C5VRX by Twotoz and the C5VRX contributors · GPL-3.0-only, without any warranty · license and source: <a class="muted" href="https://github.com/defane/FPV-5.8-Checkoint">github.com/defane/FPV-5.8-Checkoint</a></footer>
 <script src="/auth.js"></script>
 <script>
 const $ = id => document.getElementById(id);
@@ -269,13 +269,13 @@ const CMD_DONE = { cal_full: "full calibration started", cal_quick: "quick calib
 document.querySelectorAll("button[data-cmd]").forEach(b => b.addEventListener("click", async () => {
   const cmd = b.dataset.cmd;
   if (!confirm(cmd === "reboot" ? "Reboot the C5? The gate stops detecting until it is back up."
-      : "All VTXs must be OFF. The gate stops detecting while it calibrates (minutes for a full one). Continue?"))
+      : "All VTXs must be OFF. The gate stops detecting while it calibrates (a few seconds). Continue?"))
     return;
   $("cmd_msg").textContent = "sending…";
   try {
     let r = await sendCommand(cmd, 0);
     if (r.vtx) {
-      if (!confirm(`The gate sees a strong signal (C/N ${(r.cn_x10 / 10).toFixed(1)} dB): a VTX may be on. Force the calibration?`)) {
+      if (!confirm(`The gate sees a strong signal (${(r.cn_x10 / 10).toFixed(1)} dB over its rest): a VTX may be on. Force the calibration?`)) {
         $("cmd_msg").textContent = "cancelled"; return;
       }
       r = await sendCommand(cmd, 1);

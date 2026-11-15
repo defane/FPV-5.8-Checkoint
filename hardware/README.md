@@ -80,8 +80,9 @@ they change nothing.
   1.6 mm and two plugs fit side by side. BOOT and RESET stay reachable on top.
 - **Antennas:** the board stops short of the C5's ceramic antenna and IPEX connector, and a
   12 mm notch leaves no copper or FR-4 under any antenna.
-- **Receiver pins:** the C5's GPIO 0 to 5 carry the IQ loopback and stay unconnected, like
-  every C5 pin but `5V`, `GND` and the link (GPIO 6 and 8). Those two are not strapping pins.
+- **Receiver pins:** the C5's GPIO 0 to 5 stay unconnected (they carried C5VRX's IQ
+  loopback; the sdr_rx engine uses no GPIO), like every C5 pin but `5V`, `GND` and the link
+  (GPIO 6 and 8). Those two are not strapping pins.
 - **C6 strapping pins:** the link uses GPIO 4 and 5, which only set the SDIO clock edges and do
   not affect a boot from flash. GPIO 8, 9 and 15 are left unconnected.
 - **Speaker terminal:** its pins may poke through the breakout, so the master has no copper

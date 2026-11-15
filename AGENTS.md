@@ -82,24 +82,22 @@ permitted GPL reuse. Credit external sources used by C5VRX with the same care.
 
 ## Repository sources
 
-- `components/c5vrx_rx/` — the C5VRX-5 receive engine from upstream commit
-  `6bc9e4b` (RF/transport/gain/AGC/control/calibration/console), **pruned for the
-  video-off detector**: upstream `menu.c`, `menu_ui.c`, `menu_raster.c`,
-  `menu_font.h`, `menu_logo.h`, `dac_check.h`, `experimental.c`,
-  `experimental_phy.c`, `flightlog.c`, `sense_lab.c`, `sense_lab_logic.h` and
-  `calibration_bench.c` are removed; `menu_stub.c` and `pruned_stubs.c` (this
-  fork) stand in for the symbols the kept code calls, with the video-off
-  behaviour. Other modifications by this fork: `transport.c` (+7 lines:
-  `CONFIG_C5VRX_VIDEO_OUTPUT=n` routes `s_dac_gpio` to no pin), `console.c` (the
-  checkpoint `K`/`T` hooks, a reduced key table, `C5VRX5_COMMIT` renamed
-  `CHECKPOINT_COMMIT`), `CMakeLists.txt` (component packaging, the same rename);
-  added: `Kconfig.projbuild`, `checkpoint.h`,
-  `checkpoint_weak.c`. Every other engine file, `rf.c`, `receiver.c`, `gain.c`,
-  `agc.c` and `*.bsasm` included, is byte-identical to upstream `6bc9e4b:main/`.
+- `components/sdr_rx/` — the detector's receive engine, ported from widscan58 by
+  CapnBry (https://github.com/CapnBry/widscan58, commit `a9fff97`), whose radio
+  layer derives from esp-sdr by ESPARGOS (https://github.com/ESPARGOS/esp-sdr,
+  commit `a8eaac1`). The ported files are GPL-3.0-or-later and keep their notices;
+  each file header names its source path and lists its changes. `sdr_rx.c`,
+  `sdr_host.h`, `include/sdr_rx.h`, `sdr_rx_bench.h` and `sdr_types.h`, `Kconfig`
+  and `CMakeLists.txt` are this fork's (GPL-3.0-only).
+  The C5VRX-5 engine, `components/c5vrx_rx/`, was removed on this branch per
+  issue #2 (operator decision); `main` keeps it until a board bench validates
+  sdr_rx.
 - `components/checkpoint/`, `components/pass_detector/`,
   `components/audio_player/`, `components/link_proto/` — the platform's own
   code (pass detection, the C6 master's coin sound, the C5<->bridge UART
-  protocol).
+  protocol). In `components/checkpoint`, `cp_console.c` and `fw_id.c` re-home
+  C5VRX-5 `console.c` code, `cp_nvs.c` its `settings.c` blobs and `CMakeLists.txt`
+  its commit id, each credited in place.
 - `components/fleet_proto/`, `components/race_timing/`, `components/espnow_link/`
   — the race-timing fleet: the C6<->C3 ESP-NOW protocol, the lap/sector engine,
   and the ESP-NOW transport.
@@ -111,12 +109,15 @@ permitted GPL reuse. Credit external sources used by C5VRX with the same care.
 - `test/` host tests, `tools/` console/log/build helpers, `docs/` the
   platform's feature notes (`docs/CHECKPOINT.md`) and wiring.
 
-The receive engine is upstream material; do not modify it further without the
-operator's approval (the realtime invariants below still govern any change to
-it). The invariants below describe upstream C5VRX-5: where they name the menu,
-the OSD, the flight log or a console key this fork removed, the matching code is
-a stub here (the splash flag and the menu's TX ownership are kept, and they
-still gate BOOT_PHASE and calibration exactly as described).
+The detector's receive engine is `components/sdr_rx` (widscan58/esp-sdr,
+GPL-3.0-or-later files). Changes to its radio files, `hot_iram.lf`,
+`sram_guard.ld` or the `--wrap` list need a board bench (docs/bench.md "Engine
+bench"); keep them close to widscan58 and record deviations in the file header.
+
+The sections below describe upstream C5VRX-5. They no longer describe code in
+this tree and apply only when C5VRX material is reused again. The paths they name
+(`components/c5vrx_rx/…`, `tools/dco_preset.py`, …) refer to `main` before
+issue #2 and to upstream, not to this branch.
 
 ## C5VRX-5 at a glance
 
@@ -374,10 +375,11 @@ When proposing a new CPU, source, DMA, DSP or DAC route:
 ### Workflows
 
 - `.github/workflows/checkpoint.yml` ("FPV 5.8 Checkpoint Build") is the firmware workflow.
-  It runs the host tests and builds firmware/detector, firmware/node and
-  firmware/master with ESP-IDF v6.0.2. Its images stay workflow artifacts: this
-  derivative publishes no GitHub Release, since one under the C5VRX name would
-  read as an official release (`assets/BRANDING.md`).
+  It runs the host tests (the platform's pure-C components, sdr_rx's DSP and LO
+  planner, the web mock, the boards and the tools) and builds firmware/detector,
+  firmware/node and firmware/master with ESP-IDF v6.0.2. Its images stay workflow
+  artifacts: this derivative publishes no GitHub Release, since one under the C5VRX
+  name would read as an official release (`assets/BRANDING.md`).
 - Keep its concurrency group separated by event type and PR identity
   (`checkpoint-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}`):
   a `github.ref`-only group let a merged PR's cleanup cancel the main build.

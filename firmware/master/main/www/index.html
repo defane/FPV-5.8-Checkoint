@@ -112,7 +112,7 @@
       <button id="cal_all" class="admin-only warn" title="Full calibration (console B) on every reachable gate">Calibrate all gates (B)</button>
       <span id="cmd_msg" class="muted"></span></div>
     <table>
-      <thead><tr><th>Gate</th><th>Node</th><th>Link</th><th>Detector</th><th title="C5 calibration state and transport faults (hover for firmware, uptime, heap)">Health</th><th>RSSI</th><th>Loss</th><th>Seen</th><th class="admin-only"></th></tr></thead>
+      <thead><tr><th>Gate</th><th>Node</th><th>Link</th><th>Detector</th><th title="C5 calibration state and capture faults (hover for firmware, uptime, heap)">Health</th><th>RSSI</th><th>Loss</th><th>Seen</th><th class="admin-only"></th></tr></thead>
       <tbody id="nodes"><tr><td colspan="9" class="muted">no nodes paired</td></tr></tbody>
     </table>
     <p class="muted" style="margin:10px 0 0">Gate 0 is the master's own C5.</p>
@@ -132,7 +132,7 @@
       <button class="ghost sm cmd" data-cmd="reboot" data-gate="0">Reboot</button></div>
   </div>
 </main>
-<footer class="muted" style="padding:0 16px 20px;text-align:center;font-size:.75rem">FPV 5.8 Checkpoint, based on C5VRX by Twotoz and the C5VRX contributors · GPL-3.0-only, without any warranty · license and source: <a class="muted" href="https://github.com/defane/FPV-5.8-Checkoint">github.com/defane/FPV-5.8-Checkoint</a></footer>
+<footer class="muted" style="padding:0 16px 20px;text-align:center;font-size:.75rem">FPV 5.8 Checkpoint · receive engine from widscan58 (CapnBry) and esp-sdr (ESPARGOS), forked from C5VRX by Twotoz and the C5VRX contributors · GPL-3.0-only, without any warranty · license and source: <a class="muted" href="https://github.com/defane/FPV-5.8-Checkoint">github.com/defane/FPV-5.8-Checkoint</a></footer>
 <script src="/auth.js"></script>
 <script>
 const $ = id => document.getElementById(id);
@@ -145,12 +145,12 @@ const rssiTxt = r => r ? r + " dBm" : "—";               // 0 = no frame yet
 const lossTxt = n => { const t = (n.status_rx||0) + (n.status_lost||0);
   return t ? Math.round(100*(n.status_lost||0)/t) + "%" : "—"; };
 const lossTitle = n => `${n.status_rx||0} status rx, ${n.status_lost||0} lost · ${n.rx_frames||0} frames total`;
-// C5 health (local or a node's): calibration badge, transport faults, details on hover
+// C5 health (local or a node's): calibration badge, capture faults, details on hover
 const calBadge = h => h.calibrating ? '<span class="pill busy">calibrating</span>'
   : h.cal_needed ? '<span class="pill bad" title="Run Cal B with every VTX off">cal needed</span>'
   : '<span class="pill ok">OK</span>';
 const faultsTxt = h => h.faults ? ` <span class="bad">${h.faults} faults</span>` : "";
-const healthInfo = h => `fw ${h.fw || "?"} · C5 up ${fmtUp((h.c5_uptime_s||0)*1000)} · heap min ${((h.heap_min||0)/1024).toFixed(1)} KB · gain ${h.gain} · ${h.passes} passes · ${h.faults} transport faults`;
+const healthInfo = h => `fw ${h.fw || "?"} · C5 up ${fmtUp((h.c5_uptime_s||0)*1000)} · heap min ${((h.heap_min||0)/1024).toFixed(1)} KB · gain ${h.gain} · ${h.passes} passes · ${h.faults} capture faults`;
 const healthTd = n => n.fw ? `<td title="${healthInfo(n)}">${calBadge(n)}${faultsTxt(n)}</td>`
   : '<td class="muted" title="no C5 status yet">—</td>';
 const CMD = { cal_full: "Cal B", cal_quick: "Cal F", reboot: "Reboot" };
@@ -400,10 +400,10 @@ async function sendCmd(gate, cmd, force) {
 }
 async function command(gate, cmd) {
   if (!confirm(cmd === "reboot" ? `Reboot the C5 of gate ${gate}? It stops detecting until it is back up.`
-      : "All VTXs must be OFF. The gate(s) stop detecting while calibrating (minutes for a full one). Continue?")) return;
+      : "All VTXs must be OFF. The gate(s) stop detecting while calibrating (a few seconds). Continue?")) return;
   let r = await sendCmd(gate, cmd, 0);
   if (r.vtx && r.vtx.length) {
-    const g = r.vtx.map(v => `${v.gate} (C/N ${cnTxt(v.cn_x10)} dB)`).join(", ");
+    const g = r.vtx.map(v => `${v.gate} (${cnTxt(v.cn_x10)} dB over its rest)`).join(", ");
     if (!confirm(`Strong signal on gate(s) ${g}: a VTX may be on. Force?`)) return;
     r = await sendCmd(gate, cmd, 1);
   }

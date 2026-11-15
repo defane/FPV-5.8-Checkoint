@@ -96,10 +96,12 @@ with no change on the gate side.
 - **Constraint:** the C6 and C3 APs **and** ESP-NOW share the **same Wi-Fi
   channel** (`CONFIG_*_AP_CHANNEL` / `CONFIG_C6_AP_CHANNEL`).
 - **Limit:** the time base (ESP-NOW beacons) aims for ~10 ms; not a sub-ms photo
-  finish. A pass is timed at its peak by the C5, and a lap by gate 0's C5 alone. A sector
-  also depends on when a remote gate's pass reaches its C3, after a 100 ms UART poll
-  (`LINK_READ_MS`): count ±0.1 s on it for now. The first passes after a boot teach the
-  master the local C5's clock, so a lap there can read a little short.
+  finish. A pass is timed at its smoothed peak by the C5, which lags the true peak by
+  ~40–60 ms on every gate alike, and a lap by gate 0's C5 alone. A sector also depends on
+  when a remote gate's pass reaches its C3: the C5 now reads its UART every 10 ms, but the
+  bridges still poll every 100 ms (`LINK_READ_MS`), so count ±0.1 s on a remote gate's
+  sector until they change too (a C3 and C6 reflash). The first passes after a boot teach
+  the master the local C5's clock, so a lap there can read a little short.
 
 ## Gate health and remote commands (no console in production)
 
@@ -109,16 +111,22 @@ its own C5 over UART, the others go through their C3), or the degraded C3's own
 page for a gate with no master.
 
 - **Health**, from the C5's `STATS` every `CONFIG_CHECKPOINT_LINK_STATS_MS`
-  (relayed in `NODE_STATUS`): a calibration badge (OK / calibration needed, i.e.
-  `CAL_NEEDED`/`DC_FAULT` / calibrating), RX gain, passes since boot, C5 uptime,
-  lowest free heap, transport fault counters and the firmware id. A C5 silent for
-  **3 s** is shown as absent: no stale health, and commands to it fail.
-- **Commands** (admin): *Cal B* = the console's `B` (full RF optimisation),
-  *Cal F* = `F` (quick filter calibration), *Reboot*; on the C6 also *Calibrate
-  all gates (B)*. They call the same engine functions as the console
-  (`filter_request_full()`, `filter_request()`), so the engine still refuses a
-  calibration that is already running.
-- **Guard:** a calibration blinds the gate for minutes and wants the VTXs off.
+  (relayed in `NODE_STATUS`): a calibration badge (OK / calibration needed / calibrating),
+  RX gain, passes since boot, C5 uptime, lowest free heap, the capture fault counters
+  and the firmware id. *Calibration needed* (`CAL_NEEDED`) is an LO's DC offset or IQ
+  estimate out of range for 3 s, no engine (its start failed), or a stalled scan (no
+  rotation for 1 s outside a calibration or a bench). *Calibrating* is a calibration,
+  the rests' learning (3 s) or a console bench: the gate is blind. The faults count
+  capture timeouts, short or overrun dumps, DSP errors and scan stalls, since boot. A C5
+  silent for **3 s** is shown as absent: no stale health, and commands to it fail.
+- **Commands** (admin): *Cal B* = the console's `B` (recalibrate every LO, then verify
+  its image rejection, up to 3 tries per LO), *Cal F* = `F` (recalibrate every LO),
+  *Reboot*; on the C6 also *Calibrate all gates (B)*. They post the same `sdr_rx`
+  recalibration request as the console (`sdr_rx_request_recal()`, applied by the scan
+  task), so the C5 refuses one while a calibration is pending or running, or a console
+  bench runs (`CHECKPOINT command=… refused=busy` on its console).
+- **Guard:** a calibration blinds the gate for about 3–4 s (~0.2 s of calibration,
+  more for B's retries, then 3 s of learning the rests) and wants the VTXs off.
   The page asks for confirmation; then the bridge refuses, unless forced, any
   gate whose strongest channel is above that C5's activity threshold (`active_db`,
   read from its `CONFIG_STATE` echo), i.e. a VTX is probably on. The C6 also skips gates
@@ -131,4 +139,7 @@ page for a gate with no master.
   replies `{"ok": true}`, `{"ok": false, "vtx": true, "cn_x10": x}` or
   `{"ok": false, "msg": "no C5 linked"}`.
 - **Back online:** the C6 re-sends a node's `CONFIG` (gate, detector settings) when the
-  node comes back online, so a rebooted gate returns to its assignment.
+  node comes back online, so a rebooted gate returns to its assignment. After flashing a
+  gate with the sdr_rx engine, review the detector config the C6 stores for it: the C6
+  re-sends it, and its thresholds were tuned on the C5VRX meter. Keep the defaults until
+  the bench retunes them ([bench.md](bench.md), B6).
