@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
-"""tools/scan_analyze.py on synthetic recordings: passes, bleed, steady interference."""
+"""tools/scan_analyze.py on synthetic recordings: passes, bleed, steady interference, the
+saturated-capture word of the newer rows."""
+import contextlib
 import importlib.util
+import io
 import math
 import random
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -43,11 +48,23 @@ ROT_US = 2000           # an sdr_rx rotation: four LOs, two channels a capture (
 ORDER = "1+2:3+4:5+6:7+8"
 
 
-def qdb_recording(events, decim, seconds=12, floor_db=-60.0, sd_db=1.2, drop=0.0, begin=True):
+def sat_word(r0, decim, sat):
+    """The row's saturated word: per hop, its captures within one of sat's (hop, t0_s, t1_s), 15 at
+    most, hop 0 in the top digit (cp_bench.c)."""
+    word = 0
+    for hop in range(4):
+        n = sum(1 for r in range(r0, r0 + decim) for h, t0, t1 in sat
+                if h == hop and t0 <= (r * ROT_US + (hop + 0.5) / 4 * ROT_US) / 1e6 < t1)
+        word |= min(n, 15) << (4 * (3 - hop))
+    return f"{word:04x}"
+
+
+def qdb_recording(events, decim, seconds=12, floor_db=-60.0, sd_db=1.2, drop=0.0, begin=True, sat=None):
     """The sdr_rx engine's dump (K then S, format=qdb): every channel read once a rotation, at the
     middle of its pair's quarter, sd_db of noise per reading; a row is the mean of decim rotations
     in 0.25 dB codes, timed at its first rotation's start. events: (channel, t_s, dB over the
-    floor, half_width_s)."""
+    floor, half_width_s). sat None: the older rows, 8 levels; else [(hop, t0_s, t1_s)], the
+    captures of that hop that hit a rail, and every row ends with its saturated word."""
     rnd = random.Random(7)
     rotations = int(seconds * 1e6 / ROT_US)
     rows = []
@@ -65,7 +82,8 @@ def qdb_recording(events, decim, seconds=12, floor_db=-60.0, sd_db=1.2, drop=0.0
                 sums[ch] += 4 * db
                 n[ch] += 1
         rows.append("SCAN," + ",".join(str(v) for v in [r0 * ROT_US] + [round(s / k) if k else -32768
-                                                                          for s, k in zip(sums, n)]))
+                                                                          for s, k in zip(sums, n)])
+                    + ("" if sat is None else "," + sat_word(r0, decim, sat)))
     lines = ["HB t_s=5 stage=ready"]
     if begin:
         lines.append(f"SCANDUMP begin rotations={rotations} kept={len(rows)} kept_s={seconds} decim={decim} "
@@ -177,6 +195,67 @@ class AnalyzeQdb(unittest.TestCase):
     def test_legacy_dump_stays_legacy(self):
         rows, header = sa.read_scans(recording([]))
         self.assertEqual(sa.read_dump(header, rows), {"qdb": False, "decim": 1, "rot_us": PERIOD_US})
+
+
+class SaturatedWord(unittest.TestCase):
+    """The newer K S rows end with a 4-hex-digit word: per hop, its captures that hit an ADC rail."""
+    EVENTS = AnalyzeQdb.EVENTS
+    CLIP = [(2, 2.95, 3.05)]   # LO 5825 (R5+R6) clips for 100 ms at R6's first pass
+
+    def test_word_is_read_and_optional(self):
+        text = ("SCANDUMP begin decim=15 format=qdb\nSCAN,0,-240,-32768,-1,4,-240,-240,-240,-240,0f10\n"
+                "SCAN,29500,-240,-240,-240,-240,-240,-240,-240,-240\nSCANDUMP end decim=15 format=qdb")
+        rows, _ = sa.read_scans(text, sat=True)
+        self.assertEqual(rows, [(0, [-240, None, -1, 4, -240, -240, -240, -240], [0, 15, 1, 0]),
+                                (29500, [-240] * 8, None)])
+        rows, _ = sa.read_scans(text)
+        self.assertEqual(rows[0], (0, [-240, None, -1, 4, -240, -240, -240, -240]), "without sat: as an older row")
+        self.assertEqual(len(rows), 2)
+
+    def test_old_and_new_rows_find_the_same_passes(self):
+        old = analyze_qdb(qdb_recording(self.EVENTS, 15))
+        new = analyze_qdb(qdb_recording(self.EVENTS, 15, sat=self.CLIP))
+        self.assertEqual([p["ch"] for p in new], [5, 5, 2])
+        self.assertEqual([(p["ch"], p["t"]) for p in old], [(p["ch"], p["t"]) for p in new])
+
+    def test_share_per_pass(self):
+        rows, header = sa.read_scans(qdb_recording(self.EVENTS, 15, sat=self.CLIP), sat=True)
+        dump = sa.read_dump(header, rows)
+        passes = sa.find_passes(rows, 10.0, 0.25, sa.read_order(header), dump)[0]
+        share = [sa.saturated_share(rows, p["rows"], dump["decim"]) for p in passes]
+        self.assertEqual([s[0] + s[1] + s[3] for s in share], [0, 0, 0], "only LO 5825 clipped")
+        self.assertGreater(share[0][2], 0.1, "R6's first pass: 100 ms clipped of a few hundred")
+        self.assertLess(share[0][2], 0.6)
+        self.assertEqual(share[1][2], 0.0, "R6's second pass did not clip")
+        self.assertEqual(sa.sat_text(share[0], sa.read_groups(header)).split()[:3], ["saturated", "1+2", "0%"])
+        old, _ = sa.read_scans(qdb_recording(self.EVENTS, 15), sat=True)
+        self.assertIsNone(sa.saturated_share(old, passes[0]["rows"], 15), "an older row has no share")
+
+    def test_a_count_reads_15_at_most(self):
+        rows, header = sa.read_scans(qdb_recording([], 16, seconds=2, sat=[(0, 0.0, 9.0)]), sat=True)
+        self.assertEqual({r[2][0] for r in rows}, {15})
+        self.assertAlmostEqual(sa.saturated_share(rows, (0, len(rows) - 1), 16)[0], 15 / 16)
+
+    def test_main_prints_the_share(self):
+        for sat, expect in ((self.CLIP, True), (None, False)):
+            with tempfile.TemporaryDirectory() as d:
+                log = Path(d) / "run.log"
+                log.write_text(qdb_recording(self.EVENTS, 15, sat=sat))
+                out = io.StringIO()
+                argv = sys.argv
+                sys.argv = ["scan_analyze.py", str(log), "--margin", "10"]
+                try:
+                    with contextlib.redirect_stdout(out):
+                        sa.main()
+                finally:
+                    sys.argv = argv
+            lines = [line for line in out.getvalue().splitlines() if line.startswith("  t=")]
+            self.assertEqual(len(lines), 3)
+            if expect:
+                self.assertRegex(lines[0], r"saturated 1\+2 0% 3\+4 0% 5\+6 [1-9]\d?% 7\+8 0%$")
+                self.assertTrue(lines[1].endswith("saturated 1+2 0% 3+4 0% 5+6 0% 7+8 0%"))
+            else:
+                self.assertNotIn("saturated", out.getvalue())
 
 
 class Analyze(unittest.TestCase):

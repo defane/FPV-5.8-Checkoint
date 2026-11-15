@@ -9,6 +9,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "checkpoint.h"
 #include "checkpoint_link.h"
 #include "cp_bench.h"
@@ -60,14 +61,21 @@ void cp_on_pass(cp_t *cp, const pd_event_t *e)
     checkpoint_link_report_pass(e);
 }
 
-static void cp_trace(const cp_t *cp, int64_t now_us)
+/* K l: the rises, then each plan hop's saturated captures since the previous line (sat=, hop order:
+ * a capture that hit an ADC rail, the flag the detector sees on both of its readings). */
+static void cp_trace(cp_t *cp, int64_t now_us)
 {
     const scan_detector_t *sd = &cp->sd;
     const unsigned top = sd_strongest(sd);
-    printf("CP_TRACE t_ms=%lld rise_db=%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f top=R%u state=%s\n", now_us / 1000,
+    const sdr_plan_t *p = sdr_bench_plan();
+    const unsigned nhops = p && p->nhops < SDR_RX_MAX_HOPS ? p->nhops : SDR_RX_MAX_HOPS;
+    printf("CP_TRACE t_ms=%lld rise_db=%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f top=R%u state=%s sat=", now_us / 1000,
            (double)sd_rise_db(sd, 0), (double)sd_rise_db(sd, 1), (double)sd_rise_db(sd, 2),
            (double)sd_rise_db(sd, 3), (double)sd_rise_db(sd, 4), (double)sd_rise_db(sd, 5),
            (double)sd_rise_db(sd, 6), (double)sd_rise_db(sd, 7), top + 1u, pd_state_name(sd->det.ch[top].state));
+    for (unsigned j = 0; j < nhops; j++) printf("%s%u", j ? "," : "", (unsigned)cp->trace_sat[j]);
+    printf("\n");
+    memset(cp->trace_sat, 0, sizeof(cp->trace_sat));
 }
 
 /* A bench in this task (the console posted it), then the production settings again. */
@@ -190,6 +198,9 @@ static void scan_task(void *arg)
                 cp->relearn_pending = false;
             }
         }
+        if (cp->trace && h.n && (h.r[0].flags & SDR_RD_SATURATED) && h.hop < SDR_RX_MAX_HOPS &&
+            cp->trace_sat[h.hop] < UINT16_MAX)
+            cp->trace_sat[h.hop]++;              /* one flag per capture, on both of its readings */
         for (unsigned i = 0; i < h.n; i++) {
             pd_event_t e;
             cp->readings++;

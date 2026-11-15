@@ -4,7 +4,8 @@
  *   x  image rejection between the two channels of an LO: a floor run (VTX off), then VTX on
  *   n  noise of a reading against the capture size, and a borrowed-calibration DC control
  *   p  the SINGLE plan (one LO per channel) against PAIRS, for 1 s
- *   S  scan recording: every channel's level over the last >= 60 s, dumped when stopped
+ *   S  scan recording: every channel's level and every LO's saturated captures over the last
+ *      >= 60 s, dumped when stopped
  * The methods are widscan58's (CapnBry, https://github.com/CapnBry/widscan58, a9fff97, PLAN.md:
  * tune timing, settle, image rejection and noise per FFT size); the recording and the residue
  * trace keep the shape of the fork's C5VRX-era hop bench (hop_bench.c before issue #2).
@@ -70,6 +71,8 @@
 #define R_LIVE_S         10u
 #define R_NOMINAL_HZ_X10 5100u         /* before the engine's first 1 s window (never in practice) */
 #define R_DUMP_PAUSE_MS  200u
+#define R_SAT_HOPS       4u            /* a row's saturated-capture counts: PAIRS's 4 LOs, 4 bits each */
+#define R_SAT_MAX        15u           /* a count over 15 (decim over 15) reads 15 */
 
 static const uint16_t k_z_delay_us[] = {0, 25, 50, 100, 150, 200, 300, 500, 800, 1000, 2000};
 #define Z_DELAYS (sizeof k_z_delay_us / sizeof k_z_delay_us[0])
@@ -106,19 +109,27 @@ typedef struct {
     uint32_t dsp_us[SDR_RX_MAX_HOPS * N_CAPTURES];
 } n_bench_t;
 
-typedef struct {
+/* Packed: 22 bytes, so the 44 KiB scratch holds 2048 rows, decim 15 at the board's 507.9 rotations
+ * a second ([board] B1); aligned, 24 bytes would hold 1877 rows, decim 17. */
+typedef struct __attribute__((packed)) {
     uint32_t t_us;                                 /* the row's first rotation start, from the recording's */
     int16_t qdb[SDR_RX_CHANNELS];                  /* mean of decim rotations; SDR_LEVEL_NONE */
+    uint16_t sat;                                  /* saturated captures per hop among those rotations,
+                                                    * 4 bits a hop, hop 0 in the top nibble; <= R_SAT_MAX */
 } scan_row_t;
 
 _Static_assert(sizeof(s_bench_t) <= SCRATCH_BYTES && sizeof(z_bench_t) <= SCRATCH_BYTES &&
                sizeof(x_bench_t) <= SCRATCH_BYTES && sizeof(n_bench_t) <= SCRATCH_BYTES, "bench scratch");
-_Static_assert(sizeof(scan_row_t) == 20u, "20-byte recording rows: 2252 in the scratch");
+_Static_assert(sizeof(scan_row_t) == 22u && SCRATCH_BYTES / sizeof(scan_row_t) == 2048u,
+               "22-byte recording rows: 2048 in the scratch");
+_Static_assert(R_SAT_HOPS * 4u <= 16u, "a row's saturated counts fit its 16 bits");
+_Static_assert(SDR_RX_MAX_HOPS <= 8u, "rotation_t.sat_hops is 8 bits");
 _Static_assert(ROT_READINGS >= SDR_RX_CHANNELS, "a rotation reads every channel once");
 
 typedef struct {
     sdr_reading_t r[ROT_READINGS];
     unsigned n, stale;
+    uint8_t sat_hops;                              /* a bit per plan hop whose capture hit an ADC rail */
 } rotation_t;
 
 /* ---- helpers ---- */
@@ -166,6 +177,7 @@ static bool next_rotation(cp_yield_t *y, rotation_t *o, hs_hist_t *t, scan_detec
 {
     o->n = 0;
     o->stale = 0;
+    o->sat_hops = 0;
     for (unsigned k = 0; k < ROT_STEPS_MAX; k++) {
         cp_yield(y);
         sdr_hop_t h;
@@ -178,6 +190,8 @@ static bool next_rotation(cp_yield_t *y, rotation_t *o, hs_hist_t *t, scan_detec
             hs_hist_add(&t[T_WAIT], h.t.wait_us);
             if (h.n) hs_hist_add(&t[T_DSP], h.t.dsp_us);
         }
+        /* One flag per capture, on both of its readings. */
+        if (h.n && (h.r[0].flags & SDR_RD_SATURATED) && h.hop < SDR_RX_MAX_HOPS) o->sat_hops |= (uint8_t)(1u << h.hop);
         for (unsigned i = 0; i < h.n; i++) {
             if (feed) {
                 pd_event_t e;
@@ -729,6 +743,7 @@ static void bench_record(cp_t *cp, cp_yield_t *y, scan_row_t *ring, size_t cap)
     int64_t rot_start = t0, live_t = t0, next_live = t0 + R_LIVE_S * 1000000ll;
     int32_t sum[SDR_RX_CHANNELS] = {0};
     uint16_t cnt[SDR_RX_CHANNELS] = {0};
+    unsigned sat[R_SAT_HOPS] = {0};
     int16_t peak[SDR_RX_CHANNELS];
     unsigned in_row = 0;
     uint32_t row_t = 0;
@@ -745,6 +760,7 @@ static void bench_record(cp_t *cp, cp_yield_t *y, scan_row_t *ring, size_t cap)
             cnt[ch]++;
             if (l > peak[ch]) peak[ch] = l;
         }
+        for (unsigned j = 0; j < R_SAT_HOPS; j++) sat[j] += (r.sat_hops >> j) & 1u;
         /* A running median of the rotation time (1 us a step from the engine's last average): the
          * in-row channel times of tools/scan_analyze.py need it to ~0.1 ms, and the ring fills the
          * scratch, so the rotation times are not kept. */
@@ -761,6 +777,12 @@ static void bench_record(cp_t *cp, cp_yield_t *y, scan_row_t *ring, size_t cap)
                 sum[ch] = 0;
                 cnt[ch] = 0;
             }
+            uint16_t packed = 0;
+            for (unsigned j = 0; j < R_SAT_HOPS; j++) {
+                packed |= (uint16_t)((sat[j] < R_SAT_MAX ? sat[j] : R_SAT_MAX) << (4u * (R_SAT_HOPS - 1u - j)));
+                sat[j] = 0;
+            }
+            e->sat = packed;
             rows++;
             in_row = 0;
         }
@@ -793,8 +815,8 @@ static void bench_record(cp_t *cp, cp_yield_t *y, scan_row_t *ring, size_t cap)
            (unsigned)gain, rot_med, firmware_id());
     for (size_t i = 0; i < kept; i++) {
         const scan_row_t *e = &ring[(oldest + i) % cap];
-        printf("SCAN,%" PRIu32 ",%d,%d,%d,%d,%d,%d,%d,%d\n", e->t_us, e->qdb[0], e->qdb[1], e->qdb[2], e->qdb[3],
-               e->qdb[4], e->qdb[5], e->qdb[6], e->qdb[7]);
+        printf("SCAN,%" PRIu32 ",%d,%d,%d,%d,%d,%d,%d,%d,%04x\n", e->t_us, e->qdb[0], e->qdb[1], e->qdb[2], e->qdb[3],
+               e->qdb[4], e->qdb[5], e->qdb[6], e->qdb[7], (unsigned)e->sat);
         pace(y, &lines);
     }
     printf("SCANDUMP end rotations=%" PRIu32 " decim=%u format=qdb order=%s gain=%u\n", rotations, decim, order,

@@ -83,10 +83,15 @@ from the `CHECK` line, or pass `--heap-min-warn 20000`.
 
 ## 2. Signal
 
-- Send `K` then `l` (trace): `CP_TRACE t_ms=… rise_db=r1,r2,…,r8 top=R… state=…`, 5 lines a
-  second, each channel's rise above its rest in dB. VTX off, every rise stays near 0. VTX
-  on and close, its channel rises well above the others (20 dB or more at 0.9 m for
-  25 mW).
+- Send `K` then `l` (trace): `CP_TRACE t_ms=… rise_db=r1,r2,…,r8 top=R… state=… sat=a,b,c,d`,
+  5 lines a second, each channel's rise above its rest in dB. VTX off, every rise stays
+  near 0. VTX on and close, its channel rises well above the others (20 dB or more at
+  0.9 m for 25 mW).
+- `sat=` counts, per LO in hop order (5677, 5751, 5825, 5899 MHz: R1+R2, R3+R4, R5+R6,
+  R7+R8), the captures that hit an ADC rail since the previous line (about 100 a line per
+  LO at 508 rotations a second, [board] B1). A saturated capture flags both of its readings,
+  so this is what the detector sees. A 25 mW VTX clips within about 30 cm of the onboard
+  antenna at gain 40 ([board] 2026-11-15).
 - **If the levels stay flat with a strong VTX**, report it: the first suspect is the Wi-Fi
   promiscuous filter (`CONFIG_SDR_RX_PROMISC_FILTER_ALL=y`, bench B0).
 - Stop the trace (`K` `l`) before the quality measurements.
@@ -228,17 +233,20 @@ This records every channel's level, to find the passes offline and tune the dete
 
 1. Log the console to a file (`python tools/flash.py PORT --monitor-only --log run.log`).
    Set a VTX on a known channel, with the power low enough that it does not clip up close.
-2. `K` then `S` starts it: `SCANBENCH start decim=14 row_ms=27.5 rows=2252 keep_s=60
+2. `K` then `S` starts it: `SCANBENCH start decim=15 row_ms=29.5 rows=2048 keep_s=60
    max_s=3600 order=1+2:3+4:5+6:7+8 gain=40: …`. A row is the mean of `decim` rotations,
-   per channel, in 0.25 dB codes; the ring keeps the newest 60 s at least.
+   per channel, in 0.25 dB codes, plus each LO's saturated captures among those rotations.
+   The ring keeps the newest 60 s at least: it fills the bench scratch (44 KiB in the RF dump
+   bank), 2048 rows of 22 bytes, and `decim` is the rotations a second × 60 / 2048, rounded
+   up (15 at the board's 507.9, [board] B1).
 3. Move the VTX past the antenna a few times, a second or so each, a few seconds apart.
 4. `K` then `S` again stops it, **within 60 s of the first pass**. The dump follows:
 
 ```
-SCANDUMP begin rotations=… kept=… kept_s=… decim=14 format=qdb order=1+2:3+4:5+6:7+8 gain=40 rot_us=… fw=…
-SCAN,<t_us>,<R1>,<R2>,…,<R8>
+SCANDUMP begin rotations=… kept=… kept_s=… decim=15 format=qdb order=1+2:3+4:5+6:7+8 gain=40 rot_us=… fw=…
+SCAN,<t_us>,<R1>,<R2>,…,<R8>,<sat>
 …
-SCANDUMP end rotations=… decim=14 format=qdb order=… gain=40
+SCANDUMP end rotations=… decim=15 format=qdb order=… gain=40
 SCANBENCH done stop=key rotations=… rows=… faults=…
 ```
 
@@ -249,11 +257,18 @@ python3 tools/scan_analyze.py run.log
 ```
 
 `order=` lists the hops in reading order, `a+b` for two channels of one capture. A level
-is the code / 4 in dBFS, −32768 when the row had no reading. `scan_analyze.py` also reads
-the C5VRX-era power format. It prints the real refresh, each channel's rest, median and
+is the code / 4 in dBFS, −32768 when the row had no reading. `<sat>` is 4 hex digits, one
+per hop in that order (`0f00`: R3+R4's LO clipped in 15 of the row's rotations): the
+captures of that LO that hit an ADC rail, 15 at most (`f` is 15 or more when `decim` is
+over 15). Recordings from before it end at R8; `scan_analyze.py` reads both, and the
+C5VRX-era power format too. It prints the real refresh, each channel's rest, median and
 peak, and the passes: a channel rising 8 dB (`--margin`) above its own rest, smoothed like
 the detector (`--alpha`, per 17.5 ms), timed at the centroid of the peak. A pass seen on
 several channels at once goes to the strongest, and the others are listed as `also on`.
+With `<sat>`, each pass ends with the saturated share of every LO over its span
+(`saturated 1+2 0% 3+4 0% 5+6 41% 7+8 0%`): a rise on R5 during a pass of R6 that comes
+with saturated captures on 5+6 is the clipping ghost (the rails' products land in the
+partner's window).
 
 What decides: every pass found, on the right channel, none invented, and neighbours well
 below it. The partner channel of the pass's LO is the one to watch (its image, §4 `K` `x`).

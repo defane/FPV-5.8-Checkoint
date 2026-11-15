@@ -81,7 +81,8 @@ records real passes on this meter, where a 25 mW drone at 0.9 m rises 22–30 dB
 together with the C3's and the C6's copies (`firmware/node/main/c3_store.c`,
 `firmware/master/main/c6_hub.c`), in one commit.
 
-Other keys: `K` then `l` (live rise of R1-R8, `CP_TRACE` lines, 5 a second), `0`
+Other keys: `K` then `l` (live rise of R1-R8 and each LO's saturated captures, `CP_TRACE`
+lines, 5 a second), `0`
 (defaults), `k` (show), `i` (antenna onboard/IPEX, C5-Zero only: GPIO 26, not saved,
 then every LO recalibrated on it), the engine benches `s`, `z`, `x`, `n`, `p` and `S`
 ([bench.md](bench.md#4-engine-bench)), `q` (close). The `K` window stays open 5 s after
