@@ -22,7 +22,8 @@
 #define CP_SCAN_PRIORITY 1u
 #define CP_YIELD_US      100000     /* every scan-task loop blocks one tick this often */
 #define CP_TRACE_US      200000     /* K l: 5 lines a second */
-#define CP_STALL_MS      1000u      /* no rotation this long, outside a calibration or bench: stalled */
+#define CP_STALL_MS      1000u      /* no rotation this long, outside a calibration or bench: stalled;
+                                     * a channel without a reading this long reads unknown in STATS */
 #define CP_GAIN_MIN      10u
 #define CP_GAIN_STEP     2u
 
@@ -40,6 +41,7 @@ typedef struct {
     volatile bool scan_stop;                               /* a second K S while recording */
     volatile bool relearn_pending;                         /* set by an accepted command/antenna/gain change */
     volatile uint32_t last_rotation_ms;                    /* scan task writes (32-bit: no torn read) */
+    volatile uint32_t last_reading_ms[SDR_RX_CHANNELS];    /* per channel, the same; reset with last_rotation_ms */
     int16_t image_floor_qdb[SDR_RX_CHANNELS];              /* K x floor run */
     uint8_t image_floor_gain;                              /* 0 = no floor run yet */
     int64_t last_trace_us;
@@ -78,6 +80,9 @@ const char *cp_boot_stage(void);
 /* Live (levels real) and stalled (no rotation for CP_STALL_MS outside a calibration or a
  * bench), computed now. */
 void cp_health(const cp_t *cp, bool *live, bool *stalled);
+/* The scan task, whenever it sets last_rotation_ms by hand (live, after a calibration or a
+ * bench): every channel counts as just read. */
+void cp_mark_read(cp_t *cp, uint32_t now_ms);
 /* A link COMMAND or the console's F/B: posts it to the scan task, or prints the refusal. */
 void cp_command(uint8_t lp_cmd, const char *from);
 

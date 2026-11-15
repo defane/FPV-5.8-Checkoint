@@ -63,6 +63,12 @@ void cp_health(const cp_t *cp, bool *live, bool *stalled)
     *stalled = cp->live && !cp->bench_running && !calibrating && !fresh;
 }
 
+void cp_mark_read(cp_t *cp, uint32_t now_ms)
+{
+    for (unsigned ch = 0; ch < SDR_RX_CHANNELS; ch++) cp->last_reading_ms[ch] = now_ms;
+    cp->last_rotation_ms = now_ms;
+}
+
 static void prefs_load(pd_config_t *det, uint8_t *gain)
 {
     checkpoint_prefs_t p;
@@ -257,7 +263,10 @@ void checkpoint_link_get_config(lp_config_t *out)
 
 /* What T would show, as reads only (no print, no allocation, no engine call but its [any] reads).
  * live is computed now rather than trusted from the scan task: a scan task that stopped rotating
- * outside a calibration or a bench is "stalled", which flags CAL_NEEDED and counts a fault. */
+ * outside a calibration or a bench is "stalled", which flags CAL_NEEDED and counts a fault. A
+ * channel with no reading for CP_STALL_MS while the gate rotates (its LO's captures fail: the
+ * engine flags CAL_NEEDED after 3 s and the faults count them) reads LP_LEVEL_UNKNOWN, not a
+ * rise of 0. */
 void checkpoint_link_get_stats(lp_stats_t *out)
 {
     const cp_t *cp = s_cp;
@@ -283,8 +292,13 @@ void checkpoint_link_get_stats(lp_stats_t *out)
         .faults   = sdr_rx_fault_count() + s_stalls,
     };
     for (unsigned ch = 0; ch < LP_LEVELS; ch++) {
-        const float rise = live ? sd_rise_db(&cp->sd, ch) : 0.0f;
-        out->levels[ch] = !live ? LP_LEVEL_UNKNOWN : rise > 127.0f ? 127 : rise < -127.0f ? -127 : (int8_t)lroundf(rise);
+        bool heard = live && ch < SDR_RX_CHANNELS;
+        if (heard) {
+            const uint32_t last = cp->last_reading_ms[ch];   /* first: now is never earlier (no wrap) */
+            heard = cp_now_ms() - last < CP_STALL_MS;
+        }
+        const float rise = heard ? sd_rise_db(&cp->sd, ch) : 0.0f;
+        out->levels[ch] = !heard ? LP_LEVEL_UNKNOWN : rise > 127.0f ? 127 : rise < -127.0f ? -127 : (int8_t)lroundf(rise);
     }
     snprintf(out->fw, sizeof(out->fw), "%s", firmware_id());   /* truncated to LP_FW_LEN, NUL-terminated */
 }

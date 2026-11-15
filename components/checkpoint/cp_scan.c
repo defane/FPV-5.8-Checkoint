@@ -15,6 +15,7 @@
 #include "cp_internal.h"
 #include "esp_chip_info.h"
 #include "esp_heap_caps.h"
+#include "sdkconfig.h"
 #include "sdr_rx_bench.h"
 
 _Static_assert(SD_FLAG_SATURATED == SDR_RD_SATURATED, "sd_feed takes the engine's reading flags as they are");
@@ -81,7 +82,7 @@ static void run_bench(cp_t *cp, char key, cp_yield_t *y)
     sdr_bench_set_tune_method(SDR_TUNE_PLL);
     sdr_bench_set_plan(SDR_PLAN_PAIRS);          /* also resets the IQ states */
     sd_relearn(&cp->sd);
-    cp->last_rotation_ms = cp_now_ms();
+    cp_mark_read(cp, cp_now_ms());
 }
 
 /* The mailbox (cp_internal.h): detector settings, gain (+ relearn), a recalibration, a bench. */
@@ -141,9 +142,11 @@ static void print_ready(uint32_t cal_ms)
         len += (size_t)snprintf(lo + len, sizeof(lo) - len, "%s%u", j ? "," : "", (unsigned)h.lo_mhz[j]);
     esp_chip_info_t chip;
     esp_chip_info(&chip);
-    /* tools/flash.py waits for this line (BOOT_DONE). */
-    printf("SDR ready lo=%s gain=%u cal_ms=%" PRIu32 " boot_ms=%lld chip_rev=v%u.%u\n", lo, (unsigned)sdr_rx_gain(),
-           cal_ms, (esp_timer_get_time() - s_boot_t0_us) / 1000, (unsigned)(chip.revision / 100u),
+    /* tools/flash.py waits for this line (BOOT_DONE). verify_tries shows the build's setting: an
+     * sdkconfig kept from a bench control (1 = the verify only logs) is visible in every log. */
+    printf("SDR ready lo=%s gain=%u verify_tries=%u cal_ms=%" PRIu32 " boot_ms=%lld chip_rev=v%u.%u\n", lo,
+           (unsigned)sdr_rx_gain(), (unsigned)CONFIG_SDR_RX_VERIFY_TRIES, cal_ms,
+           (esp_timer_get_time() - s_boot_t0_us) / 1000, (unsigned)(chip.revision / 100u),
            (unsigned)(chip.revision % 100u));
 }
 
@@ -173,7 +176,7 @@ static void scan_task(void *arg)
     cp->wanted_dirty = false;
     portEXIT_CRITICAL(&cp_mux);
     sd_init(&cp->sd, &cfg);
-    cp->last_rotation_ms = cp_now_ms();
+    cp_mark_read(cp, cp_now_ms());
     cp->live = true;
     cp_yield_t y = {.last_us = esp_timer_get_time()};
     for (;;) {
@@ -181,7 +184,7 @@ static void scan_task(void *arg)
         sdr_hop_t h;
         sdr_rx_step(&h);                         /* applies pending recal/gain itself */
         if (h.recalibrated) {
-            cp->last_rotation_ms = cp_now_ms();  /* the end of a calibration is not a stall */
+            cp_mark_read(cp, cp_now_ms());       /* the end of a calibration is not a stall */
             if (cp->relearn_pending) {
                 sd_relearn(&cp->sd);
                 cp->relearn_pending = false;
@@ -190,6 +193,7 @@ static void scan_task(void *arg)
         for (unsigned i = 0; i < h.n; i++) {
             pd_event_t e;
             cp->readings++;
+            cp->last_reading_ms[h.r[i].channel % SDR_RX_CHANNELS] = (uint32_t)(h.r[i].t_us / 1000);
             if (sd_feed(&cp->sd, h.r[i].channel, h.r[i].level_qdb, h.r[i].flags, h.r[i].t_us, &e)) cp_on_pass(cp, &e);
         }
         const int64_t now = esp_timer_get_time();

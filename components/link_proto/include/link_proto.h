@@ -77,7 +77,7 @@ typedef struct {
 #define LP_HEALTH_CALIBRATING 0x02u  /* a calibration, the rests' learning or a console bench: the gate is blind */
 
 #define LP_LEVELS 8u                 /* R1..R8 */
-#define LP_LEVEL_UNKNOWN (-128)      /* not measured: calibrating, a bench, no engine */
+#define LP_LEVEL_UNKNOWN (-128)      /* not measured: calibrating, a bench, no engine, no reading for 1 s */
 
 #define LP_FW_LEN 24u                /* firmware id incl. NUL, e.g. "5.0.0-dev+3201b7196ece" */
 
