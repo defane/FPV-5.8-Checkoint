@@ -1,28 +1,31 @@
 #!/usr/bin/env python3
-"""Flash a C5VRX-5 build over USB (C5VRX by Twotoz and the C5VRX contributors).
+"""Flash the detector (ESP32-C5) over USB without a line reset.
 
-`idf.py flash` resets the chip through the USB DTR/RTS lines. On a running
-C5VRX-5 image that reset lands in a ROM loader that no longer answers (the
-modem dump writer is still on), so esptool stops with a pySerial
-"Write timeout" and the board stays hung until USB and battery power are
-both removed. This runs the route that works instead:
+From C5VRX-5's tools/flash.py (Twotoz and the C5VRX contributors).
+`idf.py flash` resets the chip through the USB DTR/RTS lines. That reset does
+not reset the C5's modem domain: on a running C5VRX image it landed in a ROM
+loader that no longer answered, esptool stopped with a pySerial "Write
+timeout" and the board stayed hung until USB and battery power were both
+removed. The detector keeps the route that worked:
 
 1. the console download key '`' (tools/enter_download.py): the firmware
-   stops the writer and Wi-Fi and reboots into the ROM loader itself;
+   stops its captures and Wi-Fi and reboots into the ROM loader itself;
 2. esptool --before no-reset write-flash @flash_args, so no line reset
    reaches the chip and no esptool sync is sent to live firmware;
 3. --after watchdog-reset: the LP watchdog starts the new image (an RTS
    reset would leave a C5 in the loader).
 
-    idf.py build
+    ( cd firmware/detector && idf.py build )
     python tools/flash.py COM6
     python tools/flash.py /dev/ttyACM0 --no-key   # board already in the ROM loader
     python tools/flash.py COM6 --app-only         # app image only (flash_app_args)
     python tools/flash.py COM6 --monitor          # then show the console
     python tools/flash.py COM6 --monitor-only     # console only, no flashing
     python tools/flash.py COM6 --check            # flash, then a pass/fail health check
-    python tools/flash.py COM6 --monitor-only --log bench.log --iq iq/ --iq-every 10
+    python tools/flash.py COM6 --monitor-only --log bench.log
+    python tools/flash.py COM6 --build firmware/detector/build-ipex   # a variant
 
+The default build is firmware/detector/build; --build picks a variant's.
 --app-only skips the bootloader and partition table, so it is faster for
 firmware-only changes; use the full set after a partition or bootloader
 change, or when switching from another generation.
@@ -30,33 +33,26 @@ change, or when switching from another generation.
 --monitor replaces `idf.py flash monitor`, whose monitor resets the chip
 through the same lines. It reopens the port with DTR and RTS low, prints
 the console at 115200 and sends each key as typed (no Enter, as the
-receiver expects). Ctrl+] or Ctrl+C exits. --monitor-only opens the same
+detector expects). Ctrl+] or Ctrl+C exits. --monitor-only opens the same
 console without flashing (no build or esptool needed).
 
 --log FILE appends every console line with a local timestamp
 (HH:MM:SS.mmm), plus the keys sent and the tool's own notes as '#' lines.
-tools/field_diag_compare.py reads these logs directly.
+tools/scan_analyze.py reads these logs directly (a K S scan recording).
 
---iq DIR saves each IQ snapshot the console prints (key I) as a .bin and
-.json pair, in the format of tools/capture_iq_snapshot.py, instead of
-32 hex lines on the screen; --iq-every SECONDS also sends I on that period,
-for watching the raw IQ while tuning gain, filter or the VTX. A snapshot
-is 204.75 us of IQ: a sample of the receiver input, not a range result.
+--check waits for the boot (SDR ready), sends T and exits 1 if the board
+crashed or rebooted, runs another image than the one flashed (the FIRMWARE
+elf_sha256 prefix), did not answer T (no FIRMWARE or SDR plan= line) or
+reports engine faults (SDR faults=, capture faults since boot). cal_needed=1
+is a warning: an LO's DC offset or IQ estimate is out of range (F with the
+VTX off). It ends with one 'CHECK result=pass|fail ...' line for scripts.
+With --monitor-only it checks the running board without waiting for a boot
+or comparing the image.
 
---check waits for the boot (CAL_BOOT), lets the boot phase pass, sends T
-and D and exits 1 if the board crashed or rebooted, runs another image
-than the one flashed (the FIRMWARE elf_sha256 prefix), reports a chain
-fault or a filter that did not read back, or (with --expect-video) has no
-video (VIDEO_Q known=0). It ends with one 'CHECK result=pass|fail ...'
-line for scripts. With --monitor-only it checks the running board without
-waiting for a boot or comparing the image.
-
-The check also reads the heap from T and warns when the largest free block
-is below --heap-warn (8192 bytes) or, on firmware that prints heap_min, when
-the lowest free heap since boot is below --heap-min-warn (1024 bytes). The
-boot peak is the receiver tasks starting, which a reading after the boot
-cannot show. (Upstream's menu splash chain left about 2 KB there; the
-checkpoint fork has no such chain, so expect far more: re-measure on a board.)
+The check also reads the heap from T's STATUS line and warns when the
+largest free block is below --heap-warn (8192 bytes) or the lowest free
+heap since boot (heap_min, which includes the boot peak of the Wi-Fi init a
+reading after the boot cannot show) is below --heap-min-warn (1024 bytes).
 
 Before flashing, every value set in sdkconfig.defaults is compared with the
 build's configuration. ESP-IDF never reapplies the defaults to an existing
@@ -81,15 +77,15 @@ import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-DEFAULT_BUILD = HERE.parent / "build"
-sys.path.insert(0, str(HERE))
-import capture_iq_snapshot  # noqa: E402
+DEFAULT_BUILD = HERE.parent / "firmware" / "detector" / "build"
+sys.path.insert(0, str(HERE))   # enter_download
 
 KV = re.compile(r"(\w+)=(\S+)")
-BOOT_DONE = ("CAL_BOOT ", "STARTUP done")
+BOOT_DONE = ("SDR ready",)
+BOOT_FAILED = ("SDR init failed", "BOOT failed")
 BOOT_BANNER = ("rst:0x",)
 CRASH = ("Guru Meditation", "ESP_ERROR_CHECK failed", "abort() was called", "task_wdt")
-WARN_VERDICTS = ("NOT_CALIBRATED", "DC_CAL_NEEDED", "GAIN_FIXED", "CALIBRATION_OR_PHY sampling phase")
+T_DONE = ("CHECKPOINT source=",)   # the last line T prints
 
 
 def esptool_cmd(port, baud, args_file="flash_args"):
@@ -167,11 +163,11 @@ def config_drift(build):
 
 
 class Console:
-    """Console lines to the screen, the --log file and, with --iq, IQ snapshots to files."""
+    """Console lines to the screen and the --log file."""
 
-    def __init__(self, out=None, log=None, iq_dir=None):
-        self.out, self.log, self.iq_dir = out or sys.stdout, log, iq_dir
-        self.buf, self.shown, self.iq, self.saved = "", 0, None, 0
+    def __init__(self, out=None, log=None):
+        self.out, self.log = out or sys.stdout, log
+        self.buf, self.shown = "", 0
         self.lines = []   # every complete line
 
     def feed(self, text):
@@ -183,17 +179,14 @@ class Console:
         self.out.flush()
 
     def idle(self):
-        """Nothing new arrived: show a partial line (a prompt), unless it is IQ data to save."""
-        if self.buf[self.shown:] and (self.iq_dir is None or "IQSNAP" not in self.buf):
+        """Nothing new arrived: show a partial line (a prompt)."""
+        if self.buf[self.shown:]:
             self.out.write(self.buf[self.shown:])
             self.out.flush()
             self.shown = len(self.buf)
 
     def line(self, line, shown=0):
         self.lines.append(line)
-        if self.iq_dir is not None and "IQSNAP_" in line and "IQSNAP_REFUSED" not in line:
-            self.iq_record(capture_iq_snapshot.record_line(line))
-            return
         self.out.write(line[shown:] + "\n")
         self.write_log(line)
 
@@ -205,26 +198,6 @@ class Console:
         if self.log:
             self.log.write(f"{datetime.datetime.now():%H:%M:%S.%f}"[:-3] + " " + line + "\n")
             self.log.flush()
-
-    def iq_record(self, rec):
-        if rec.startswith("IQSNAP_BEGIN "):
-            self.iq = [rec]
-        elif self.iq is not None:
-            self.iq.append(rec)
-        if not rec.startswith("IQSNAP_END"):
-            return
-        lines, self.iq = self.iq, None
-        try:
-            if lines is None:
-                raise ValueError("no IQSNAP_BEGIN header")
-            raw, metadata = capture_iq_snapshot.decode(lines)
-        except ValueError as e:
-            self.note(f"IQ snapshot not saved: {e}")
-            return
-        self.saved += 1
-        path = self.iq_dir / f"iq_{datetime.datetime.now():%Y%m%d-%H%M%S}_{self.saved:03d}.bin"
-        capture_iq_snapshot.save(raw, metadata, path)
-        self.note(f"IQ saved {path} gain={metadata.get('gain')} freq_mhz={metadata.get('freq_mhz')}")
 
 
 @contextlib.contextmanager
@@ -258,11 +231,10 @@ def console_keys():
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
 
-def monitor(port, poll, console, iq_every=0.0):
+def monitor(port, poll, console):
     import serial
     console.note(f"flash: console on {port} at 115200; Ctrl+] or Ctrl+C exits")
     s = None
-    next_iq = time.monotonic() + iq_every if iq_every else None
     try:
         while True:
             if s is None:
@@ -276,7 +248,7 @@ def monitor(port, poll, console, iq_every=0.0):
                 data = s.read(4096)
                 if data:
                     console.feed(data.decode(errors="replace"))
-                    # Monitoring can run for days, including large IQ dumps.
+                    # Monitoring can run for days, including K S scan dumps.
                     # Only check_board needs an in-memory transcript.
                     console.lines.clear()
                 else:
@@ -284,9 +256,6 @@ def monitor(port, poll, console, iq_every=0.0):
                 key = poll()
                 if key in ("\x1d", "\x03"):
                     break
-                if next_iq is not None and time.monotonic() >= next_iq:
-                    next_iq = time.monotonic() + iq_every
-                    key = key or "I"
                 if key:
                     s.write(key.encode("ascii", errors="ignore"))
                     console.write_log("# key " + key)
@@ -306,8 +275,8 @@ def monitor(port, poll, console, iq_every=0.0):
     return 0
 
 
-def check_board(port, console, booting, boot_timeout=60.0, settle=6.0, status_wait=2.0, diag_wait=5.0):
-    """Wait out the boot (if booting), then send T and D; return the console lines read."""
+def check_board(port, console, booting, boot_timeout=60.0, status_wait=2.0):
+    """Wait for SDR ready (if booting), then send T; return the console lines read."""
     import serial
     start = len(console.lines)
     s = None
@@ -354,13 +323,10 @@ def check_board(port, console, booting, boot_timeout=60.0, settle=6.0, status_wa
 
     try:
         if booting:
-            console.note(f"flash: check waits up to {boot_timeout:.0f} s for the boot")
-            if pump(boot_timeout, BOOT_DONE):
-                pump(settle)   # the boot phase (sampling-phase check) runs 5 s after CAL_BOOT
+            console.note(f"flash: check waits up to {boot_timeout:.0f} s for the boot (SDR ready)")
+            pump(boot_timeout, BOOT_DONE + BOOT_FAILED)
         send(b"T")
-        pump(status_wait)
-        send(b"D")
-        if pump(diag_wait, ("RANGE_DIAG history",)):
+        if pump(status_wait, T_DONE):
             pump(0.3)
     finally:
         if s is not None:
@@ -369,12 +335,14 @@ def check_board(port, console, booting, boot_timeout=60.0, settle=6.0, status_wa
     return console.lines[start:]
 
 
-def evaluate(lines, booting, elf=None, expect_video=False, heap_warn=8192, heap_min_warn=1024):
+def evaluate(lines, booting, elf=None, heap_warn=8192, heap_min_warn=1024):
     """Judge the check from the console lines: (problems, warnings, summary fields)."""
     problems, warnings, fields = [], [], {}
     boot_at = next((i for i, line in enumerate(lines) if any(b in line for b in BOOT_DONE)), None)
     if booting and boot_at is None:
-        problems.append("no CAL_BOOT or STARTUP done line: the receiver did not finish booting")
+        failed = [line.strip() for line in lines if any(f in line for f in BOOT_FAILED)]
+        problems.append("no SDR ready line: the detector did not finish booting" +
+                        (f" ({failed[-1]})" if failed else ""))
     for i, line in enumerate(lines):
         if any(c in line for c in CRASH):
             problems.append("crash: " + line.strip())
@@ -395,47 +363,34 @@ def evaluate(lines, booting, elf=None, expect_video=False, heap_warn=8192, heap_
             fields["elf_match"] = int(bool(running) and elf.startswith(running))
             if not fields["elf_match"]:
                 problems.append(f"running image elf_sha256={running[:16] or '?'} is not the flashed build {elf[:16]}")
-    status = last("C5VRX5 version=") or {}
+    status = last("STATUS ") or {}
     for key, floor in (("heap_largest", heap_warn), ("heap_min", heap_min_warn)):
-        if status.get(key, "").isdigit():   # heap_min only on firmware that prints it
+        if status.get(key, "").isdigit():
             fields[key] = int(status[key])
             if fields[key] < floor:
                 warnings.append(f"{key}={fields[key]} below {floor} bytes (internal heap is nearly exhausted)")
-    vq = last("VIDEO_Q ")
-    if vq is not None:
-        fields.update(video_known=vq.get("known"), snr_x10=vq.get("snr_x10"), lines_x100=vq.get("lines_x100"))
-    if expect_video and (vq is None or vq.get("known") != "1"):
-        problems.append("no video: VIDEO_Q known=0 (VTX on, same channel, load fitted?)")
-    if not any("RANGE_DIAG " in line for line in lines):
-        problems.append("no RANGE_DIAG lines: the board did not answer D")
-    gain, iq, chain = last("RANGE_DIAG gain "), last("RANGE_DIAG iq "), last("RANGE_DIAG chain ")
-    if last("RANGE_DIAG history ") is None or chain is None or "faults" not in chain:
-        problems.append("incomplete RANGE_DIAG response: transport health was not confirmed")
-    if gain:
-        fields["gain"] = gain.get("index")
-    if iq:
-        fields["cn_est_x10"] = iq.get("cn_est_x10")
-    if chain:
-        fields["faults"] = chain.get("faults")
-        if chain.get("faults", "0") != "0":
-            problems.append(f"transport faults={chain['faults']}")
-    verdicts = [line.split("verdict=", 1)[1].strip() for line in lines if "RANGE_DIAG verdict=" in line]
-    for v in verdicts:
-        if v.startswith("CALIBRATION_OR_PHY filter"):
-            problems.append(v)
-        elif v.startswith(WARN_VERDICTS):
-            warnings.append(v)
-    fields["verdicts"] = ",".join(v.split()[0] for v in verdicts) or "none"
+    sdr = last("SDR plan=")
+    if sdr is None:
+        problems.append("no SDR plan= line: the board did not answer T")
+    else:
+        fields.update({k: sdr[k] for k in ("gain", "rot_hz_x10", "faults", "cal_needed") if k in sdr})
+        if "faults" not in sdr:
+            problems.append("incomplete SDR plan= line: engine health was not confirmed")
+        elif sdr["faults"] != "0":
+            problems.append(f"engine faults={sdr['faults']} (capture faults since boot)")
+        if sdr.get("cal_needed") == "1":
+            warnings.append("cal_needed=1: an LO's DC offset or IQ estimate is out of range "
+                            "(F to recalibrate, VTX off)")
     # A boot loop repeats the same crash every boot: report each once, with a count.
     counted = {p: problems.count(p) for p in problems}
     problems = [p if n == 1 else f"{p} (x{n})" for p, n in counted.items()]
     return problems, warnings, fields
 
 
-def run_check(port, console, booting, elf=None, expect_video=False, boot_timeout=60.0,
-              heap_warn=8192, heap_min_warn=1024, drift=()):
+def run_check(port, console, booting, elf=None, boot_timeout=60.0, heap_warn=8192, heap_min_warn=1024,
+              drift=()):
     lines = check_board(port, console, booting, boot_timeout)
-    problems, warnings, fields = evaluate(lines, booting, elf, expect_video, heap_warn, heap_min_warn)
+    problems, warnings, fields = evaluate(lines, booting, elf, heap_warn, heap_min_warn)
     for w in ["sdkconfig differs from sdkconfig.defaults: " + d for d in drift] + warnings:
         console.note("CHECK warn: " + w)
     for p in problems:
@@ -446,7 +401,7 @@ def run_check(port, console, booting, elf=None, expect_video=False, boot_timeout
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="Flash C5VRX-5 without a USB line reset.")
+    ap = argparse.ArgumentParser(description="Flash the detector (ESP32-C5) without a USB line reset.")
     ap.add_argument("port", help="serial port, for example COM6 or /dev/ttyACM0")
     ap.add_argument("--build", type=Path, default=DEFAULT_BUILD,
                     help="idf.py build directory (default: %(default)s)")
@@ -462,34 +417,21 @@ def main(argv=None):
     ap.add_argument("--monitor-only", action="store_true",
                     help="do not flash: only show the console (or --check the running board)")
     ap.add_argument("--log", type=Path, metavar="FILE",
-                    help="append the console to FILE with timestamps (field_diag_compare.py reads it)")
-    ap.add_argument("--iq", type=Path, metavar="DIR",
-                    help="save each IQ snapshot (key I) to DIR as .bin + .json")
-    ap.add_argument("--iq-every", type=float, default=0.0, metavar="SECONDS",
-                    help="with --iq: send I on this period while monitoring")
+                    help="append the console to FILE with timestamps (scan_analyze.py reads it)")
     ap.add_argument("--check", action="store_true",
-                    help="after flashing, wait for the boot, run T and D and exit 1 if the "
-                         "health check fails")
-    ap.add_argument("--expect-video", action="store_true",
-                    help="with --check: also fail without video (VIDEO_Q known=0)")
+                    help="after flashing, wait for the boot, run T and exit 1 if the health check fails")
     ap.add_argument("--boot-timeout", type=float, default=60.0, metavar="SECONDS",
-                    help="with --check: how long to wait for CAL_BOOT (default: %(default)s)")
+                    help="with --check: how long to wait for SDR ready (default: %(default)s)")
     ap.add_argument("--heap-warn", type=int, default=8192, metavar="BYTES",
                     help="with --check: warn when T's heap_largest is below this (default: %(default)s)")
     ap.add_argument("--heap-min-warn", type=int, default=1024, metavar="BYTES",
                     help="with --check: warn when T's heap_min (lowest since boot) is below this "
                          "(default: %(default)s)")
     args = ap.parse_args(argv)
-    if args.iq_every and not args.iq:
-        ap.error("--iq-every needs --iq DIR")
-    if args.expect_video and not args.check:
-        ap.error("--expect-video needs --check")
-    if args.iq_every and not (args.monitor or args.monitor_only):
-        ap.error("--iq-every needs --monitor or --monitor-only")
     args_file = "flash_app_args" if args.app_only else "flash_args"
 
     if not args.monitor_only:
-        # Check everything before the key: it reboots the receiver into the loader.
+        # Check everything before the key: it reboots the detector into the loader.
         if not (args.build / args_file).is_file():
             print(f"flash: {args.build / args_file} not found; run idf.py build first")
             return 2
@@ -497,14 +439,12 @@ def main(argv=None):
             print("flash: esptool not found; run this in the ESP-IDF environment "
                   "(export.ps1 / . ./export.sh) or pip install esptool")
             return 2
-    if args.iq:
-        args.iq.mkdir(parents=True, exist_ok=True)
 
     with contextlib.ExitStack() as stack:
         log = None
         if args.log:
             log = stack.enter_context(open(args.log, "a", encoding="utf-8"))
-        console = Console(log=log, iq_dir=args.iq)
+        console = Console(log=log)
         console.write_log(f"# flash.py log {datetime.datetime.now().isoformat(timespec='seconds')} "
                           f"port={args.port} argv={' '.join(sys.argv[1:] if argv is None else argv)}")
         rc = 0
@@ -521,11 +461,11 @@ def main(argv=None):
                 return rc
         if args.check:
             elf = None if args.monitor_only else elf_sha256(args.build)
-            rc = run_check(args.port, console, not args.monitor_only, elf, args.expect_video, args.boot_timeout,
+            rc = run_check(args.port, console, not args.monitor_only, elf, args.boot_timeout,
                            args.heap_warn, args.heap_min_warn, drift)
         if args.monitor or (args.monitor_only and not args.check):
             with console_keys() as poll:
-                monitor(args.port, poll, console, args.iq_every)
+                monitor(args.port, poll, console)
         return rc
 
 
@@ -533,7 +473,7 @@ def flash(args, args_file, console):
     if not args.no_key:
         if not send_download_key(args.port):
             console.note("flash: the firmware did not acknowledge the download key, so nothing was "
-                         "flashed (esptool's sync would reach a running receiver).\n"
+                         "flashed (esptool's sync would reach a running detector).\n"
                          "  Board already in the ROM loader: rerun with --no-key.\n"
                          "  Otherwise remove USB and the battery, hold BOOT while plugging USB "
                          "back in, release it, and rerun with --no-key.")
@@ -542,7 +482,7 @@ def flash(args, args_file, console):
 
     rc = subprocess.run(esptool_cmd(args.port, args.baud, args_file), cwd=args.build).returncode
     if rc == 0:
-        console.note("flash: done; the receiver restarts into the new image")
+        console.note("flash: done; the detector restarts into the new image")
     else:
         console.note("flash: esptool failed. If it timed out, remove USB and the battery, hold BOOT "
                      "while plugging USB back in, and rerun with --no-key.")

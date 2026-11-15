@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
-"""Put a running C5VRX board into USB download mode, then exit.
+"""Put a running detector (ESP32-C5) into USB download mode, then exit.
 
-esptool's own USB reset does not work on a running C5VRX image: the RTS/DTR
-reset leaves the modem domain (forced clocks, the always-on dump writer)
-running into the ROM loader, whose USB download loop then stops answering.
-This sends the console key '`', which makes the firmware stop the writer and
-Wi-Fi, request a download boot and esp_restart() (main/rf.c,
-rf_reboot_to_download). Flash afterwards with esptool --before no-reset;
-tools/flash.py does both steps.
+From C5VRX-5 (Twotoz and the C5VRX contributors). The RTS/DTR reset esptool
+uses does not reset the C5's modem domain: on C5VRX images the PHY I/Q dump
+and Wi-Fi ran on into the ROM loader, whose USB download loop then stopped
+answering. The detector keeps C5VRX's route: this sends the console download
+key '`', and the firmware stops the scan task's captures, releases the dump
+bank, stops Wi-Fi, requests a download boot and restarts
+(sdr_rx_reboot_to_download, components/sdr_rx/sdr_radio_c5.c), after printing
+"SDR download_boot=requested", the acknowledgement waited for here. Flash
+afterwards with esptool --before no-reset; tools/flash.py does both steps.
 
   python tools/enter_download.py COM33 && esptool --before no-reset ...
 
-If the console is starved (very old images, heavy load) the key is not read;
+If the console is starved (heavy load, a hung image) the key is not read;
 then use the BOOT button (hold BOOT, tap RESET).
 """
 import sys

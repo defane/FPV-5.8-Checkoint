@@ -55,7 +55,7 @@ BRIDGES = {
     "checkpoint-master": (default("firmware/master/main/Kconfig.projbuild", "C6_UART_TX_GPIO"),
                           default("firmware/master/main/Kconfig.projbuild", "C6_UART_RX_GPIO")),
 }
-IQ_PINS = ["0", "1", "2", "3", "4", "5"]      # the receiver's, CLAUDE.md "GPIO map"
+IQ_PINS = ["0", "1", "2", "3", "4", "5"]      # the former C5VRX loopback pins, left unconnected
 
 
 class Boards(unittest.TestCase):

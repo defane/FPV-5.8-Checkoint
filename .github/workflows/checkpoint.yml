@@ -61,48 +61,11 @@ jobs:
       - uses: actions/setup-node@v4   # test/test_web_auth.mjs (the idf image has no node)
         with:
           node-version: 20
-      - name: Host tests (quiet test, VTX deviation profile, dropout classifier, AFC, gain fade)
+      - name: Host tests
         shell: bash
         working-directory: test
         run: |
           set -euo pipefail   # each compile on its own line: in "cc && ./t" a failed cc did not stop -e
-          for t in test_quiet test_profile test_diag test_afc test_afc_measure test_control_window test_cn_observation test_calibration_noise test_sphase test_dco_slots test_dc_servo test_flightlog test_rx_state; do
-            cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/c5vrx_rx "$t.c" -lm -o "/tmp/$t"
-            "/tmp/$t" | tail -1
-          done
-          cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/c5vrx_rx test_dc_trim.c -o /tmp/test_dc_trim
-          /tmp/test_dc_trim
-          cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/c5vrx_rx test_agc_table.c ../components/c5vrx_rx/arc_phy.c -o /tmp/test_agc_table
-          /tmp/test_agc_table | tail -1
-          cc -O2 -std=c11 -Wall -Wextra -Werror -DEXPECT_FADE_HOLD -I../components/c5vrx_rx test_gain_fade.c \
-            ../components/c5vrx_rx/gain.c ../components/c5vrx_rx/arc_phy.c -lm -o /tmp/test_gain_fade
-          /tmp/test_gain_fade | tail -1
-          cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/c5vrx_rx test_gain_preset.c \
-            ../components/c5vrx_rx/gain.c ../components/c5vrx_rx/arc_phy.c -lm -o /tmp/test_gain_preset
-          /tmp/test_gain_preset | tail -1
-          cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/c5vrx_rx test_gain_v7.c ../components/c5vrx_rx/gain.c ../components/c5vrx_rx/arc_phy.c -lm -o /tmp/test_gain_v7
-          /tmp/test_gain_v7
-          cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/c5vrx_rx test_rx_level.c ../components/c5vrx_rx/gain.c ../components/c5vrx_rx/arc_phy.c -lm -o /tmp/test_rx_level
-          /tmp/test_rx_level
-          cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/c5vrx_rx test_keel_track.c ../components/c5vrx_rx/gain.c ../components/c5vrx_rx/arc_phy.c -lm -o /tmp/test_keel_track
-          /tmp/test_keel_track | grep -v "^S,"
-          # AGC models (agc.c) against KEEL-1, scored on the measured demod quality (level_quality.h)
-          # with the blackbox write cost: nominal and a board-like gain-model error.
-          cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/c5vrx_rx -DSKIP_BOUNDS -DAGC_CHECKS -DPICTURE_Q -DWRITE_COST_US=7000 test_agc_compare.c ../components/c5vrx_rx/agc.c ../components/c5vrx_rx/gain.c ../components/c5vrx_rx/arc_phy.c -lm -o /tmp/test_agc_compare
-          /tmp/test_agc_compare | tail -5
-          cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/c5vrx_rx -DSKIP_BOUNDS -DAGC_CHECKS -DPICTURE_Q -DWRITE_COST_US=7000 -DGAIN_ERR_DB=1.0 -DGAIN_ERR_LOW_DB=6.0 test_agc_compare.c ../components/c5vrx_rx/agc.c ../components/c5vrx_rx/gain.c ../components/c5vrx_rx/arc_phy.c -lm -o /tmp/test_agc_compare_err
-          /tmp/test_agc_compare_err | tail -5
-          cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/c5vrx_rx test_agc_options.c ../components/c5vrx_rx/agc.c -lm -o /tmp/test_agc_options
-          /tmp/test_agc_options
-          # LEVEL's carrier radius of a folded window on the exact hardware fold model (adc_fold.h)
-          cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/c5vrx_rx test_fold_radius.c ../components/c5vrx_rx/agc.c -lm -o /tmp/test_fold_radius
-          /tmp/test_fold_radius
-          cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/c5vrx_rx test_gain_measured.c ../components/c5vrx_rx/gain.c ../components/c5vrx_rx/arc_phy.c -lm -o /tmp/test_gain_measured
-          /tmp/test_gain_measured
-          cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/c5vrx_rx test_gain_track.c ../components/c5vrx_rx/gain.c ../components/c5vrx_rx/arc_phy.c -lm -o /tmp/test_gain_track
-          /tmp/test_gain_track | grep -v "^R," | tail -8
-          cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/c5vrx_rx test_afc_evidence.c -o /tmp/test_afc_evidence
-          /tmp/test_afc_evidence
           # Checkpoint audio helpers (components/audio_player): pitch table, resampler, gain.
           cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/audio_player/include test_audio_resample.c -lm -o /tmp/test_audio_resample
           /tmp/test_audio_resample | tail -1
@@ -150,20 +113,7 @@ jobs:
           python3 test/test_web_mock.py
           python3 test/test_pcb.py
           python3 test/test_scan_analyze.py
-          python3 test/test_field_diag_compare.py
           python3 test/test_flash_tool.py
-          python3 test/test_diag_snapshot_runtime.py
-          python3 test/test_settings.py
-          python3 test/test_phy_observation_hook.py
-          python3 test/test_bank1_watch_runtime.py
-          python3 test/test_11p_runtime.py
-          python3 test/test_dfilt_runtime.py
-          python3 test/test_gain_map_context.py
-          python3 test/test_afc_telemetry.py
-          python3 test/test_sphase_runtime.py
-          python3 test/test_phase_repair_runtime.py
-          python3 test/test_calibration_search_runtime.py
-          python3 test/test_manual_calibration_runtime.py
       - name: Build Checkpoint C5 detector
         shell: bash
         run: |
