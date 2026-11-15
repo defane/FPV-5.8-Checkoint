@@ -92,15 +92,6 @@ float sd_tau_ms(const scan_detector_t *sd);
  * plus the median's one reading. An estimate for the console; peak_ms stays uncorrected. */
 float sd_delay_ms(const scan_detector_t *sd, unsigned channel);
 
-/* Legacy sweep API for the C5VRX glue (components/checkpoint until it moves to sdr_rx,
- * which deletes this block). A sweep is one reading per channel, all at now_ms. */
-#define SD_NO_DATA 0xffffu            /* a window that could not be read */
-/* Power as window_power() gives it, x256, in dB (-30 dB floor). */
-float sd_power_db(uint32_t power);
-/* sd_feed of round(4 * sd_power_db(power[ch])) per channel (SD_NO_DATA skipped), flags 0,
- * t = now_ms * 1000, then sd_rotation. Fills events[] (PD_CHANNELS at most), returns how many. */
-unsigned sd_sweep(scan_detector_t *sd, const uint16_t power[PD_CHANNELS], uint32_t now_ms, pd_event_t *events);
-
 #ifdef __cplusplus
 }
 #endif

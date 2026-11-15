@@ -1,0 +1,8 @@
+# The scan detector runs for every reading (~4000 a second): in IRAM, away from flash cache
+# misses, as widscan58 (CapnBry, a9fff97) put its lap feed in IRAM. About 1.5 KB; the first
+# thing to drop if static RAM gets short (components/sdr_rx/sram_guard.ld).
+[mapping:cp_detector]
+archive: libpass_detector.a
+entries:
+    scan_detector (noflash)
+    pass_detector (noflash)

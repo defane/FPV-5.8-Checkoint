@@ -153,26 +153,3 @@ float sd_delay_ms(const scan_detector_t *sd, unsigned channel)
 {
     return channel < PD_CHANNELS ? (sd->tau_us + (float)sd->c[channel].dt_avg_us) / 1000.0f : 0.0f;
 }
-
-/* Legacy sweep API (see scan_detector.h). */
-#define LEGACY_FLOOR_DB (-30.0f)   /* power 0 after the DC removal */
-
-float sd_power_db(uint32_t power)
-{
-    if (!power) return LEGACY_FLOOR_DB;
-    const float db = 10.0f * log10f((float)power / 256.0f);
-    return db > LEGACY_FLOOR_DB ? db : LEGACY_FLOOR_DB;
-}
-
-unsigned sd_sweep(scan_detector_t *sd, const uint16_t power[PD_CHANNELS], uint32_t now_ms, pd_event_t *events)
-{
-    const int64_t t_us = (int64_t)now_ms * 1000;
-    unsigned n = 0;
-    for (unsigned ch = 0; ch < PD_CHANNELS; ch++) {
-        if (power[ch] == SD_NO_DATA) continue;
-        const int16_t q = (int16_t)lroundf(QDB_PER_DB * sd_power_db(power[ch]));
-        if (sd_feed(sd, ch, q, 0u, t_us, &events[n])) n++;
-    }
-    sd_rotation(sd, t_us);
-    return n;
-}

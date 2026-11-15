@@ -8,9 +8,10 @@ menu "Checkpoint antenna"
             antenna switch, high for the IPEX connector, low for the onboard
             antenna. Off, the firmware leaves GPIO 26 alone and the board stays on
             its default, the onboard antenna. Only for a C5-Zero: GPIO 26 is
-            something else, or nothing, on other boards. On the bench, K then i
-            switches the antenna at run time. A boot with nothing on the IPEX
-            connector is deaf; recalibrate (B, VTX off) after changing antenna.
+            something else, or nothing, on other boards. The boot calibration and
+            K i's automatic recalibration see that antenna: on the bench, K then i
+            switches the antenna at run time and recalibrates every LO on it. A
+            boot with nothing on the IPEX connector is deaf.
 
 endmenu
 
@@ -38,9 +39,9 @@ menu "Checkpoint C5<->C3 link"
         depends on CHECKPOINT_LINK_ENABLE
         default 6
         help
-            GPIO 6 (TX) and 8 (RX) are receiver-free header pins on the
-            C5-Zero (GPIO 15 is not broken out). GPIO 8 is a video-DAC pin,
-            free with video off. See the GPIO map in CLAUDE.md.
+            GPIO 6 (TX) and 8 (RX) are header pins on the C5-Zero (GPIO 15 is
+            not broken out). GPIO 8 is free on the detector (the dump engine
+            uses no GPIO). See the GPIO map in CLAUDE.md.
 
     config CHECKPOINT_LINK_RX_GPIO
         int "Link UART RX GPIO (from the C3 TX)"

@@ -1,8 +1,7 @@
 # detector-xiao-c5 overlay (on sdkconfig.defaults + sdkconfig.psram.defaults):
 # Seeed XIAO ESP32-C5HR8 = 8 MB flash + in-package PSRAM. PSRAM moves the
 # Wi-Fi BSS out of internal SRAM for extra headroom; the partition table is the
-# default one (partitions.csv, within the 8 MB). The status LED stays off: the
-# onboard WS2812 pin is still a receiver IQ-loopback pin on any C5.
+# default one (partitions.csv, within the 8 MB). The detector has no status LED.
 # An sdkconfig.xiao-c5 generated before the flight log was pruned still names
 # partitions.flightlog.csv (deleted) and fails to build: delete it once; ESP-IDF
 # never reapplies these defaults to an existing sdkconfig.

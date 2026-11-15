@@ -6,8 +6,9 @@
  * own gate): applies CONFIG_SET / answers CONFIG_REQ and runs a COMMAND
  * (a calibration like the console's B/F, or a reboot), as nobody opens the
  * C5's USB console in production. Pass events reach it through a small queue
- * (checkpoint_link_report_pass, called from the detector task), so every UART
- * write happens from this one task and never races. */
+ * (checkpoint_link_report_pass, called from the scan task), so every UART
+ * write happens from this one task and never races. It reads the UART for
+ * LINK_READ_MS at a time, so a queued pass leaves within about that. */
 #include "checkpoint_link.h"
 #include "sdkconfig.h"
 #include <stdio.h>
@@ -21,13 +22,14 @@
 #include "freertos/task.h"
 
 #define LINK_UART       ((uart_port_t)CONFIG_CHECKPOINT_LINK_UART_NUM)
-#define LINK_PRIORITY   1u      /* below every receiver task, like the detector */
+#define LINK_PRIORITY   1u      /* as the scan task: they time-slice at every tick */
 #define LINK_STACK      3072u
 #define LINK_RX_BUF     256u
 #define LINK_EVQ_DEPTH  4u
-#define LINK_READ_MS    100u
+#define LINK_READ_MS    10u     /* a queued pass waits at most about this */
 
-static QueueHandle_t s_evq;     /* pd_event_t from the detector task */
+static QueueHandle_t s_evq;     /* pd_event_t from the scan task */
+static TaskHandle_t s_task;
 
 static uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
 
@@ -59,7 +61,7 @@ static void handle_msg(const lp_msg_t *m) {
     case LP_MSG_HELLO:          /* the C3 just connected: sync it */
         send_config_state();
         break;
-    case LP_MSG_COMMAND:        /* calibrate or reboot: the bridge's web confirmed it */
+    case LP_MSG_COMMAND:        /* recalibrate or reboot: the bridge's web confirmed it */
         checkpoint_link_command(m->command);
         break;
     default:
@@ -127,7 +129,7 @@ void checkpoint_link_start(void) {
         s_evq = NULL;
         return;
     }
-    if (xTaskCreate(link_task, "cp_link", LINK_STACK, NULL, LINK_PRIORITY, NULL) != pdPASS) {
+    if (xTaskCreate(link_task, "cp_link", LINK_STACK, NULL, LINK_PRIORITY, &s_task) != pdPASS) {
         printf("CHECKPOINT link disabled: no memory for the task\n");
         uart_driver_delete(LINK_UART);
         vQueueDelete(s_evq);
@@ -143,9 +145,12 @@ void checkpoint_link_report_pass(const pd_event_t *e) {
     if (s_evq) (void)xQueueSend(s_evq, e, 0);   /* non-blocking; drop if full */
 }
 
+TaskHandle_t checkpoint_link_task(void) { return s_task; }
+
 #else  /* !CONFIG_CHECKPOINT_LINK_ENABLE */
 
 void checkpoint_link_start(void) {}
 void checkpoint_link_report_pass(const pd_event_t *e) { (void)e; }
+TaskHandle_t checkpoint_link_task(void) { return NULL; }
 
 #endif

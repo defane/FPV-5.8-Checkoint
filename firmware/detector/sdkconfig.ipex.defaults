@@ -1,7 +1,6 @@
 # detector-ipex overlay (on sdkconfig.defaults): a Waveshare ESP32-C5-Zero that listens
 # on its IPEX connector, for an external antenna (hardware/antenna, or the enclosure's
-# SMA bulkhead). GPIO 26 is driven high before the radio starts, so the calibration sees
-# that antenna. C5-Zero only: GPIO 26 is something else, or nothing, on other boards.
-# With nothing on the IPEX connector the detector is deaf. Recalibrate (B, or the web's
-# calibration) with every VTX off after flashing it.
+# SMA bulkhead). GPIO 26 is driven high before the radio starts, so the boot calibration
+# runs on the IPEX antenna. C5-Zero only: GPIO 26 is something else, or nothing, on other
+# boards. With nothing on the IPEX connector the detector is deaf.
 CONFIG_CHECKPOINT_ANTENNA_IPEX=y
