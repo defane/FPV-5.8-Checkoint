@@ -39,6 +39,124 @@ def recording(events, steady=None, seconds=12, drop=0.0):
     return "\n".join(lines)
 
 
+ROT_US = 2000           # an sdr_rx rotation: four LOs, two channels a capture (1+2 first)
+ORDER = "1+2:3+4:5+6:7+8"
+
+
+def qdb_recording(events, decim, seconds=12, floor_db=-60.0, sd_db=1.2, drop=0.0, begin=True):
+    """The sdr_rx engine's dump (K then S, format=qdb): every channel read once a rotation, at the
+    middle of its pair's quarter, sd_db of noise per reading; a row is the mean of decim rotations
+    in 0.25 dB codes, timed at its first rotation's start. events: (channel, t_s, dB over the
+    floor, half_width_s)."""
+    rnd = random.Random(7)
+    rotations = int(seconds * 1e6 / ROT_US)
+    rows = []
+    for r0 in range(0, rotations - decim + 1, decim):
+        sums, n = [0.0] * 8, [0] * 8
+        for r in range(r0, r0 + decim):
+            for ch in range(8):
+                if rnd.random() < drop:
+                    continue
+                t = (r * ROT_US + (ch // 2 + 0.5) / 4 * ROT_US) / 1e6
+                db = floor_db + rnd.gauss(0, sd_db)
+                for c, at, over, half in events:
+                    if c == ch and abs(t - at) < 3 * half:
+                        db = max(db, floor_db + over - ((t - at) / half) ** 2 * 6 + rnd.gauss(0, sd_db))
+                sums[ch] += 4 * db
+                n[ch] += 1
+        rows.append("SCAN," + ",".join(str(v) for v in [r0 * ROT_US] + [round(s / k) if k else -32768
+                                                                          for s, k in zip(sums, n)]))
+    lines = ["HB t_s=5 stage=ready"]
+    if begin:
+        lines.append(f"SCANDUMP begin rotations={rotations} kept={len(rows)} kept_s={seconds} decim={decim} "
+                     f"format=qdb order={ORDER} gain=40 rot_us={ROT_US} fw=test")
+    lines += rows
+    lines.append(f"SCANDUMP end rotations={rotations} decim={decim} format=qdb order={ORDER} gain=40")
+    return "\n".join(lines)
+
+
+def analyze_qdb(text, margin=10.0, alpha=0.25):
+    rows, header = sa.read_scans(text)
+    return sa.find_passes(rows, margin, alpha, sa.read_order(header), sa.read_dump(header, rows))[0]
+
+
+class AnalyzeQdb(unittest.TestCase):
+    EVENTS = [(5, 3.0, 25, 0.15), (5, 7.0, 22, 0.15), (2, 10.0, 24, 0.15)]
+
+    def test_2_ms_and_28_ms_rows_find_the_same_passes(self):
+        fast = analyze_qdb(qdb_recording(self.EVENTS, 1))
+        slow = analyze_qdb(qdb_recording(self.EVENTS, 14))
+        self.assertEqual([p["ch"] for p in fast], [5, 5, 2])
+        self.assertEqual([p["ch"] for p in slow], [5, 5, 2])
+        for a, b in zip(fast, slow):
+            self.assertLess(abs(a["t"] - b["t"]), 0.03, "the row rate does not move a pass")
+        for p, at in zip(fast + slow, (3.0, 7.0, 10.0) * 2):
+            self.assertLess(abs(p["t"] - at), 0.1, "the 61 ms smoothing delay, no more")
+
+    def test_nothing_on_noise(self):
+        self.assertEqual(analyze_qdb(qdb_recording([], 1)), [])
+        self.assertEqual(analyze_qdb(qdb_recording([], 14)), [])
+
+    def test_no_signal_floor_clamp(self):
+        # A legacy recording clamps the threshold at SIGNAL_DB (-5 dB); a -35 dBFS peak is a pass here.
+        passes = analyze_qdb(qdb_recording([(1, 6.0, 25, 0.15)], 14))
+        self.assertEqual([p["ch"] for p in passes], [1])
+        self.assertLess(passes[0]["peak"], sa.SIGNAL_DB)
+
+    def test_codes_and_missing_readings(self):
+        rows, header = sa.read_scans(qdb_recording(self.EVENTS, 14, drop=0.02))
+        self.assertIn("format=qdb", header)
+        self.assertEqual(sa.to_db(-240, qdb=True), -60.0)
+        self.assertEqual(sa.to_db(-1, qdb=True), -0.25)
+        rows, _ = sa.read_scans("SCANDUMP begin decim=1 format=qdb\nSCAN,0,-240,-32768,-1,4,-240,-240,-240,-240\n"
+                                "SCANDUMP end decim=1 format=qdb")
+        self.assertEqual(rows, [(0, [-240, None, -1, 4, -240, -240, -240, -240])])
+        self.assertEqual([p["ch"] for p in analyze_qdb(qdb_recording(self.EVENTS, 14, drop=0.02))], [5, 5, 2])
+
+    def test_pair_order(self):
+        self.assertEqual(sa.read_order(f"SCANDUMP end order={ORDER}"), [0, 0, 1, 1, 2, 2, 3, 3])
+        self.assertEqual(sa.read_order("order=7+8:1+2:3+4:5+6"), [1, 1, 2, 2, 3, 3, 0, 0])
+
+    def test_row_times_within_the_rotation(self):
+        rows = [(k * 14 * ROT_US, [-240] * 8) for k in range(3)]
+        dump = {"qdb": True, "decim": 14, "rot_us": ROT_US}
+        times, period = sa.channel_times(rows, sa.read_order(f"order={ORDER}"), dump)
+        self.assertEqual(period, 14 * ROT_US)
+        # A row's centre is 14 ms after its start; R1/R2 are read in the first quarter of each
+        # rotation, 0.75 ms before a rotation's middle, R7/R8 0.75 ms after it.
+        self.assertAlmostEqual(times[0][1], (28000 + 14000 - 750) / 1e6)
+        self.assertAlmostEqual(times[1][1], times[0][1])
+        self.assertAlmostEqual(times[7][1], (28000 + 14000 + 750) / 1e6)
+        one = [(k * ROT_US, [-240] * 8) for k in range(3)]
+        times, _ = sa.channel_times(one, sa.read_order(f"order={ORDER}"), {"qdb": True, "decim": 1, "rot_us": ROT_US})
+        self.assertAlmostEqual(times[2][1], (2000 + 750) / 1e6, msg="R3: middle of the second quarter")
+
+    def test_lost_begin_line(self):
+        text = qdb_recording(self.EVENTS, 14, begin=False)
+        rows, header = sa.read_scans(text)
+        dump = sa.read_dump(header, rows)
+        self.assertTrue(dump["qdb"])
+        self.assertEqual(dump["decim"], 14)
+        self.assertAlmostEqual(dump["rot_us"], ROT_US, msg="from the rows' period over decim")
+        self.assertEqual([p["ch"] for p in analyze_qdb(text)], [5, 5, 2])
+
+    def test_header_holds_both_lines(self):
+        rows, header = sa.read_scans(qdb_recording([], 14))
+        self.assertIn("SCANDUMP begin", header)
+        self.assertIn("SCANDUMP end", header)
+        self.assertEqual(sa.read_dump(header, rows), {"qdb": True, "decim": 14, "rot_us": float(ROT_US)})
+
+    def test_alpha_is_per_17_5_ms(self):
+        self.assertAlmostEqual(sa.row_alpha(0.25, 17500), 0.25)
+        self.assertAlmostEqual(sa.row_alpha(0.25, 35000), 1 - 0.75 ** 2)
+        tau = [-p / math.log(1 - sa.row_alpha(0.25, p)) for p in (2000, 28000)]
+        self.assertAlmostEqual(tau[0], tau[1], msg="the same time constant at any row rate")
+
+    def test_legacy_dump_stays_legacy(self):
+        rows, header = sa.read_scans(recording([]))
+        self.assertEqual(sa.read_dump(header, rows), {"qdb": False, "decim": 1, "rot_us": PERIOD_US})
+
+
 class Analyze(unittest.TestCase):
     def run_on(self, text, margin=10.0):
         rows, header = sa.read_scans(text)

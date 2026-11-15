@@ -1,13 +1,11 @@
-/* Hop bench statistics, pure C (host-tested in test/test_hop_stats.c): how long a
- * retune takes, how long the IQ power needs to settle after it, and the refresh
- * per channel a scan would get out of that. */
+/* Engine bench statistics, pure C (host-tested in test/test_hop_stats.c), for the console benches
+ * of cp_bench.c: the spread of the hop timings (unsigned microseconds), and levels in 0.25 dB
+ * codes (signed qdb, as sdr_rx reports them): medians, the settle point of a trace against a
+ * control, the noise of a reading, and the excess power over a floor. */
 #pragma once
+#include <math.h>
 #include <stddef.h>
 #include <stdint.h>
-
-#define HS_UNSETTLED  UINT32_MAX
-#define HS_TAIL_MAX   16u
-#define HS_TRACE_MAX  128u
 
 typedef struct { uint32_t min, med, max; } hs_spread_t;
 
@@ -21,21 +19,6 @@ static inline void hs_sort(uint32_t *v, size_t n)
     }
 }
 
-/* Mean IQ power of a window, DC removed, x256 (4-bit I and Q as measure_window). */
-static inline uint32_t hs_window_power(const uint8_t *s, size_t n)
-{
-    int32_t si = 0, sq = 0;
-    uint32_t sp = 0;
-    for (size_t k = 0; k < n; k++) {
-        const int q = (int8_t)((s[k] & 0x0fu) << 4) >> 4, i = (int8_t)(s[k] & 0xf0u) >> 4;
-        si += i;
-        sq += q;
-        sp += (uint32_t)(i * i + q * q);
-    }
-    const int64_t ac = (int64_t)sp * (int64_t)n - (int64_t)si * si - (int64_t)sq * sq;
-    return ac <= 0 ? 0u : (uint32_t)(ac * 256 / ((int64_t)n * (int64_t)n));
-}
-
 /* Sorts v in place. */
 static inline hs_spread_t hs_spread(uint32_t *v, size_t n)
 {
@@ -44,7 +27,7 @@ static inline hs_spread_t hs_spread(uint32_t *v, size_t n)
     return (hs_spread_t){v[0], v[n / 2], v[n - 1]};
 }
 
-/* Index of the highest value of v, n > 0: the VTX's channel in a power table. */
+/* Index of the highest value of v, n > 0. */
 static inline size_t hs_strongest(const uint32_t *v, size_t n)
 {
     size_t best = 0;
@@ -53,45 +36,126 @@ static inline size_t hs_strongest(const uint32_t *v, size_t n)
     return best;
 }
 
-/* About +-3 dB: a live VTX moves more than 1 dB from one 102 us window to the next
- * (first board run, unclipped: the video modulation), so a tighter band never holds. */
-static inline int hs_near(uint32_t p, uint32_t level)
-{
-    return (uint64_t)p <= (uint64_t)level * 2u && (uint64_t)p * 2u >= (uint64_t)level;
-}
-
 static inline uint32_t hs_median3(uint32_t a, uint32_t b, uint32_t c)
 {
     return a > b ? (b > c ? b : (a > c ? c : a)) : (a > c ? a : (b > c ? c : b));
-}
-
-/* An IQ power trace after a hop, t_us rising, n <= HS_TRACE_MAX, median-of-3
- * smoothed so a lone window does not count. The settled level is the median of the
- * last tail points (tail <= HS_TAIL_MAX), stored in *level. Returns the time of the
- * first point from which every later one stays near it, or HS_UNSETTLED when the
- * tail itself does not hold still. */
-static inline uint32_t hs_settle_us(const uint32_t *t_us, const uint32_t *power, size_t n, size_t tail,
-                                    uint32_t *level)
-{
-    uint32_t last[HS_TAIL_MAX], s[HS_TRACE_MAX];
-    if (!n || !tail || tail > HS_TAIL_MAX || tail > n || n > HS_TRACE_MAX) { *level = 0; return HS_UNSETTLED; }
-    for (size_t i = 0; i < n; i++)
-        s[i] = i && i + 1u < n ? hs_median3(power[i - 1], power[i], power[i + 1]) : power[i];
-    for (size_t i = 0; i < tail; i++) last[i] = s[n - tail + i];
-    *level = hs_spread(last, tail).med;
-    size_t first = n;
-    while (first && hs_near(s[first - 1], *level)) first--;
-    return n - first < tail ? HS_UNSETTLED : t_us[first];
 }
 
 /* A ring of cap entries after count writes: how many it holds, and its oldest slot. */
 static inline size_t hs_ring_kept(uint32_t count, size_t cap) { return count < cap ? count : cap; }
 static inline size_t hs_ring_oldest(uint32_t count, size_t cap) { return count < cap ? 0 : count % cap; }
 
-/* Refresh per channel in Hz x10 for a scan of `channels`, one slot being the hop,
- * its settling and one power window. */
-static inline uint32_t hs_rate_x10(uint32_t hop_us, uint32_t settle_us, uint32_t window_us, unsigned channels)
+/* Many integer timings without keeping them (K s: thousands of hops): a count per value
+ * 0..nbins-1, larger values in the last bin (a median there reads nbins - 1); min and max
+ * exact. bin[] is the caller's. */
+typedef struct { uint32_t *bin; uint32_t nbins, count, min, max; } hs_hist_t;
+
+static inline void hs_hist_init(hs_hist_t *h, uint32_t *bin, uint32_t nbins)
 {
-    const uint64_t round_us = ((uint64_t)hop_us + settle_us + window_us) * channels;
-    return round_us ? (uint32_t)(10000000u / round_us) : 0u;
+    for (uint32_t i = 0; i < nbins; i++) bin[i] = 0;
+    *h = (hs_hist_t){bin, nbins, 0, UINT32_MAX, 0};
+}
+
+static inline void hs_hist_add(hs_hist_t *h, uint32_t v)
+{
+    if (!h->nbins) return;
+    h->bin[v < h->nbins ? v : h->nbins - 1u]++;
+    h->count++;
+    if (v < h->min) h->min = v;
+    if (v > h->max) h->max = v;
+}
+
+/* As hs_spread on the same values: the median is the (count / 2)-th smallest, from 0. */
+static inline hs_spread_t hs_hist_spread(const hs_hist_t *h)
+{
+    if (!h->count) return (hs_spread_t){0, 0, 0};
+    uint32_t below = 0, m = 0;
+    for (; m + 1u < h->nbins; m++) {
+        below += h->bin[m];
+        if (below > h->count / 2u) break;
+    }
+    return (hs_spread_t){h->min, m, h->max};
+}
+
+/* ---- levels: 0.25 dB codes, signed ---- */
+
+static inline int hs_near_qdb(int32_t a, int32_t b, int32_t tol)   /* |a-b| <= tol */
+{
+    const int64_t d = (int64_t)a - (int64_t)b;
+    return (d < 0 ? -d : d) <= (int64_t)tol;
+}
+
+/* The first index from which every later point stays within tol of ref[i] (pointwise), or n
+ * when not even the last one does. */
+static inline size_t hs_settled_from(const int16_t *v, const int16_t *ref, size_t n, int32_t tol)
+{
+    size_t first = n;
+    while (first && hs_near_qdb(v[first - 1], ref[first - 1], tol)) first--;
+    return first;
+}
+
+/* Mean (rounded, qdb) and sample standard deviation (millidB) of n codes; 0 and 0 for n = 0,
+ * sd 0 for n = 1. Every v counts: leave missing readings out first. */
+static inline void hs_mean_sd_qdb(const int16_t *v, size_t n, int32_t *mean_qdb, uint32_t *sd_mdb)
+{
+    *mean_qdb = 0;
+    *sd_mdb = 0;
+    if (!n) return;
+    int64_t s = 0;
+    for (size_t i = 0; i < n; i++) s += v[i];
+    const double mean = (double)s / (double)n;
+    *mean_qdb = (int32_t)lround(mean);
+    if (n < 2) return;
+    double ss = 0.0;
+    for (size_t i = 0; i < n; i++) ss += ((double)v[i] - mean) * ((double)v[i] - mean);
+    *sd_mdb = (uint32_t)lround(sqrt(ss / (double)(n - 1)) * 250.0);   /* 1 qdb = 250 mdB */
+}
+
+typedef struct { int32_t min, median, max; } hs_spread_i32_t;
+
+static inline void hs_sort_i32(int32_t *v, size_t n)
+{
+    for (size_t i = 1; i < n; i++) {
+        const int32_t x = v[i];
+        size_t j = i;
+        for (; j && v[j - 1] > x; j--) v[j] = v[j - 1];
+        v[j] = x;
+    }
+}
+
+/* Sorts v; n = 0 gives all 0. The median is v[n / 2] of the sorted values, as hs_spread. */
+static inline hs_spread_i32_t hs_spread_i32(int32_t *v, size_t n)
+{
+    if (!n) return (hs_spread_i32_t){0, 0, 0};
+    hs_sort_i32(v, n);
+    return (hs_spread_i32_t){v[0], v[n / 2], v[n - 1]};
+}
+
+static inline size_t hs_strongest_i32(const int32_t *v, size_t n)   /* index of the max, 0 if n = 0 */
+{
+    size_t best = 0;
+    for (size_t i = 1; i < n; i++)
+        if (v[i] > v[best]) best = i;
+    return best;
+}
+
+static inline size_t hs_weakest_i32(const int32_t *v, size_t n)     /* index of the min, 0 if n = 0 */
+{
+    size_t best = 0;
+    for (size_t i = 1; i < n; i++)
+        if (v[i] < v[best]) best = i;
+    return best;
+}
+
+/* The power a reading has beyond a floor, dB: 10 log10(10^(with/10) - 10^(floor/10)), computed
+ * relative to the floor (no overflow at any level); -200 when with <= floor. */
+static inline float hs_excess_db(float with_db, float floor_db)
+{
+    const float d = with_db - floor_db;
+    if (!(d > 0.0f)) return -200.0f;
+    if (d > 60.0f) return with_db;                 /* the floor is under 1e-6 dB of it */
+    const float x = powf(10.0f, d / 10.0f) - 1.0f;
+    if (!(x > 0.0f)) return -200.0f;
+    const float r = floor_db + 10.0f * log10f(x);
+    return r < -200.0f ? -200.0f : r;
 }
