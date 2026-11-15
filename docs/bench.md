@@ -63,9 +63,10 @@ capture (8 per LO, so 33, when the dump never answers).
   0. `stale` counts captures dropped after a PHY-tracking recalibration: not a fault, each
   comes with `foreign_dc` +3. `cal_needed=1`: an LO's DC offset (`dc_max` over 30 counts)
   or its IQ estimate (`iq_bad`, one bit per LO) stayed out of range for 3 s; recalibrate
-  (`F`, VTX off). The same for an LO whose captures failed on most hops for 3 s (`cap_bad`,
-  with `timeout`, `short` or `overrun` climbing): its two channels are deaf, and the bridges
-  show their levels as unknown.
+  (`F`, VTX off). The same when an LO's captures failed on most of its hops for 3 s (`cap_bad`,
+  one bit per LO, with `timeout`, `short`, `overrun` or `dsp` climbing); its two channels
+  refresh slower or not at all. A channel that gets no reading at all for 1 s (every capture
+  of its LO fails) shows an unknown level on the bridges.
 - `CHECKPOINT source=sdr live= learning= bench= engine_failed= stalled= stalls= gain= top=
   rise_db= state= rotations= readings= passes= alpha= tau_ms= active_db= …`, and
   `CHECKPOINT last_pass …` once a pass rang.
