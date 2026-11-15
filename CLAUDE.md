@@ -79,7 +79,7 @@ Every firmware builds only `main`'s dependency closure (`set(COMPONENTS main)`):
   usb_reader 10 (the download key). Benches run in the scan task, never in the console.
 - RAM: static IRAM, data and BSS must end below `0x40820000` (`sram_guard.ld` fails the
   link otherwise) with an 8 KiB margin: `_iram_end`, `_data_end`, `_bss_end` ≤
-  `0x4081E000` (`riscv32-esp-elf-nm`; `_bss_end` is `0x4081a978` today). Buffers go on
+  `0x4081E000` (`riscv32-esp-elf-nm`; `_bss_end` is `0x4081ab78` today). Buffers go on
   the heap or in the bank's regions (`sdr_bench_scratch()`); checkpoint state is
   heap-allocated (`checkpoint_start()`), so do not add static `.bss` buffers. Nothing but
   the scan task touches `0x40820000`–`0x4083FFFF` (the RF dump bank), never during a
