@@ -839,8 +839,9 @@ int main(void)
 
     /* 24. A real R5 pilot 30 dB under that R6, on the same line, 200 ms behind it, then at the same
      *     instant. Per reading, the phantom at R6's time takes the pass and its refractory kills the
-     *     real one; guarded, R5 rings once, on its own pass, within 30 ms (200 ms) or 80 ms (same
-     *     instant: blind while R6 clips) of R5 alone in the air. */
+     *     real one; guarded, R5 rings once, on its own pass, within 30 ms (200 ms) or 50 ms (same
+     *     instant: blind while R6 clips; 39 ms here) of R5 alone in the air. Without the catch-up of a
+     *     pass under way to its fresh median, the same instant was 61 ms off. */
     {
         static scan_detector_t sd;
         const pdrone_t r6 = {.mw = 600, .d_m = 0.3, .t0_s = 2.0}, none = {0};
@@ -868,7 +869,7 @@ int main(void)
                base_ok, guard_ok, worst * 1e3, same_ok, worst_same * 1e3);
         CHECK(base_ok <= 2, "per reading, the phantom replaces a real R5 pass 200 ms behind a clipping R6");
         CHECK(guard_ok == 10 && worst <= 0.03, "guarded, R5 rings its own pass, within 30 ms of R5 alone");
-        CHECK(same_ok == 10 && worst_same <= 0.08, "at the same instant too, within 80 ms (blind while R6 clips)");
+        CHECK(same_ok == 10 && worst_same <= 0.05, "at the same instant too, within 50 ms (blind while R6 clips)");
     }
 
     /* 25. A 600 mW R6 parked 0.5 m from the gate for 10 s (clipping) while R5 laps at 1 m every 3 s:
@@ -957,6 +958,33 @@ int main(void)
                off, r.total, (double)(rest14 - rest9));
         CHECK(off == 1 && r.total == 4 && r.passes[2] == 4 && r.last.rel, "a VTX staying 28 dB up: 1 pass without the re-arm, all 4 with 16 dB");
         CHECK(armed && rest14 == rest9, "relatively armed, the rest does not climb");
+        /* Back to absolute: the drone leaves at 40 s (under the release), then a far pass 14 dB up
+         * (over active_db and min_peak_db, under the trough + 16 it would need if still relative). */
+        const scene_t far = {6, {rect(2, 28.0f, 4.0, 40.0), gpass(2, 20.0f, 5.0, 250.0f), gpass(2, 20.0f, 15.0, 250.0f),
+                                gpass(2, 20.0f, 25.0, 250.0f), gpass(2, 20.0f, 35.0, 250.0f), gpass(2, 14.0f, 50.0, 250.0f)}};
+        unsigned abs_ok = 0;
+        for (uint64_t k = 0; k < 5u; k++) {
+            start(&r, RATE_A_US, NOISE_DB, 270 + k);
+            play(&r, 54.0, &far);
+            abs_ok += r.passes[2] == 5u && r.total == 5u && !r.last.rel && fabs(r.last.peak_ms / 1000.0 - (T0_US / 1e6 + 50.0)) < 0.2;
+        }
+        CHECK(abs_ok == 5u, "once the drone falls under the release, a far 14 dB pass rings, armed absolutely (5 runs)");
+        /* The 1 s average at the reading rate: a pass held 45 dB up from 5 to 20 s with 20 dB fades of
+         * 150 ms (8 s, which rings the pass) and 300 ms (11 s), and a 25 dB one of 600 ms (14 s): the
+         * average falls 11 dB in the longest, short of the re-arm's 16, so it rings once. A 40 ms
+         * average (a fixed weight per reading at 490 Hz) re-armed in the 300 ms fade, a 0.4 s one in
+         * the 600 ms fade, each ringing a second pass. */
+        const scene_t fades = {6, {rect(2, 45.0f, 5.0, 8.0), rect(2, 25.0f, 8.0, 8.15), rect(2, 45.0f, 8.15, 11.0),
+                                   rect(2, 25.0f, 11.0, 11.3), rect(2, 45.0f, 11.3, 14.0), rect(2, 20.0f, 14.0, 14.6)}};
+        scene_t held45 = fades;
+        held45.b[held45.n++] = rect(2, 45.0f, 14.6, 20.0);
+        unsigned once = 0;
+        for (uint64_t k = 0; k < 5u; k++) {
+            start(&r, RATE_A_US, NOISE_DB, 275 + k);
+            play(&r, 24.0, &held45);
+            once += r.passes[2] == 1u && r.total == 1u;
+        }
+        CHECK(once == 5u, "fades of 150, 300 and 600 ms inside a held pass ring it once at 490 Hz (5 runs)");
         s_rearm_db = 0.0f;
     }
 
@@ -1115,6 +1143,145 @@ int main(void)
         CHECK(ctl == 0u, "with the FM spread a still VTX rings nothing by itself");
         CHECK(held_ok == runs && tr_ok == runs, "back from a 2 s hold, R5 is relatively armed within 3 dB of its level");
         CHECK(phantom == 0u, "and rings nothing");
+    }
+
+    /* 31. Two saturated runs on one hop, their sources on either channel: R6's VTX switched on beside
+     *     the antenna at 5 s for 0.3 s (a jump: R6 is that run's source), then a 600 mW R5 passing
+     *     0.3 m away at 10 s clips the capture itself, R6 at the floor reading its products. A new run
+     *     forgets the old source: R5 is never held in it and rings its pass on time, R6 rings its own
+     *     onset only. Keeping R6 as the source held R5 for its whole pass and rang an R6 phantom. */
+    {
+        static scan_detector_t sd;
+        const pdrone_t r5 = {.mw = 600, .d_m = 0.3, .t0_s = 10.0};
+        unsigned ok = 0;
+        for (uint64_t k = 0; k < 10u; k++) {
+            const pd_config_t c = sd_config_default();
+            sd_init(&sd, &c);
+            pd_set_rearm(&sd.det, 16.0f);
+            seed(3100 + k);
+            unsigned n5 = 0, n6 = 0, n6_late = 0, held5 = 0;
+            double t5 = 0.0;
+            for (int64_t t = T0_US; t < T0_US + S(14.0); t += RATE_A_US) {
+                for (unsigned hop = 0; hop < 4u; hop++) {
+                    const int64_t th = t + (int64_t)hop * RATE_A_US / 4;
+                    const double ts = (double)(th - T0_US) * 1e-6;
+                    double ra = PAIR_FLOOR + gauss(1.2f), rb = PAIR_FLOOR + gauss(1.2f);
+                    uint8_t fl = 0;
+                    if (hop == PAIR_HOP) {
+                        const double a = pdrone_db(&r5, ts) + gauss(1.0f);
+                        if (ts >= 5.0 && ts < 5.3) {             /* R6 switched on at 6 cm */
+                            fl = SD_FLAG_SATURATED;
+                            rb = PAIR_CLIP_DBFS + 5.0 + gauss(0.3f);
+                            ra = psum(ra, rb + clip_x());
+                        } else if (a > PAIR_CLIP_DBFS) {         /* R5 clips the capture */
+                            fl = SD_FLAG_SATURATED;
+                            ra = PAIR_CLIP_DBFS + 7.5 * tanh((a - PAIR_CLIP_DBFS) / 10.0) + gauss(0.3f);
+                            rb = psum(rb, ra + clip_x());
+                        } else {
+                            ra = psum(ra, a);
+                        }
+                    }
+                    const sd_reading_t rd[2] = {{th, qdb((float)ra), (uint8_t)(2u * hop), fl},
+                                                {th, qdb((float)rb), (uint8_t)(2u * hop + 1u), fl}};
+                    pd_event_t ev[2];
+                    unsigned held = 0;
+                    const unsigned rang = sd_feed_hop(&sd, hop, rd, 2, ev, &held);
+                    if (hop == PAIR_HOP && ts > 9.0 && (held & 1u)) held5++;
+                    for (unsigned i = 0; i < 2; i++) {
+                        if (!(rang & (1u << i))) continue;
+                        const double pt = ev[i].peak_ms / 1000.0 - T0_US / 1e6;
+                        if (ev[i].channel == PAIR_LO) { n5++; t5 = pt; }
+                        if (ev[i].channel == PAIR_HI) { n6++; n6_late += pt > 8.0; }
+                    }
+                }
+                sd_rotation(&sd, t + 3 * RATE_A_US / 4);
+            }
+            ok += n5 == 1u && fabs(t5 - 10.0) < 0.1 && n6 == 1u && n6_late == 0u && held5 == 0u;
+        }
+        printf("     a step run of R6, then a clipping pass of R5 on the same hop: right in %u/10\n", ok);
+        CHECK(ok == 10u, "a new saturated run forgets the old one's source");
+    }
+
+    /* 32. A hover at the clip edge: a 600 mW R6 parked by the gate from 0.5 to 10.5 s just over its
+     *     first rail hit (+1 dB) with the guard evaluation's mild fading (1.5 dB slow, tau 50 ms, plus
+     *     1 dB per capture), so its captures go in and out of the rails (about 3 in 4 saturated) while
+     *     R5 laps at 1 m every 3 s. The hover's tail holds R5 on the clean captures too, so it is held
+     *     more often than R6 clips, and it rings no phantom and no mistimed lap (a lap that stands
+     *     within 15 dB of R6 may ring on time, -120..+250 ms, the eval's scoring). Fed in the fades'
+     *     gaps, R5 rang phantom and mistimed laps (the eval's S4a without the tail: 20 of 80). */
+    {
+        static scan_detector_t sd;
+        const pdrone_t r5 = {.mw = 25, .d_m = 1.0, .t0_s = 1.0, .laps = 4, .lap_s = 3.0};
+        unsigned kept = 0, wrong = 0, tail_ok = 0;
+        double satcap = 0.0, cap = 0.0;
+        for (uint64_t k = 0; k < 20u; k++) {
+            const pd_config_t c = sd_config_default();
+            sd_init(&sd, &c);
+            pd_set_rearm(&sd.det, 16.0f);
+            seed(3200 + k);
+            double slow = 0.0;
+            unsigned sat_n = 0, held5 = 0;
+            for (int64_t t = T0_US; t < T0_US + S(3.5 + 12.0); t += RATE_A_US) {
+                for (unsigned hop = 0; hop < 4u; hop++) {
+                    const int64_t th = t + (int64_t)hop * RATE_A_US / 4;
+                    const double ts = (double)(th - T0_US) * 1e-6 - 3.5;
+                    double ra = PAIR_FLOOR + gauss(1.2f), rb = PAIR_FLOOR + gauss(1.2f);
+                    uint8_t fl = 0;
+                    if (hop == PAIR_HOP && ts >= 0.0) {
+                        const double dt = RATE_A_US * 1e-6;
+                        slow += (dt / 0.05) * -slow + 1.5 * sqrt(2.0 * dt / 0.05) * gauss(1.0f);
+                        const bool on = ts >= 0.5 && ts < 10.5;
+                        const double b = on ? PAIR_CLIP_DBFS + 1.0 + slow + gauss(1.0f) : -999.0;
+                        const double a = pdrone_db(&r5, ts) + gauss(1.0f);
+                        cap += on;
+                        if (b > PAIR_CLIP_DBFS) {
+                            fl = SD_FLAG_SATURATED;
+                            sat_n++;
+                            rb = PAIR_CLIP_DBFS + 7.5 * tanh((b - PAIR_CLIP_DBFS) / 10.0) + gauss(0.3f);
+                            ra = psum(psum(ra, a - 3.0), rb + clip_x());
+                        } else {
+                            ra = psum(ra, a);
+                            rb = psum(rb, b);
+                        }
+                    }
+                    const sd_reading_t rd[2] = {{th, qdb((float)ra), (uint8_t)(2u * hop), fl},
+                                                {th, qdb((float)rb), (uint8_t)(2u * hop + 1u), fl}};
+                    pd_event_t ev[2];
+                    unsigned held = 0;
+                    const unsigned got = sd_feed_hop(&sd, hop, rd, 2, ev, &held);
+                    held5 += hop == PAIR_HOP && (held & 1u);
+                    for (unsigned i = 0; i < 2; i++) {
+                        if (!(got & (1u << i)) || ev[i].channel != PAIR_LO) continue;
+                        const double pt = ev[i].peak_ms / 1000.0 - (T0_US / 1e6 + 3.5);
+                        double d = 1e9;
+                        for (int l = 0; l < 4; l++) d = fabs(pt - (1.0 + 3.0 * l)) < fabs(d) ? pt - (1.0 + 3.0 * l) : d;
+                        if (d >= -0.12 && d <= 0.25) kept++;
+                        else wrong++;
+                    }
+                }
+                sd_rotation(&sd, t + 3 * RATE_A_US / 4);
+            }
+            satcap += sat_n;
+            tail_ok += held5 > sat_n;
+        }
+        printf("     clip-edge hover, %.0f%% of R6's captures saturated: R5 over 20 runs (80 laps) %u on time, %u phantom or "
+               "mistimed; held past R6's saturated captures in %u\n", 100.0 * satcap / cap, kept, wrong, tail_ok);
+        CHECK(wrong == 0u && tail_ok == 20u, "a hover in and out of the rails: its tail holds the partner, no phantom, no mistimed lap");
+    }
+
+    /* 33. Check 28's hold with a drop over the re-arm's 16 dB: R5 35 dB up between laps, 15 after a
+     *     0.8 s hold (over SD_HOLD_LONG_US, under stale_ms). R5 starts again from the level it comes
+     *     back at, so the average from before the hold, falling 20 dB, rings nothing; every lap rings. */
+    {
+        unsigned ok = 0;
+        for (uint64_t k = 0; k < 10u; k++) {
+            const step_t p = {.base = 35.0, .after = 15.0, .clip_s = 0.8, .ramp = 1, .rearm = 16.0f};
+            step_out_t o;
+            step_run(&p, 3300 + k, &o);
+            ok += step_laps(&o) == 0xFu && o.probe.state == PD_IDLE && o.probe.rel && fabsf(o.probe.trough - 15.0f) < 2.0f;
+        }
+        printf("     long hold, R5 35 dB up then 15: right in %u/10\n", ok);
+        CHECK(ok == 10u, "a 20 dB drop across a long hold rings nothing; R5 rings every lap");
     }
 
     printf("%d/%d scan_detector checks passed\n", g_pass, g_pass + g_fail);

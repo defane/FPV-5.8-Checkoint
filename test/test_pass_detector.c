@@ -395,6 +395,10 @@ int main(void)
         check("pd_resume: a 4 dB wobble at that level rings nothing, the next +20 dB pass rings (rel)", n == 1u && rel == 1u);
         pd_resume(&r, 0u, 8.0f, 13000u);
         check("pd_resume under the release: armed (IDLE, not relative)", r.ch[0].state == PD_IDLE && !r.ch[0].rel);
+        pd_resume(&r, 0u, 13.0f, 13000u);   /* the release is 12 dB, active_db 15 */
+        check("pd_resume between the release and active_db: relatively armed there",
+              r.ch[0].state == PD_IDLE && r.ch[0].rel && r.ch[0].trough == 13.0f);
+        pd_resume(&r, 0u, 8.0f, 13000u);
         const pd_channel_t keep = r.ch[0];
         pd_resume(&r, 0u, NAN, 13050u);
         pd_resume(&r, PD_CHANNELS, 30.0f, 13050u);

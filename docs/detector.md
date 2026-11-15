@@ -219,7 +219,8 @@ than 6 dB over the other channels' median.
   level's 1 s average (`PD_REARM_TAU_MS`) stands D under the highest level since the pass.
   That highest level follows the level up in COOLDOWN, so an early ring does not leave it
   low. A fade shorter than the average does not re-arm: two 20 dB fades of 150 and 300 ms
-  inside a held pass ring once ([host] `test_pass_detector.c`).
+  inside a held pass ring once ([host] `test_pass_detector.c`), and at the reading rate a
+  25 dB one of 600 ms too ([host] `test_scan_detector.c` check 27).
 - **The prominence.** After a relative re-arm the level is still far above `active_db`, so
   the next 3 dB wobble (`drop_db`) would ring a phantom at a high level. The next pass must
   therefore also rise D over the trough, the lowest 1 s average since the re-arm. RISING
