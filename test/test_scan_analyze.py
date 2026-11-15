@@ -152,6 +152,28 @@ class AnalyzeQdb(unittest.TestCase):
         tau = [-p / math.log(1 - sa.row_alpha(0.25, p)) for p in (2000, 28000)]
         self.assertAlmostEqual(tau[0], tau[1], msg="the same time constant at any row rate")
 
+    def test_vtx_parked_most_of_the_recording_keeps_the_rest_low(self):
+        # R6 sits +15 dB over the floor for the first 7.2 s of 12 (a drone held by the gate, 60 %),
+        # then a real pass at 10.5 s: a median rest would be the parked level and miss it.
+        lines = qdb_recording([(5, 10.5, 25, 0.15)], 1).splitlines()
+        for i, line in enumerate(lines):
+            if line.startswith("SCAN,"):
+                f = line.split(",")
+                if int(f[1]) < 7_200_000:
+                    f[7] = str(int(f[7]) + 60)   # R6, +15 dB in 0.25 dB codes
+                lines[i] = ",".join(f)
+        passes = analyze_qdb("\n".join(lines))
+        self.assertTrue(any(p["ch"] == 5 and abs(p["t"] - 10.5) < 0.15 for p in passes),
+                        "the pass after the parked stretch is found")
+
+    def test_truncated_dump_after_a_complete_one(self):
+        # The console closed in the middle of a second dump: its rows have no end line, so the
+        # complete dump before it is the one analysed.
+        full = qdb_recording([(1, 3.0, 25, 0.15)], 14)
+        cut = qdb_recording([(6, 3.0, 25, 0.15)], 14).splitlines()
+        cut = "\n".join(line for line in cut[: len(cut) // 2] if "SCANDUMP end" not in line)
+        self.assertEqual([p["ch"] for p in analyze_qdb(full + "\n" + cut)], [1])
+
     def test_legacy_dump_stays_legacy(self):
         rows, header = sa.read_scans(recording([]))
         self.assertEqual(sa.read_dump(header, rows), {"qdb": False, "decim": 1, "rot_us": PERIOD_US})
@@ -169,11 +191,12 @@ class Analyze(unittest.TestCase):
         for p, at in zip(passes, (3.0, 7.0, 10.0)):
             self.assertLess(abs(p["t"] - at), 0.06, "smoothing delay stays small")
 
-    def test_vtx_close_most_of_the_time_keeps_its_passes(self):
-        # Held close for most of the recording: the median is no longer the rest.
+    def test_vtx_close_all_along_keeps_its_passes(self):
+        # A VTX steady 12 dB over the others on R6, nine laps on it: each lap is a pass on R6.
+        # (The rest quantile against a VTX parked most of the recording: AnalyzeQdb.)
         events = [(5, 2.0 + i, 15, 0.2) for i in range(9)]
         passes = self.run_on(recording(events, steady={5: 2.0}), margin=6.0)
-        self.assertTrue(passes and all(p["ch"] == 5 for p in passes))
+        self.assertEqual([p["ch"] for p in passes], [5] * 9)
 
     def test_nothing_on_noise(self):
         self.assertEqual(self.run_on(recording([])), [])
