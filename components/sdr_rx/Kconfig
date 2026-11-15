@@ -1,0 +1,54 @@
+# sdr_rx: the detector's receive engine (components/sdr_rx). GPL-3.0-only.
+menu "SDR receive engine (sdr_rx)"
+    config SDR_RX_GAIN_DEFAULT
+        int "Forced RX gain index at first boot"
+        range 0 83
+        default 40
+    config SDR_RX_SETTLE_US
+        int "Wait from the end of a tune to the capture (us)"
+        range 0 5000
+        default 100
+        help
+            Hidden behind the DSP up to ~240 us (spec 2.1). Raise only if K z shows a residue.
+    config SDR_RX_NFFT
+        int "FFT size (capture = 4 x this)"
+        range 64 256
+        default 64
+    config SDR_RX_FILTER_CODE
+        int "RX analog filter capacitor code (-1 = the PHY's own)"
+        range -1 63
+        default 0
+    config SDR_RX_DC_CAL_NEEDED
+        int "DC offset (counts) that flags 'calibration needed'"
+        range 5 511
+        default 30
+    config SDR_RX_IRR_MIN_DB
+        int "Minimum image rejection after a full calibration (dB)"
+        range 0 60
+        default 30
+    config SDR_RX_VERIFY_GAIN
+        int "RX gain index of the full calibration's image-rejection verify"
+        range 46 83
+        default 60
+        help
+            Above ~45 the receiver's own noise dominates the ADC's (spec 2.8), so idle I/Q
+            moments carry the analog imbalance. The scan gain is restored afterwards.
+    config SDR_RX_VERIFY_CAPTURES
+        int "Captures (256 samples) summed by the verify"
+        range 32 256
+        default 64
+    config SDR_RX_VERIFY_TRIES
+        int "Calibrations per LO before the verify gives up (1 = verify logs only)"
+        range 1 5
+        default 3
+    config SDR_RX_PROMISC_FILTER_ALL
+        bool "Keep the Wi-Fi promiscuous filter at its default (all frames), as widscan58"
+        default n
+        help
+            Off (default): filter mask 0, as C5VRX, so no 5 GHz Wi-Fi frame (ch 165 sits on
+            LO 5825) reaches the MAC's buffers or wakes the Wi-Fi task. On: widscan58's
+            measured setting; use it if bench B0 shows flat levels.
+    config SDR_RX_ALLOW_UNPINNED_PHY
+        bool "Build with an unverified C5 libphy (private ABI not re-checked)"
+        default n
+endmenu

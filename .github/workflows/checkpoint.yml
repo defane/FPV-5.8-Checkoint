@@ -133,6 +133,13 @@ jobs:
           # Hop bench statistics (components/checkpoint/hop_stats.h).
           cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/checkpoint test_hop_stats.c -o /tmp/test_hop_stats
           /tmp/test_hop_stats | tail -1
+          # sdr_rx engine (components/sdr_rx): FFT, PSD, band levels, IQ correction; the LO planner.
+          cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/sdr_rx -I../components/sdr_rx/include test_sdr_dsp.c \
+            ../components/sdr_rx/sdr_psd.c ../components/sdr_rx/sdr_level.c -lm -o /tmp/test_sdr_dsp
+          /tmp/test_sdr_dsp | tail -1
+          cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/sdr_rx -I../components/sdr_rx/include test_sdr_plan.c \
+            ../components/sdr_rx/sdr_plan.c -o /tmp/test_sdr_plan
+          /tmp/test_sdr_plan | tail -1
           # Signed admin requests (components/web_auth): sessions, replay, HMAC; then the page side.
           cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/web_auth/include test_web_auth.c \
             ../components/web_auth/web_auth.c -o /tmp/test_web_auth
