@@ -18,10 +18,12 @@ settles them. The C5VRX-era results are in [History](#history).
 python tools/flash.py PORT --check
 ```
 
-On a tree that built the C5VRX engine before, run `tools/fw.sh clean` and delete the
-generated `firmware/detector/sdkconfig` (and `sdkconfig.ipex`, `sdkconfig.xiao-c5`,
-`sdkconfig.wave-c5-lcd`, `sdkconfig.psram`; never the `*.defaults`) first: ESP-IDF never
-reapplies the defaults, and sdr_rx's CMake stops on a stale one.
+On a tree that built the C5VRX engine before, run `tools/fw.sh clean` first: it deletes
+every build dir and generated sdkconfig of the `make variants` list
+(`firmware/detector/sdkconfig`, `sdkconfig.ipex`, `sdkconfig.xiao-c5`,
+`sdkconfig.wave-c5-lcd`, …; never a `*.defaults`). ESP-IDF never reapplies the defaults,
+and sdr_rx's CMake stops on a stale one. The CI's PSRAM build (`build-psram`,
+`sdkconfig.psram`) is not in that list: delete those by hand if you made them.
 
 Startup prints, in order:
 
@@ -284,7 +286,7 @@ must fly the same power (25 mW and 600 mW are 14 dB apart).
 
 Setup: the detector on USB, logged (`python tools/flash.py PORT --monitor-only --log
 run.log`); a 25 mW VTX on a known channel at 0.9 m; the onboard antenna. Before B0, run
-`tools/fw.sh clean` and delete the generated sdkconfig files listed in §1.
+`tools/fw.sh clean` (§1).
 Report the `SDR cal`, `SDRBENCH`, `SDRRESIDUE`, `SDRIMAGE` and `SDRNOISE` lines and the
 `scan_analyze.py` output, and fill the tables below.
 
@@ -310,7 +312,7 @@ Report the `SDR cal`, `SDRBENCH`, `SDRRESIDUE`, `SDRIMAGE` and `SDRNOISE` lines 
 - If not: no `SDR ready`, send the `SDR init` or `BOOT failed` lines. Levels flat with
   the VTX on: set `CONFIG_SDR_RX_PROMISC_FILTER_ALL=y`. Control failed: report the pairs;
   the fallback is `CONFIG_SDR_RX_VERIFY_TRIES=1` in `sdkconfig.defaults` (the verify then
-  only logs; delete the generated sdkconfig and rebuild).
+  only logs; run `tools/fw.sh clean` and rebuild).
 
 **B1, rate.** `K` `s`, VTX off.
 - Pass: PLL `per_channel_hz_x10` 4000 or more (target about 5000), `tune_us` median 300 or

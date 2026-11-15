@@ -187,9 +187,9 @@ pages from disk against a simulated `/api`, so a page edit needs no build or
 flash; a new `/api/state` field or a changed POST buffer goes in the mock too
 (`test/test_web_mock.py` fails otherwise).
 
-After editing `firmware/detector/sdkconfig*.defaults`, delete the generated
-`firmware/detector/sdkconfig` and its variants' `sdkconfig.<variant>` (never the
-`*.defaults`) and run `tools/fw.sh clean`: ESP-IDF never reapplies the defaults, and
+After editing `firmware/detector/sdkconfig*.defaults`, run `tools/fw.sh clean` (`make
+clean`): it deletes every build dir and generated `sdkconfig`/`sdkconfig.<variant>` of the
+`make variants` list, never a `*.defaults`. ESP-IDF never reapplies the defaults, and
 sdr_rx's CMake stops on a stale one (cert-test archive or `-Og`). The raw commands:
 
 ```sh

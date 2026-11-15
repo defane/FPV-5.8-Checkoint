@@ -1,7 +1,7 @@
 # FPV 5.8 Checkpoint detector (ESP32-C5): the sdr_rx engine (PHY I/Q dump snapshots, one LO per
 # two channels), pass detection, UART link to the bridge. Settings partly after widscan58 a9fff97
 # firmware/sdkconfig.defaults (itself derived from esp-sdr), GPL-3.0-or-later.
-# Delete the generated sdkconfig* after editing: ESP-IDF never reapplies the defaults.
+# Run tools/fw.sh clean after editing: ESP-IDF never reapplies the defaults.
 CONFIG_IDF_TARGET="esp32c5"
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 # 4 MB: the Waveshare ESP32-C5-Zero has 4 MB flash; the image also boots on an 8 MB part.

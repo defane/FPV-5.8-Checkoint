@@ -144,9 +144,9 @@ python3 test_scan_analyze.py   # tools/scan_analyze.py on synthetic recordings
 python3 test_flash_tool.py     # tools/flash.py: download key, --check, logs
 ```
 
-After editing a `firmware/detector/sdkconfig*.defaults`, delete the generated
-`firmware/detector/sdkconfig` (and the variants' `sdkconfig.<variant>`, never the
-`*.defaults`) and run `tools/fw.sh clean`: ESP-IDF never reapplies the defaults.
+After editing a `firmware/detector/sdkconfig*.defaults`, run `tools/fw.sh clean`: it
+deletes every build dir and generated `sdkconfig`/`sdkconfig.<variant>` (never a
+`*.defaults`), since ESP-IDF never reapplies the defaults.
 
 ## Architecture
 
