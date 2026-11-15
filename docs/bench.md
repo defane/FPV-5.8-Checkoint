@@ -5,10 +5,11 @@ Propulsion removed. The detector has no picture and no sound: everything shows
 on the console (`python tools/flash.py PORT --monitor-only --log run.log`); the
 coin sound is the C6 master's ([fleet.md](fleet.md)).
 
-The receive engine is `components/sdr_rx` ([detector.md](detector.md)). Nothing below
-has been measured on this board yet: the expected values are widscan58's (CapnBry,
-`PLAN.md` at `a9fff97`), and [§7](#7-first-bench-b0-to-b10-and-results) is the bench that
-settles them. The C5VRX-era results are in [History](#history).
+The receive engine is `components/sdr_rx` ([detector.md](detector.md)). B0 to B4 of
+[§7](#7-first-bench-b0-to-b10-and-results) were run on a C5-Zero on 2026-11-15 (results and
+gaps in its table). The other expected values are still widscan58's (CapnBry, `PLAN.md` at
+`a9fff97`), and the rest of §7 is the bench that settles them. The C5VRX-era results are in
+[History](#history).
 
 ## 1. Build, flash, startup
 
@@ -203,7 +204,11 @@ SDRNOISE done
 5899 MHz with 5677 MHz's calibration tables (one band edge with the other's: what a stale
 calibration looks like) and prints its DC offset next to the calibrated LOs' worst one.
 The *calibration needed* threshold (`threshold`, `CONFIG_SDR_RX_DC_CAL_NEEDED`, 30 counts)
-must lie between the two (B7).
+must lie between the two (B7). On the C5-Zero at gain 40 the two do not separate ([board]
+2026-11-15): `calibrated_dc_max=4`, borrowed `dc_i=8 dc_q=-3`, and the borrowed LO's levels
+read within 0.5 dB of the calibrated ones (`mean_qdb=-239/-236` against −237/−234). A stale
+calibration is then harmless to the levels, so the threshold stays at 30: it only catches a
+gross DC fault.
 
 ### `K` `p`: one LO per channel against the pairs
 
@@ -212,7 +217,9 @@ R1=-19.0MHz/bins13..20 R2=+18.0MHz/bins43..50`, …), takes 200 rotations, switc
 SINGLE (one LO per channel, 8 MHz below it; its 8 new LOs calibrate on their first visit),
 prints that plan, takes 100 rotations, then `SDRPLAN compare gain=… pairs_qdb=… single_qdb=…
 pairs_hz_x10=… single_hz_x10=…` and `SDRPLAN done (PAIRS again)`. `pairs_qdb` is also the
-quickest read of every channel's median level at the current gain.
+quickest read of every channel's median level at the current gain. On the C5-Zero, a 25 mW
+VTX on R6 ([board] 2026-11-15): PAIRS 537 Hz per channel with R6 at +41 dB, SINGLE 269 Hz
+with R6 at +34 dB. PAIRS stays the plan: twice the rate, and the VTX reads at least as strong.
 
 ## 5. Scan recording: do real passes stand out?
 
@@ -374,7 +381,9 @@ at gains 30 to 50 in steps of 4 (`K` `G` twice a step), reading R4's level at ea
   larger in magnitude) above `threshold`, and `calibrated_dc_max` under it.
 - If gaps or hangs come with a tracking recalibration: set
   `CONFIG_ESP_PHY_DISABLE_PLL_TRACK=y` and report. If the threshold is not between the two
-  DC values: set `CONFIG_SDR_RX_DC_CAL_NEEDED` midway (on a log scale) and record it.
+  DC values: keep 30 while the borrowed levels stay within 1 dB of the calibrated ones (the
+  case at gain 40, §4 `K` `n`); otherwise set `CONFIG_SDR_RX_DC_CAL_NEEDED` midway (on a log
+  scale) and record it.
 
 **B8, XIAO.** `tools/fw.sh build detector-xiao-c5`, flash it on a XIAO ESP32-C5 (`python
 tools/flash.py PORT --build firmware/detector/build-xiao-c5`), then B0 and B1. Pass: as B0
@@ -384,6 +393,13 @@ and B1, with `faults` 0 over 10 min (the PSRAM and the dump bank coexist).
 its IPEX connector (`python tools/flash.py PORT --build firmware/detector/build-ipex`);
 `K` `i` twice. Pass: the boot prints `CHECKPOINT antenna=ipex`, each `K` `i`
 prints `recal=quick`, and the levels change as expected.
+
+**TODO (not run yet, deferred on 2026-11-15).** Bench the IPEX connector with an external
+antenna: B9 itself, then the clipping headroom. On the onboard antenna at gain 40, a 25 mW
+VTX clips the ADC within about 30 cm, and the clipping puts a ghost on the other channel of
+its LO. So redo on IPEX a `K` `S` recording with passes close to the antenna and B6 (c), and
+decide from them whether the IPEX lead needs a fixed attenuator (a PI pad, see
+[For later: hardware attenuation](#for-later-hardware-attenuation-for-a-more-precise-pass-point)).
 
 **B10, link.** From the C3's web page: *Cal F*, *Cal B*, *Reboot*. Then the download key
 (`` ` ``) while the detector scans, 5 times: `python tools/flash.py PORT` sends it through
@@ -397,17 +413,17 @@ prints `recal=quick`, and the levels change as expected.
 
 | Step | Date | Board, firmware id | Result | Numbers |
 | --- | --- | --- | --- | --- |
-| B0 boot | | | | `boot_ms`, `irr_db` ×4, `tries`, `heap_min`, the four `*_stack_free` |
-| B0 control | | | | 10 pairs (`irr_db`, `irr_off_db`) |
-| B1 rate | | | | `per_channel_hz_x10`, `tune_us`, `cap_us`, `dsp_us` (pll, full) |
-| B2 settle | | | | `settle_us` (pll, full) |
-| B3 image | | | | `irr_on_db`, `irr_off_db`, `moments_irr_db` for R1, R2, R7, R8 |
-| B4 noise | | | | `sd_db` per size; `calibrated_dc_max`, borrowed `dc_i`/`dc_q` |
+| B0 boot | 2026-11-15 | C5-Zero, onboard antenna, `5.0.0-dev+34259ce5b8b7` | Partial: `heap_min`, the four `*_stack_free` and the 10 min run not done yet | `boot_ms` 982–1034, `faults=0`; `irr_db` 31.5/28.7/27.7/34.9 and 31.8/26.5/30.7/31.7 (two boots), `tries` up to 3 (the threshold was 30 then, 25 since) |
+| B0 control | | | Not run yet | 10 pairs (`irr_db`, `irr_off_db`) |
+| B1 rate | 2026-11-15 | as B0 | Pass | pll: `per_channel_hz_x10=5079` (507.9 Hz), rotation 1957 µs, `tune_us` 216, `cap_us` 29, `dsp_us` 216, detector 11 µs; full: `tune_us` 438 |
+| B2 settle | 2026-11-15 | as B0 | Pass | `settle_us` 0 (pll), 0 (full); no residue across LOs |
+| B3 image | 2026-11-15 | as B0 | Effectively pass, on R6/R5 only, from `K` `S`; `K` `x` not measured | Every floor run had the VTX on (R6's floor −8, −41, −30, −26 qdb; refused since, §4). `K` `S`: R6 at −20 to −7.5 dBFS, R5 (its partner) +0.5 dB median over its rest: rejection ≥ ~49 dB, floor-limited |
+| B4 noise | 2026-11-15 | as B0 | Pass | `sd_db` 1.02–1.08 (256), 0.50–0.58 (1024), 0.26–0.29 (4096), means within 0.25 dB; `calibrated_dc_max=4`, borrowed `dc_i=8`/`dc_q=-3`: not separable, kept 30 (§4 `K` `n`) |
 | B5 channels | | | | rise per channel; R4 level per gain |
 | B6 passes | | | | (a) found/10, (b) `PASS` counts |
 | B7 long run | | | | `faults`, `rot_hz_x10`, `heap_min`, `foreign_dc`, `stale` |
 | B8 XIAO | | | | |
-| B9 IPEX | | | | |
+| B9 IPEX | | | TODO, deferred (see B9) | |
 | B10 link | | | | badge times, download key 5/5 |
 
 B6 (c), far drones (`peak_db` of each pass, `—` if none rang):
