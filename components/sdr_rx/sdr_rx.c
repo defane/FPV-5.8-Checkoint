@@ -35,9 +35,10 @@
 #define WINDOW_US 1000000          /* health window */
 #define CAL_NEEDED_WINDOWS 3u
 #define VERIFY_MIN_OK 32u          /* unsaturated captures a verify needs */
-#define VERIFY_MAX_ERRORS 4u       /* failed captures in a row that end a verify: no IRR to measure, and
-                                    * a dead dump (20 ms per timeout) must not run a recalibration into
-                                    * the task watchdog (~0.5 s for 4 LOs instead of ~5 s) */
+#define VERIFY_MAX_ERRORS 8u       /* failed captures that end a verify try, in a row or not: a try then
+                                    * waits on at most 8 timeouts (20 ms each) whatever VERIFY_CAPTURES is,
+                                    * so a FULL recalibration stays under the task watchdog (~2.5 s worst
+                                    * case at the defaults, 4 LOs x 3 tries) */
 #define BENCH_NFFT 64u             /* sdr_bench_moments_add */
 
 _Static_assert(PSD_WS_BYTES <= SDR_BANK_PSD_BYTES, "psd workspace in the bank");
@@ -168,19 +169,21 @@ static uint32_t capture_dc(const uint32_t *w, unsigned n) {
 /* The FULL verify of one freshly calibrated LO (spec 2.8): at the verify gain, where the
  * receiver's noise is over the ADC's, plain I/Q moment sums of VERIFY_CAPTURES captures give
  * the raw path's image rejection; under IRR_MIN_DB, that LO is calibrated again (at most
- * VERIFY_TRIES calibrations). VERIFY_MAX_ERRORS failed captures in a row end it (irr_db=
- * skip_faults), so a dead dump costs ~0.1 s per LO whatever VERIFY_CAPTURES is. Returns false
- * when no capture worked at all. */
+ * VERIFY_TRIES calibrations). VERIFY_MAX_ERRORS failed captures end a try (irr_db=skip_faults
+ * under VERIFY_MIN_OK good ones), so a try is bounded whatever VERIFY_CAPTURES is and however the
+ * failures are spread: a dead dump costs ~0.16 s per LO. Returns false only when no capture of
+ * this LO worked in any try (the dump does not run), so a retry that starts badly never turns an
+ * LO that captured into a boot failure. */
 static bool verify_lo(engine_t *e, unsigned h, uint32_t cal_ms) {
     const uint32_t lo = e->plan.hop[h].lo_khz;
     unsigned tries = 1, ok = 0, sat = 0, errors = 0;
     uint32_t dc = 0;
     float irr = 0.0f;
+    bool captured = false; /* a good or saturated capture of this LO, in any try */
     for (;;) {
         sdr_moments_t m = {0};
-        ok = sat = errors = 0;
+        ok = sat = errors = 0; /* a stale capture is no error: it neither counts nor ends the try */
         dc = 0;
-        unsigned in_row = 0; /* failed captures in a row (a stale one neither counts nor breaks it) */
         (void)radio_gain_now(CONFIG_SDR_RX_VERIFY_GAIN);
         for (unsigned c = 0; c < CONFIG_SDR_RX_VERIFY_CAPTURES; c++) {
             const uint32_t *w;
@@ -194,11 +197,10 @@ static bool verify_lo(engine_t *e, unsigned h, uint32_t cal_ms) {
             }
             if (err != ESP_OK) {
                 count_capture_error(err);
-                errors++;
-                if (++in_row >= VERIFY_MAX_ERRORS) break;
+                if (++errors >= VERIFY_MAX_ERRORS) break;
                 continue;
             }
-            in_row = 0;
+            captured = true;
             if (psd_moments_add(w, e->ncap, e->nfft, &m)) {
                 sat++;
                 continue;
@@ -227,7 +229,7 @@ static bool verify_lo(engine_t *e, unsigned h, uint32_t cal_ms) {
     else
         printf("SDR cal lo=%" PRIu32 " ms=%" PRIu32 " irr_db=%.1f verify_gain=%u tries=%u dc=%" PRIu32 " sat=%u\n",
                lo / 1000u, cal_ms, (double)irr, (unsigned)CONFIG_SDR_RX_VERIFY_GAIN, tries, dc, sat);
-    return ok || sat;
+    return captured;
 }
 
 /* Every plan LO recalibrated (spec 2.8): the cache cleared once (never per LO: that would leave

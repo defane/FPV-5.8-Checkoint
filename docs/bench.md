@@ -32,7 +32,7 @@ Startup prints, in order:
   LO is calibrated (~41 ms), then its image rejection is verified from 64 captures at a
   temporary gain of 60, at least 30 dB or up to 3 calibrations (`tries`).
   `irr_db=skip_saturated` means too many clipped captures: a VTX too close, verify skipped;
-  `irr_db=skip_faults` means the captures failed (4 failed in a row end the verify).
+  `irr_db=skip_faults` means the captures failed (8 failed captures end a verify try).
 - `SDR ready lo=5677,5751,5825,5899 gain=40 verify_tries=3 cal_ms=… boot_ms=… chip_rev=v…`
   (`verify_tries` is the build's `CONFIG_SDR_RX_VERIFY_TRIES`: 1 only in B0's control), expected within
   about 2 s of the reset; `tools/flash.py --check` waits for it. Passes can ring 3 s later,
@@ -45,7 +45,7 @@ console stays up`; the console and the download key keep working. After `BOOT fa
 UART link is never started, so the bridges show the gate as absent (no C5 status) and
 commands to it fail; only the USB console tells why. After `SDR init failed` the bridges see
 *calibration needed* with unknown levels and at least one fault, plus one per failed verify
-capture (4 per LO, so 17, when the dump never answers).
+capture (8 per LO, so 33, when the dump never answers).
 
 `T` prints four lines:
 
