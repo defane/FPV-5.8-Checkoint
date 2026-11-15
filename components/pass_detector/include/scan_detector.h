@@ -21,7 +21,10 @@
  * or its first laps would rise from nothing. A saturated capture never moves a rest
  * (compression reads the partner channel low). Nothing rings while the rests settle.
  * A channel without a reading for over SD_DT_MAX_US (a calibration) restarts its median
- * and its average from the next reading. */
+ * and holds its next readings until the median is full again (a lone burst after the gap
+ * stays a lone burst); its average then resumes where it was or, after a gap longer than
+ * pd's stale_ms (pd has forgotten the channel), starts again from that median. A late
+ * reading (over twice the usual interval) weighs in the average as one on time. */
 #pragma once
 #include "pass_detector.h"
 #include <stdbool.h>
@@ -38,7 +41,7 @@ extern "C" {
 #define SD_REST_DOWN_DB   0.02f       /* per 17.5 ms: 1.14 dB/s, settles on its low values */
 #define SD_LEARN_US       3000000u    /* the rests settle ten times faster for 3 s */
 #define SD_LEARN_RATE     10.0f
-#define SD_DT_MAX_US      100000      /* a longer gap re-primes the channel */
+#define SD_DT_MAX_US      100000      /* a longer gap restarts the channel's median */
 #define SD_FLAG_SATURATED 0x01u       /* sd_feed flags: = SDR_RD_SATURATED */
 
 typedef struct {

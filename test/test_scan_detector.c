@@ -284,7 +284,8 @@ int main(void)
     }
     CHECK(r.total == 0, "a strong signal in the first 3 s rings nothing");
 
-    /* 8. A VTX left on keeps showing, and a drone waiting by the gate is not learnt. */
+    /* 8. A VTX left on keeps showing (switched on after learning: its rest does not climb while it
+     *    is active). A VTX on from the boot is test 18. */
     start(&r, RATE_A_US, NOISE_DB, 8);
     {
         const scene_t sc = {2, {rect(4, 15.0f, 5.0, 305.0), gpass(4, 15.0f, 309.0, 150.0f)}};
@@ -295,7 +296,7 @@ int main(void)
         float low = 1e9f;
         for (unsigned ch = 0; ch < PD_CHANNELS; ch++)
             if (ch != 4 && r.sd.c[ch].rest_db < low) low = r.sd.c[ch].rest_db;
-        CHECK(r.sd.c[4].rest_db <= low + SD_REST_SPREAD_DB + 1.0f, "its rest stays near the others'");
+        CHECK(r.sd.c[4].rest_db <= low + SD_REST_SPREAD_DB + 1.0f, "its rest does not climb while it is active");
         play(&r, 313.0, &sc);                /* it leaves (that rings), then one lap */
     }
     CHECK(r.passes[4] == 2 && r.total == 2, "its first lap counts");
@@ -385,12 +386,21 @@ int main(void)
     {
         const scene_t sc = {1, {rect(5, 15.0f, 5.0, 10.0)}};
         play(&r, 10.0, &sc);
+        float rest[PD_CHANNELS];
+        for (unsigned ch = 0; ch < PD_CHANNELS; ch++) rest[ch] = r.sd.c[ch].rest_db;
         r.t += S(2.0);                       /* 2 s without readings */
         bool dt_ok = true;
+        float moved = 0.0f;
         for (unsigned k = 0; k < 10u; k++) {
             rotation(&r, &sc);
             dt_ok &= r.sd.c[5].dt_avg_us > 0 && r.sd.c[5].dt_avg_us < 3000;
+            if (k == 0)
+                for (unsigned ch = 0; ch < PD_CHANNELS; ch++)
+                    if (fabsf(r.sd.c[ch].rest_db - rest[ch]) > moved) moved = fabsf(r.sd.c[ch].rest_db - rest[ch]);
         }
+        printf("     gap: rests moved by %.4f dB at most\n", moved);
+        CHECK(moved <= SD_REST_DOWN_DB * (float)SD_DT_MAX_US / (float)SD_REF_SWEEP_US + 0.01f,
+              "the gap moves no rest by more than SD_DT_MAX_US of descent");
         play(&r, 17.0, &sc);
         printf("     gap: R6 dt_avg_us %ld after\n", (long)r.sd.c[5].dt_avg_us);
         CHECK(r.total == 0, "a VTX gone during a 2 s gap rings nothing");
@@ -431,6 +441,54 @@ int main(void)
     }
     printf("     wrap: max rise %.4f dB over %lu readings\n", r.rise_max[0], (unsigned long)r.reads[0]);
     CHECK(r.rise_max[0] < 0.2f && r.total == 0, "a burst every 256 readings never passes the median");
+
+    /* 16. A lone burst as the first reading after a gap is still a lone burst: the channel waits
+     *     for a full median. A gap under pd's stale_ms (a PHY-tracking recalibration, ~0.2 s) and
+     *     a longer one. */
+    {
+        const struct { float db; double gap_s; } cases[4] = {{30.0f, 0.2}, {15.0f, 0.2}, {30.0f, 1.5}, {15.0f, 1.5}};
+        unsigned rang = 0;
+        for (unsigned k = 0; k < 4u; k++) {
+            start(&r, RATE_A_US, NOISE_DB, 160u + k);
+            play(&r, 10.0, NULL);
+            r.t += S(cases[k].gap_s);
+            const scene_t burst = {1, {{.ch = 2, .db = cases[k].db, .from = r.t, .to = r.t + r.dt / 2}}};
+            rotation(&r, &burst);            /* R3's first reading after the gap */
+            play(&r, 14.0, NULL);
+            rang += r.total;
+        }
+        CHECK(rang == 0, "a +15/+30 dB burst as the first reading after a 0.2/1.5 s gap rings nothing");
+    }
+
+    /* 17. A parked VTX across 0.2 s gaps (PHY-tracking recalibrations): the average resumes where
+     *     it was, so neither a high nor a low first median after a gap rings against the peak
+     *     held from before. 2000 gaps, 1.3 s apart; re-priming at every gap rang on ~0.2 % of
+     *     them, and only the first phantom would show (the channel then stays in cooldown). */
+    start(&r, RATE_A_US, NOISE_DB, 17);
+    {
+        const scene_t sc = {1, {rect(4, 15.0f, 5.0, 1e6)}};
+        play(&r, 8.0, &sc);
+        for (unsigned g = 0; g < 2000u; g++) {
+            r.t += S(0.2);
+            play(&r, 8.0 + 1.5 * (g + 1u), &sc);
+        }
+        printf("     parked VTX across 2000 gaps: %u passes, R5 %s\n", r.total, pd_state_name(r.sd.det.ch[4].state));
+        CHECK(r.total == 0 && r.sd.det.ch[4].state == PD_RISING, "a VTX parked across 2000 gaps of 0.2 s rings nothing");
+    }
+
+    /* 18. A drone waiting by the gate from the boot is not learnt as its channel's rest: the rest
+     *     stops 6 dB over the others' median, the VTX still shows, and its first lap counts. */
+    start(&r, RATE_A_US, NOISE_DB, 18);
+    {
+        const scene_t sc = {2, {rect(4, 15.0f, -1.0, 60.0), gpass(4, 15.0f, 75.0, 150.0f)}};
+        play(&r, 60.0, &sc);
+        printf("     VTX from boot: R5 rest %.2f dB (cap %.2f), rise %.2f dB\n", r.sd.c[4].rest_db, r.sd.cap_db,
+               sd_rise_db(&r.sd, 4));
+        CHECK(r.sd.c[4].rest_db <= r.sd.cap_db + 0.25f, "its rest is capped at the others' median + 6 dB");
+        CHECK(sd_rise_db(&r.sd, 4) > r.sd.det.cfg.active_db && r.total == 0, "it still shows, above active_db, and rings nothing");
+        play(&r, 80.0, &sc);                 /* it leaves at 60 s, then one lap at 75 s */
+    }
+    CHECK(r.passes[4] == 1 && r.total == 1, "its first lap counts");
 
     /* sd_relearn starts over. */
     sd_relearn(&r.sd);

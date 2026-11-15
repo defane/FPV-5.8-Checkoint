@@ -83,26 +83,35 @@ bool sd_feed(scan_detector_t *sd, unsigned channel, int16_t level_qdb, uint8_t f
         if (dt < 0) dt = 0;
     }
     c->last_us = t_us;
-    if (c->primed && dt > SD_DT_MAX_US) {   /* a gap: the old readings would come back */
+    if (c->primed && dt > SD_DT_MAX_US) {
+        /* A gap (a calibration): the old readings would come back, so the median starts again.
+         * Up to pd's stale_ms the average then resumes where it was, which keeps it and pd's
+         * peak one series (a level re-primed from one reading, against a peak built from the
+         * smoothed one, rang on a mere noise excursion); after a longer gap pd has forgotten
+         * the channel and the average re-primes. */
         c->nhist = 0;
         c->hidx = 0;
-        c->primed = false;
+        if (dt > (int64_t)sd->det.cfg.stale_ms * 1000) c->primed = false;
     }
 
     c->hist[c->hidx] = level_qdb;
     c->hidx = c->hidx >= 2u ? 0u : (uint8_t)(c->hidx + 1u);
     if (c->nhist < 3u) c->nhist++;
+    /* After a gap, held until the median is full again: a lone burst must not lead the channel. */
+    if (c->nhist < 3u && c->rest_primed) return false;
     const int16_t m = c->nhist == 3u ? median3(c->hist[0], c->hist[1], c->hist[2]) : level_qdb;
     const float db = (float)m / QDB_PER_DB;
-    if (!c->primed) {                        /* (re-)primed from this reading; dt_avg kept */
+    if (!c->primed) {                        /* (re-)primed from this median; dt_avg kept */
         c->smooth_db = db;
         c->primed = true;
     } else {
-        c->smooth_db += weight(sd->tau_us, dt) * (db - c->smooth_db);
+        /* A late reading (dt over twice the usual interval) weighs as one on time: its median
+         * mostly holds readings from before the delay. */
+        const int64_t most = c->dt_avg_us ? 2 * (int64_t)c->dt_avg_us + 1000 : dt;
+        c->smooth_db += weight(sd->tau_us, dt < most ? dt : most) * (db - c->smooth_db);
         if (!c->dt_avg_us) {
             c->dt_avg_us = (int32_t)dt;
         } else {                             /* one late reading barely moves it */
-            const int64_t most = 2 * (int64_t)c->dt_avg_us + 1000;
             const int32_t dtc = (int32_t)(dt < most ? dt : most);
             c->dt_avg_us += (dtc - c->dt_avg_us) / 8;
         }
