@@ -48,6 +48,15 @@
 #define Z_TOL_QDB        4             /* 1 dB */
 #define X_CAPTURES       200u
 #define X_SIGNAL_QDB     40            /* 10 dB over the floor: a VTX is on, so not a floor run */
+/* A floor run with a channel over 6 dB above the median of the 8 is refused: a VTX is on. With
+ * every VTX off the 8 floors spread 1.25 dB at gain 40, under 1 dB from their median ([board] K n,
+ * 2026-11-15: -239..-234 qdb), and each is a median of 200 readings of ~1.06 dB sd ([board] B4),
+ * so ~0.1 dB of noise: 6 dB leaves ~5 dB for another board, antenna or gain. A channel at
+ * X_SIGNAL_QDB over its own floor stands 9 dB or more over that median, so no VTX that would
+ * count as a signal is stored as a floor. Floor runs taken with a 25 mW VTX on R6 had R6 49-57 dB
+ * over the median ([board] 2026-11-15). The median ignores up to 3 raised channels of 8, so a
+ * strong VTX's partner (R5 at +3.75 dB in those runs) does not hide it. */
+#define X_FLOOR_SPREAD_QDB 24
 #define X_NEED_QDB       200           /* 50 dB over the floor: the image is measurable */
 #define X_FLOOR_DB       0.5f          /* the partner this close to its floor: floor-limited */
 #define X_FLOOR_EXCESS_DB 9.1f         /* hs_excess_db at X_FLOOR_DB: 9.1 dB under the floor */
@@ -455,6 +464,14 @@ static void bench_image(cp_t *cp, cp_yield_t *y, x_bench_t *b)
         if (ok && over[ch] >= X_SIGNAL_QDB) signal = true;
     }
     if (!signal) {                                 /* run 1: VTX off, the floor of every channel */
+        int32_t tmp[SDR_RX_CHANNELS], excess = 0;
+        const int top = hs_over_median_i32(med, SDR_RX_CHANNELS, SDR_LEVEL_NONE, tmp, &excess);
+        if (top >= 0 && excess > X_FLOOR_SPREAD_QDB) { /* a VTX is on: keep what was stored */
+            printf("SDRIMAGE refused: R%d is %.1f dB over the channels' median (a floor allows %d dB), a VTX is on, "
+                   "nothing stored: switch every VTX off, then K x\nSDRIMAGE done\n", top + 1,
+                   (double)excess / SDR_QDB_PER_DB, X_FLOOR_SPREAD_QDB / SDR_QDB_PER_DB);
+            return;
+        }
         for (unsigned ch = 0; ch < SDR_RX_CHANNELS; ch++) cp->image_floor_qdb[ch] = (int16_t)med[ch];
         cp->image_floor_gain = gain;
         printf("SDRIMAGE floor stored gain=%u floor_qdb=%s\n", (unsigned)gain,

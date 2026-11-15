@@ -1,7 +1,8 @@
 /* Engine bench statistics, pure C (host-tested in test/test_hop_stats.c), for the console benches
  * of cp_bench.c: the spread of the hop timings (unsigned microseconds), and levels in 0.25 dB
- * codes (signed qdb, as sdr_rx reports them): medians, the settle point of a trace against a
- * control, the noise of a reading, and the excess power over a floor. */
+ * codes (signed qdb, as sdr_rx reports them): medians, the highest value over the median, the
+ * settle point of a trace against a control, the noise of a reading, and the excess power over a
+ * floor. */
 #pragma once
 #include <math.h>
 #include <stddef.h>
@@ -129,6 +130,23 @@ static inline hs_spread_i32_t hs_spread_i32(int32_t *v, size_t n)
     if (!n) return (hs_spread_i32_t){0, 0, 0};
     hs_sort_i32(v, n);
     return (hs_spread_i32_t){v[0], v[n / 2], v[n - 1]};
+}
+
+/* The highest of v's n values and its excess over their median (v[n / 2] of the sorted ones, as
+ * hs_spread_i32), values equal to `none` left out: its index, or -1 when none is left, and the
+ * excess in *over (0 then). tmp: the caller's room for n values. K x: a floor run with a channel
+ * far over the others has a VTX on. */
+static inline int hs_over_median_i32(const int32_t *v, size_t n, int32_t none, int32_t *tmp, int32_t *over)
+{
+    size_t k = 0;
+    int best = -1;
+    for (size_t i = 0; i < n; i++) {
+        if (v[i] == none) continue;
+        tmp[k++] = v[i];
+        if (best < 0 || v[i] > v[best]) best = (int)i;
+    }
+    *over = best < 0 ? 0 : v[best] - hs_spread_i32(tmp, k).median;
+    return best;
 }
 
 static inline size_t hs_strongest_i32(const int32_t *v, size_t n)   /* index of the max, 0 if n = 0 */

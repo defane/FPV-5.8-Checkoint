@@ -162,10 +162,14 @@ A `weak` line (S under 30 dB over Q) asks for a stronger VTX; the bench still ru
 
 Two runs, at the same gain.
 
-1. **VTX off: the floor run.** 200 rotations; each channel's median is stored as its floor:
-   `SDRIMAGE floor stored gain=40 floor_qdb=…` and `SDRIMAGE next: VTX on one channel at
-   -10..-5 dBFS, then K x`. The floor is kept until a reboot. A gain change, or no channel
-   10 dB over its floor, makes the next `K` `x` a floor run again.
+1. **Every VTX off: the floor run.** 200 rotations; each channel's median is stored as its
+   floor: `SDRIMAGE floor stored gain=40 floor_qdb=…` and `SDRIMAGE next: VTX on one channel
+   at -10..-5 dBFS, then K x`. The floor is kept until a reboot. A gain change, or no channel
+   10 dB over its floor, makes the next `K` `x` a floor run again. A floor run with a channel
+   more than 6 dB over the median of the 8 stores nothing (a VTX is on; with every VTX off
+   the 8 floors lie within 1 dB of their median, [board] 2026-11-15):
+   `SDRIMAGE refused: R6 is 57.0 dB over the channels' median (a floor allows 6 dB), a VTX
+   is on, nothing stored: switch every VTX off, then K x`. A floor stored before is kept.
 2. **VTX on one channel S**, 50 dB or more over its floor, not clipping (`strong_qdb`
    −40 to −20). Its partner P shares S's LO and S's image lands on it. 200 captures with
    the IQ correction on, 200 with it off (their raw I/Q moments summed too), and 200 with
@@ -180,7 +184,7 @@ SDRIMAGE done
 without the correction; `>= X (floor-limited)` when P stays within 0.5 dB of its floor.
 `moments_irr_db` comes from the raw I/Q moments, `ema_irr_db` from the correction's own
 state. Refusals: `weak` (bring the VTX closer), `clipped` (move it away), no floor stored
-for P (VTX off, `K` `x`).
+for P (VTX off, `K` `x`), and a floor run with a VTX on (run 1).
 
 ### `K` `n`: noise against the capture size (B4)
 
@@ -327,11 +331,13 @@ Report the `SDR cal`, `SDRBENCH`, `SDRRESIDUE`, `SDRIMAGE` and `SDRNOISE` lines 
   it, each hop costs the rest). 800 or more (the C5VRX engine's 1 ms tail): stop and
   report; the rate goal would then need another tune method.
 
-**B3, image.** VTX off: `K` `x` (the floor run). Then the VTX on R1, then R2, R7 and R8,
-each brought to −10 to −5 dBFS (`strong_qdb` −40 to −20, no clipping): `K` `x` each time.
+**B3, image.** Every VTX off: `K` `x` (the floor run, `SDRIMAGE floor stored`). Then the
+VTX on R1, then R2, R7 and R8, each brought to −10 to −5 dBFS (`strong_qdb` −40 to −20, no
+clipping): `K` `x` each time.
 - Pass: `irr_on_db` 45 or more on every pair, or `>= X (floor-limited)` with X 45 or more
   (widscan58: 55–58); `moments_irr_db` within 5 dB of `irr_off_db`.
-- If not: `weak` or `clipped`, move the VTX. Under 45, report the raw numbers.
+- If not: `weak` or `clipped`, move the VTX. A floor run refused with every VTX off: report
+  the line (a board spur on that channel?). Under 45, report the raw numbers.
 
 **B4, noise.** VTX off, `K` `n`.
 - Pass: each `sd_db` within 30 % of 1.06–1.32 dB (256 words), 0.55–0.68 (1024) and

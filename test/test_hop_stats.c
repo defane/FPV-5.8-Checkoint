@@ -136,6 +136,35 @@ int main(void)
     si = hs_spread_i32(big, 3);
     CHECK("spread i32 extremes", si.min == INT32_MIN && si.median == 0 && si.max == INT32_MAX);
 
+    /* K x's floor check (cp_bench.c, X_FLOOR_SPREAD_QDB = 24, 6 dB), on the board's medians of
+     * 2026-11-15 at gain 40, R1..R8 in qdb. */
+    {
+        const int32_t none = INT16_MIN, margin = 24;
+        int32_t tmp[8], over = -1;
+        const int32_t off[8] = {-239, -237, -239, -238, -237, -236, -237, -234};   /* K n, VTX off */
+        int top = hs_over_median_i32(off, 8, none, tmp, &over);
+        CHECK("over median: VTX off, R8 0.75 dB over the median, a floor", top == 7 && over == 3 && over <= margin);
+        CHECK("over median: v is left as it was", off[0] == -239 && off[7] == -234);
+        const int32_t r6_on[8] = {-239, -236, -238, -236, -221, -8, -238, -233};  /* a floor run, R6 on */
+        top = hs_over_median_i32(r6_on, 8, none, tmp, &over);
+        CHECK("over median: R6 on, 57 dB over the median (its partner R5 at +3.75 dB), refused",
+              top == 5 && over == 228 && over > margin);
+        const int32_t r6_far[8] = {-239, -238, -239, -237, -236, -41, -239, -234};
+        top = hs_over_median_i32(r6_far, 8, none, tmp, &over);
+        CHECK("over median: the weakest R6 floor run, 49 dB over, refused", top == 5 && over == 196 && over > margin);
+        const int32_t three[8] = {-238, -100, -238, -120, -238, -140, -238, -238};  /* 3 channels raised */
+        top = hs_over_median_i32(three, 8, none, tmp, &over);
+        CHECK("over median: 3 raised channels of 8 leave the median on the floor", top == 1 && over == 138);
+        const int32_t gaps[8] = {none, -239, none, -230, none, -238, none, -237};  /* LOs without readings */
+        top = hs_over_median_i32(gaps, 8, none, tmp, &over);
+        CHECK("over median: missing channels left out", top == 3 && over == 7);
+        const int32_t all_none[2] = {none, none};
+        top = hs_over_median_i32(all_none, 2, none, tmp, &over);
+        CHECK("over median: no value", top == -1 && over == 0);
+        top = hs_over_median_i32(off, 1, none, tmp, &over);
+        CHECK("over median: one value is its own median", top == 0 && over == 0);
+    }
+
     CHECK("excess: twice the floor is the floor", near_f(hs_excess_db(-60.0f + 3.0103f, -60.0f), -60.0f, 0.01f));
     CHECK("excess: 0.5 dB over the floor is 9.1 dB under it",
           near_f(hs_excess_db(-59.5f, -60.0f), -60.0f - 9.14f, 0.02f));
