@@ -108,7 +108,8 @@ S11 with the PI stays under −17 dB across R1-R8, and under −10 dB from 5.51 
 along its arms narrows it, and 84° wide square to the board. A gate therefore covers an ellipse,
 long across the dipole. Rolling the antenna about its axis turns that ellipse: with the dipole
 horizontal, the beam is narrow in azimuth and tall; with the dipole vertical, it is wide in
-azimuth and flat: a mount that rolls the antenna chooses which.
+azimuth and flat. That is why the enclosure's arm also rolls the antenna
+([`../enclosure/README.md`](../enclosure/README.md#antenna-arm)).
 
 **Polarization.** The antenna is linear, along its dipole. Against a circularly polarized VTX,
 as most FPV ones are, it loses 3 dB whatever its roll, so the roll only shapes the beam. Against

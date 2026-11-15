@@ -32,14 +32,15 @@ enclosure,,1,Plate 3: carrier,print/master/plate-3-carrier.3mf or print/node/pla
 enclosure,,2,Button pusher,print/common/button-pusher-x2.3mf,yes,"printed, PETG",,print it twice
 enclosure,,1,Dial post,print/common/dial-post.3mf,yes,"printed, PETG",,
 enclosure,,1,Antenna arm,print/common/antenna-arm.3mf,yes,"printed, PETG",,
+enclosure,,1,Antenna roll clamp,print/common/antenna-roll-clamp.3mf,yes,"printed, PETG",,the antenna's rear jaw; turns on the arm's seat
 enclosure,,2,"Antenna clamp jaws: left, right",print/common/antenna-clamp-*.3mf,yes,"printed, PETG",,one file each
-enclosure,,16,M3 heat-set insert M3x5x5,"5 mm outside, 5 mm long",yes,any,,"10 plates, 4 lid, 2 dial post; 4.2 mm holes"
+enclosure,,24,M3 heat-set insert M3x5x5,"5 mm outside, 5 mm long",yes,any,,"10 plates, 4 lid, 2 dial post, 8 the arm's roll seat; 4.2 mm holes"
 enclosure,,1,M3 heat-set insert M3x6x5,"5 mm outside, 6 mm long",yes,any,,"the arm screw, in the dial post"
 enclosure,,2,M2 heat-set insert M2x4x3.2,"3.2 mm outside, 4 mm long",yes,any,,master only: the speaker's ears; 2.8 mm holes
 enclosure,,6,M3 x 6 to 8 screw,,yes,any,,cut-off and DC-DC on their plates
-enclosure,,6,M3 x 8 screw,,yes,any,,"4 lid, 2 dial post from inside the box"
+enclosure,,8,M3 x 8 screw,,yes,any,,"4 lid, 2 dial post from inside the box, 2 the roll clamp on the arm"
 enclosure,,1,M3 x 10 screw and washer,,yes,any,,the arm on the dial post
-enclosure,,2,M3 x 18 screw and nut,,yes,any,,the antenna clamps; the nuts sit in the arm
+enclosure,,2,M3 x 12 screw and nut,,yes,any,,the antenna's front jaws; the nuts sit in the roll clamp
 enclosure,,2,M2 x 6 screw,,yes,any,,master only: the speaker's ears
 enclosure,,1,IPEX to SMA bulkhead pigtail rated to 6 GHz,"6 mm thread 10 mm long, 8 mm nut",yes,any,,"SMA, not RP-SMA: from the C5-Zero to the right wall"
-enclosure,,1,Coax SMA male to SMA male rated to 6 GHz,up to 150 mm,yes,any,,wall to antenna; its plug on the wall must stand under 20 mm (a right-angle one clears the arm)
+enclosure,,1,Coax SMA male to SMA male rated to 6 GHz,up to 150 mm,yes,any,,"wall to antenna; straight at the antenna, down the roll axis; its plug on the wall must stand under 15 mm"

@@ -105,8 +105,8 @@ axis across the Raceband, in a beam 64° by 84° wide. It has not been built.
 
 [`enclosure/`](enclosure/README.md) holds a 3D-printed box for a node or a master set, with its
 LiPo cut-off and DC-DC converter (and the master's speaker), and an arm that points the antenna
-in 8 directions. Its source is a SolidCraft design with one configuration per set. It has not
-been printed yet.
+in 8 directions and rolls it about its own axis in 8 steps. Its source is a SolidCraft design
+with one configuration per set. It has not been printed yet.
 
 ## Regenerating
 
