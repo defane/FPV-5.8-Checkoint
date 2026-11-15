@@ -140,9 +140,10 @@ jobs:
           mkdir -p release
           cp firmware/detector/build/detector-c5.bin firmware/detector/build/bootloader/bootloader.bin \
              firmware/detector/build/partition_table/partition-table.bin firmware/detector/build/flasher_args.json release/
-          esptool.py --chip esp32c5 merge_bin -o release/detector-c5_merged.bin \
-            --flash_mode dio --flash_size 8MB --flash_freq 80m \
-            0x2000 release/bootloader.bin 0x8000 release/partition-table.bin 0x10000 release/detector-c5.bin
+          # The build's own flash settings and offsets (flash_args: 4 MB for the C5-Zero); a size
+          # written into the merged bootloader header that the chip lacks stops the app at boot.
+          ( cd firmware/detector/build && esptool.py --chip esp32c5 merge_bin \
+              -o "$GITHUB_WORKSPACE/release/detector-c5_merged.bin" @flash_args )
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           printf '%s\n' '${{ github.event.pull_request.head.sha || github.sha }}' > release/COMMIT
           printf '%s\n' '${{ steps.version.outputs.version }}' > release/VERSION
