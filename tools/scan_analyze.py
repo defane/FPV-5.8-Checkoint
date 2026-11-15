@@ -4,7 +4,10 @@
 Prints the scan rate, each channel's level and the passes it finds: a channel rising
 well above its own resting level, timed at the centroid of the peak. A pass also seen on
 another channel at the same moment goes to the one with the highest level, and the
-others are listed.
+others are listed. Like the detector's relative re-arm (--rearm, 16 dB by default as
+CONFIG_CHECKPOINT_REARM_DROP_DB, 0 = off), a drone that stays well up between passes
+still gives one pass per lap: a rise is split where its 1 s average fell that far under
+its highest level and rose that far again.
 
 Two dump formats: the sdr_rx engine's (format=qdb: each row the mean of decim rotations,
 levels in 0.25 dB codes, dBFS x 4, -32768 for no reading) and the older C5VRX one (one
@@ -13,7 +16,7 @@ sweep per row, IQ power x256, 0xffff for no reading). A format=qdb row may end w
 rail among the row's rotations (15 at most). Rows without it are read as before; with it,
 each pass also gets the saturated share of every LO over its span.
 
-usage: tools/scan_analyze.py [run.log] [--margin DB] [--alpha A]
+usage: tools/scan_analyze.py [run.log] [--margin DB] [--alpha A] [--rearm DB]
 """
 import argparse
 import math
@@ -35,6 +38,9 @@ MIN_S = 0.05            # shorter than this is a glitch
 PEAK_BAND_DB = 3.0      # the centroid covers what is within this of the peak
 REST_QUANTILE = 0.2     # a channel's resting level: a VTX held close for half a recording
                         # would lift the median itself
+REARM_DB = 16.0         # --rearm default: CONFIG_CHECKPOINT_REARM_DROP_DB's
+REARM_TAU_S = 1.0       # the relative re-arm's average (PD_REARM_TAU_MS)
+REFRACTORY_S = 1.5      # sd_config_default's refractory_ms
 
 
 def read_sat(word):
@@ -148,8 +154,40 @@ def segments(times, levels, threshold):
     return [(a, b) for a, b in found if times[b] - times[a] >= MIN_S]
 
 
-def find_passes(rows, margin, alpha, position=range(CHANNELS), dump=None):
-    """alpha: smoothing weight per REF_US (17.5 ms). dump: read_dump()'s, None for legacy rows."""
+def split_rearm(times, levels, a, b, drop):
+    """The detector's relative re-arm inside the segment [a, b]: once REFRACTORY_S after its highest
+    level (about the detector's refractory period from its ring) the level's REARM_TAU_S average
+    stands drop dB under that level, the next pass starts after the lowest of that average, as soon
+    as the level rises drop dB over it. [(first, last), ...]; drop 0: the segment whole."""
+    if drop <= 0:
+        return [(a, b)]
+    out, start = [], a
+    slow = prev = ref = ref_t = trough = trough_i = None
+    for i in range(a, b + 1):
+        v = levels[i]
+        if v is None:
+            continue
+        t = times[i]
+        slow = v if slow is None else slow + min(1.0, (t - prev) / REARM_TAU_S) * (v - slow)
+        prev = t
+        if trough is None:
+            if ref is None or v > ref:
+                ref, ref_t = v, t
+            if t - ref_t >= REFRACTORY_S and slow <= ref - drop:
+                trough, trough_i = slow, i
+        else:
+            if slow < trough:
+                trough, trough_i = slow, i
+            if v > trough + drop:
+                out.append((start, trough_i))
+                start, ref, ref_t, trough = trough_i + 1, v, t, None
+    out.append((start, b))
+    return out
+
+
+def find_passes(rows, margin, alpha, position=range(CHANNELS), dump=None, rearm=0.0):
+    """alpha: smoothing weight per REF_US (17.5 ms). dump: read_dump()'s, None for legacy rows.
+    rearm: split a long rise as the detector's relative re-arm does (split_rearm), 0 = off."""
     qdb = bool(dump and dump["qdb"])
     times, period = channel_times(rows, list(position), dump)
     raw = [[None if r[1][ch] is None else to_db(r[1][ch], qdb) for r in rows] for ch in range(CHANNELS)]
@@ -161,7 +199,8 @@ def find_passes(rows, margin, alpha, position=range(CHANNELS), dump=None):
             continue
         levels = smooth(raw[ch], a_row)
         threshold = floors[ch] + margin if qdb else max(floors[ch] + margin, SIGNAL_DB)
-        for a, b in segments(times[ch], levels, threshold):
+        for a, b in (sub for seg in segments(times[ch], levels, threshold)
+                     for sub in split_rearm(times[ch], levels, seg[0], seg[1], rearm)):
             peak = max(levels[i] for i in range(a, b + 1) if levels[i] is not None)
             top = [i for i in range(a, b + 1) if levels[i] is not None and levels[i] >= peak - PEAK_BAND_DB]
             weights = [10 ** (levels[i] / 10) for i in top]
@@ -201,12 +240,14 @@ def main():
     ap.add_argument("--margin", type=float, default=8.0, help="dB above a channel's resting level that counts (default 8)")
     ap.add_argument("--alpha", type=float, default=0.25,
                     help="smoothing weight per 17.5 ms, as the detector's alpha (default 0.25: tau 61 ms)")
+    ap.add_argument("--rearm", type=float, default=REARM_DB,
+                    help="split a rise as the detector's relative re-arm does, dB (default 16, the firmware's; 0 = off)")
     a = ap.parse_args()
     rows, header = read_scans(a.log.read_text(errors="replace"), sat=True)
     if len(rows) < 10:
         raise SystemExit(f"no scan recording in {a.log}: K then S, passes, K then S again")
     dump = read_dump(header, rows)
-    passes, floors, raw, period = find_passes(rows, a.margin, a.alpha, read_order(header), dump)
+    passes, floors, raw, period = find_passes(rows, a.margin, a.alpha, read_order(header), dump, a.rearm)
     gaps = sorted(y[0] - x[0] for x, y in zip(rows, rows[1:]))
     span = (rows[-1][0] - rows[0][0]) / 1e6
     unit = "dBFS" if dump["qdb"] else "dB"
@@ -225,7 +266,7 @@ def main():
             continue
         print(f"R{ch + 1}: rest {floors[ch]:6.1f} {unit}  median {statistics.median(v):6.1f} {unit}  "
               f"peak {max(v):6.1f} {unit}  missing {len(rows) - len(v)}")
-    print(f"{len(passes)} pass(es), margin {a.margin:g} dB:")
+    print(f"{len(passes)} pass(es), margin {a.margin:g} dB, re-arm {a.rearm:g} dB:")
     groups = read_groups(header)
     for p in passes:
         share = saturated_share(rows, p["rows"], dump["decim"]) if dump["qdb"] else None

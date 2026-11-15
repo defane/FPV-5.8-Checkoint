@@ -37,9 +37,10 @@ Startup prints, in order:
   calibrations (`tries`).
   `irr_db=skip_saturated` means too many clipped captures: a VTX too close, verify skipped;
   `irr_db=skip_faults` means the captures failed (8 failed captures end a verify try).
-- `SDR ready lo=5677,5751,5825,5899 gain=40 verify_tries=3 pair_guard=1 cal_ms=… boot_ms=…
-  chip_rev=v…` (`verify_tries` is the build's `CONFIG_SDR_RX_VERIFY_TRIES`: 1 only in B0's
-  control; `pair_guard` its `CONFIG_CHECKPOINT_PAIR_GUARD`: 0 only in B11's control), expected
+- `SDR ready lo=5677,5751,5825,5899 gain=40 verify_tries=3 pair_guard=1 rearm_db=16 cal_ms=…
+  boot_ms=… chip_rev=v…` (`verify_tries` is the build's `CONFIG_SDR_RX_VERIFY_TRIES`: 1 only in
+  B0's control; `pair_guard` its `CONFIG_CHECKPOINT_PAIR_GUARD`: 0 only in B11's control;
+  `rearm_db` its `CONFIG_CHECKPOINT_REARM_DROP_DB`, the relative re-arm), expected
   within about 2 s of the reset; `tools/flash.py --check` waits for it. Passes can ring 3 s
   later, once the rests are learnt.
 - `HB t_s=… stage=… live=… rot_hz_x10=… faults=… cal=…` every 5 s, from the USB reader,
@@ -270,7 +271,9 @@ captures of that LO that hit an ADC rail, 15 at most (`f` is 15 or more when `de
 over 15). Recordings from before it end at R8; `scan_analyze.py` reads both, and the
 C5VRX-era power format too. It prints the real refresh, each channel's rest, median and
 peak, and the passes: a channel rising 8 dB (`--margin`) above its own rest, smoothed like
-the detector (`--alpha`, per 17.5 ms), timed at the centroid of the peak. A pass seen on
+the detector (`--alpha`, per 17.5 ms), timed at the centroid of the peak. A rise that stays
+up is split like the detector's relative re-arm (`--rearm`, 16 dB; `0` for one pass per
+rise, as before). A pass seen on
 several channels at once goes to the strongest, and the others are listed as `also on`.
 With `<sat>`, each pass ends with the saturated share of every LO over its span
 (`saturated 1+2 0% 3+4 0% 5+6 41% 7+8 0%`): a rise on R5 during a pass of R6 that comes
@@ -389,6 +392,12 @@ at gains 30 to 50 in steps of 4 (`K` `G` twice a step), reading R4's level at ea
 - (c) **Far drones**, live: a VTX at 3, 6 and 10 m from the gate, at 25 and 200 mW, on 2
   channels, flown or walked past at each distance. Record each pass's `peak_db` in the
   table below. Pass: only the passes within the gate's radius ring.
+- (d) **Relative re-arm**, live: a 25 mW VTX held about 3 m away (`K` `l`: note its rise),
+  then 5 hand passes at 0.3 m, back to 3 m for 5–10 s after each; then walk it 10 m away
+  and back to 0.3 m, 3 times. Pass: one `PASS` per pass, `rearm=rel` on each after the
+  first, none while it is held at 3 m. Record each pass's `peak_db` and the rise at 3 m:
+  the drop between them is what the default (16 dB, [detector.md](detector.md#relative-re-arm))
+  must stay under.
 - If not: tune `min_peak_db` and `active_db` from the recorded rises until (c) holds, then
   change the C3 and C6 defaults with them ([detector.md](detector.md)). A fleet waits for
   (c) before using this engine.
@@ -481,7 +490,7 @@ boot prints `pair_guard=1`), logged (`flash.py --log`). In this order:
 | B3 image | 2026-11-15 | as B0 | Effectively pass, on R6/R5 only, from `K` `S`; `K` `x` not measured | Every floor run had the VTX on (R6's floor −8, −41, −30, −26 qdb; refused since, §4). `K` `S`: R6 at −20 to −7.5 dBFS, R5 (its partner) +0.5 dB median over its rest: rejection ≥ ~49 dB, floor-limited |
 | B4 noise | 2026-11-15 | as B0 | Pass | `sd_db` 1.02–1.08 (256), 0.50–0.58 (1024), 0.26–0.29 (4096), means within 0.25 dB; `calibrated_dc_max=4`, borrowed `dc_i=8`/`dc_q=-3`: not separable, kept 30 (§4 `K` `n`) |
 | B5 channels | | | | rise per channel; R4 level per gain |
-| B6 passes | | | | (a) found/10, (b) `PASS` counts |
+| B6 passes | | | | (a) found/10, (b) `PASS` counts, (d) `PASS`/8, `rearm=`, the rise at 3 m and `peak_db` |
 | B7 long run | | | | `faults`, `rot_hz_x10`, `heap_min`, `foreign_dc`, `stale` |
 | B8 XIAO | | | | |
 | B9 IPEX | | | TODO, deferred (see B9) | |

@@ -115,6 +115,23 @@ class AnalyzeQdb(unittest.TestCase):
         self.assertEqual(analyze_qdb(qdb_recording([], 1)), [])
         self.assertEqual(analyze_qdb(qdb_recording([], 14)), [])
 
+    def test_relative_rearm_splits_a_vtx_staying_up(self):
+        # A VTX 28 dB up from 3 to 27 s (the bench's one 22.5 s pass), with passes 20 dB over it at 6,
+        # 14 and 22 s: one long rise without the re-arm, one pass per lap with it, as the detector.
+        events = [(5, 3.0 + k / 4, 28, 0.5) for k in range(97)] + [(5, at, 48, 0.3) for at in (6.0, 14.0, 22.0)]
+        text = qdb_recording(events, 14, seconds=36)
+        rows, header = sa.read_scans(text)
+        args = (rows, 10.0, 0.25, sa.read_order(header), sa.read_dump(header, rows))
+        whole = sa.find_passes(*args)[0]
+        self.assertEqual([p["ch"] for p in whole], [5], "rearm 0: the old segments")
+        self.assertGreater(whole[0]["end"] - whole[0]["start"], 20.0)
+        split = sa.find_passes(*args, rearm=16.0)[0]
+        self.assertEqual([p["ch"] for p in split], [5, 5, 5])
+        for p, at in zip(split, (6.0, 14.0, 22.0)):
+            self.assertLess(abs(p["t"] - at), 0.15)
+        self.assertEqual(len(sa.find_passes(*args, rearm=25.0)[0]), 1, "a 20 dB rise does not split at 25 dB")
+        self.assertEqual(sa.split_rearm([0.0, 1.0], [5.0, 6.0], 0, 1, 0.0), [(0, 1)])
+
     def test_no_signal_floor_clamp(self):
         # A legacy recording clamps the threshold at SIGNAL_DB (-5 dB); a -35 dBFS peak is a pass here.
         passes = analyze_qdb(qdb_recording([(1, 6.0, 25, 0.15)], 14))

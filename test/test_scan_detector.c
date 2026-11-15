@@ -93,6 +93,8 @@ typedef struct {
     float rise_max[PD_CHANNELS];
 } run_t;
 
+static float s_rearm_db;   /* the relative re-arm start() and pair_run() set (0: off, as sd_init leaves it) */
+
 static void start(run_t *r, int32_t dt_us, float noise, uint64_t s)
 {
     memset(r, 0, sizeof(*r));
@@ -103,6 +105,7 @@ static void start(run_t *r, int32_t dt_us, float noise, uint64_t s)
     seed(s);
     const pd_config_t c = sd_config_default();
     sd_init(&r->sd, &c);
+    pd_set_rearm(&r->sd.det, s_rearm_db);
 }
 
 static int16_t qdb(float db) { return (int16_t)lroundf(4.0f * db); }
@@ -241,6 +244,7 @@ static void pair_run(const pdrone_t *hi, const pdrone_t *lo, int guard, uint64_t
     memset(o, 0, sizeof(*o));
     const pd_config_t c = sd_config_default();
     sd_init(sd, &c);
+    pd_set_rearm(&sd->det, s_rearm_db);
     seed(s);
     for (int64_t t = T0_US; t < T0_US + S(3.5 + dur_s); t += RATE_A_US) {
         for (unsigned hop = 0; hop < 4u; hop++) {
@@ -814,6 +818,94 @@ int main(void)
         CHECK(once == runs && lo >= 0.12 && hi <= 0.30,
               "known loss: a 5 m/s co-pass rings once, at an edge of the ~320 ms clip window (0.12-0.30 s off)");
         CHECK(base_ok == runs && r6_same == runs, "per reading it rings near R5's time (its phantom's), and R6 is the same");
+    }
+
+    /* 27. Relative re-arm at the reading rate (490 Hz, median, average, rests): a VTX on R3 that
+     *     stays 28 dB up from 4 s, with passes 20 dB over that at 5, 15, 25 and 35 s. Off, only the
+     *     first rings (the bench's one 22.5 s pass); at 16 dB, all four. While relatively armed the
+     *     channel is not quiet: its rest does not climb (it would, by 0.114 dB/s, in plain IDLE). */
+    {
+        const scene_t sc = {5, {rect(2, 28.0f, 4.0, 40.0), gpass(2, 20.0f, 5.0, 250.0f), gpass(2, 20.0f, 15.0, 250.0f),
+                               gpass(2, 20.0f, 25.0, 250.0f), gpass(2, 20.0f, 35.0, 250.0f)}};
+        s_rearm_db = 0.0f;
+        start(&r, RATE_A_US, NOISE_DB, 27);
+        play(&r, 40.0, &sc);
+        const unsigned off = r.total;
+        s_rearm_db = 16.0f;
+        start(&r, RATE_A_US, NOISE_DB, 27);
+        play(&r, 9.0, &sc);
+        const bool armed = r.sd.det.ch[2].state == PD_IDLE && r.sd.det.ch[2].rel;
+        const float rest9 = r.sd.c[2].rest_db;
+        play(&r, 14.0, &sc);
+        const float rest14 = r.sd.c[2].rest_db;
+        play(&r, 40.0, &sc);
+        printf("     VTX 28 dB up between passes: %u pass(es) without the re-arm, %u with 16 dB; rest %+.3f dB over 5 s armed\n",
+               off, r.total, (double)(rest14 - rest9));
+        CHECK(off == 1 && r.total == 4 && r.passes[2] == 4 && r.last.rel, "a VTX staying 28 dB up: 1 pass without the re-arm, all 4 with 16 dB");
+        CHECK(armed && rest14 == rest9, "relatively armed, the rest does not climb");
+        s_rearm_db = 0.0f;
+    }
+
+    /* 28. The pair guard's long hold and the relative re-arm. R5 passes close (45 dB up at 4.5 s) and
+     *     stays 25 dB up, so it re-arms relatively; then a 600 mW R6 parks clipping beside the gate
+     *     for 0.8 s (over SD_HOLD_LONG_US, under stale_ms) and holds it. R5 resumes in COOLDOWN with
+     *     its reference at the level it resumes at: it does not re-arm at once on the old peak
+     *     (COOLDOWN 4 s later, no R5 pass). Then 25 again with the re-arm on: no R5 lap. */
+    {
+        static scan_detector_t sd;
+        unsigned ok = 0, armed = 0, rang = 0;
+        for (uint64_t k = 0; k < 5u; k++) {
+            bool probed = false;
+            const pd_config_t c = sd_config_default();
+            sd_init(&sd, &c);
+            pd_set_rearm(&sd.det, 16.0f);
+            seed(880 + k);
+            for (int64_t t = T0_US; t < T0_US + S(13.0); t += RATE_A_US) {
+                for (unsigned hop = 0; hop < 4u; hop++) {
+                    const int64_t th = t + (int64_t)hop * RATE_A_US / 4;
+                    const double ts = (double)(th - T0_US) * 1e-6;
+                    double ra = PAIR_FLOOR + gauss(1.2f), rb = PAIR_FLOOR + gauss(1.2f);
+                    uint8_t fl = 0;
+                    if (hop == PAIR_HOP && ts >= 4.0) {
+                        const double x = (ts - 4.5) / 0.15;
+                        ra = psum(ra, PAIR_FLOOR + 25.0 + 20.0 * exp(-0.5 * x * x) + gauss(1.0f));
+                        /* R6 flies in over 0.5 s, clips 8-8.8 s (R5 reads its products: held), flies off */
+                        const double in = ts < 8.0 ? 8.0 - ts : ts > 8.8 ? ts - 8.8 : 0.0;
+                        if (in == 0.0) {
+                            fl = SD_FLAG_SATURATED;
+                            rb = PAIR_CLIP_DBFS + 5.0 + gauss(0.3f);
+                            ra = psum(ra, rb + clip_x());
+                        } else if (in < 0.5) {
+                            rb = psum(rb, PAIR_CLIP_DBFS - 1.0 - 60.0 * in + gauss(1.0f));
+                        }
+                    }
+                    if (hop == PAIR_HOP && ts >= 7.9 && !probed) {   /* before R6 comes in */
+                        probed = true;
+                        armed += sd.det.ch[PAIR_LO].state == PD_IDLE && sd.det.ch[PAIR_LO].rel;
+                    }
+                    const sd_reading_t rd[2] = {{th, qdb((float)ra), (uint8_t)(2u * hop), fl},
+                                                {th, qdb((float)rb), (uint8_t)(2u * hop + 1u), fl}};
+                    pd_event_t ev[2];
+                    const unsigned got = sd_feed_hop(&sd, hop, rd, 2, ev, NULL);
+                    if ((got & 1u) && hop == PAIR_HOP && ts > 5.0) rang++;
+                }
+                sd_rotation(&sd, t + 3 * RATE_A_US / 4);
+            }
+            ok += sd.det.ch[PAIR_LO].state == PD_COOLDOWN && !sd.det.ch[PAIR_LO].rel && sd.held[PAIR_LO] > 300u;
+        }
+        CHECK(armed == 5 && ok == 5 && rang == 0,
+              "after a long hold the reference restarts from the level R5 resumes at: no re-arm on the old peak");
+        s_rearm_db = 16.0f;
+        const pdrone_t r6 = {.mw = 600, .hover_d_m = 0.5, .hover_t0_s = 0.5, .hover_t1_s = 10.5};
+        const pdrone_t r5 = {.mw = 25, .d_m = 1.0, .t0_s = 1.0, .laps = 4, .lap_s = 3.0};
+        rang = 0;
+        for (uint64_t k = 0; k < 5u; k++) {
+            pair_out_t gd;
+            pair_run(&r6, &r5, 1, 600 + k, 12.0, &gd, &sd);
+            rang += gd.n[PAIR_LO];
+        }
+        CHECK(rang == 0, "check 25 with the relative re-arm on: still no R5 lap, no phantom, no tail");
+        s_rearm_db = 0.0f;
     }
 
     printf("%d/%d scan_detector checks passed\n", g_pass, g_pass + g_fail);

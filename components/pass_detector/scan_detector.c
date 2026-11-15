@@ -62,7 +62,8 @@ static float weight(float tau_us, int64_t dt_us)
     return x >= 4.0f ? 1.0f : x / (1.0f + x * (0.5f + x / 12.0f));
 }
 
-/* The rest follows the low smoothed values; never from a saturated capture. */
+/* The rest follows the low smoothed values; never from a saturated capture. It climbs only while
+ * the channel is quiet: IDLE, and not armed by the relative re-arm (a drone still well up). */
 static void learn_rest(scan_detector_t *sd, unsigned ch, int64_t dt_us, bool learning)
 {
     sd_channel_t *c = &sd->c[ch];
@@ -74,7 +75,7 @@ static void learn_rest(scan_detector_t *sd, unsigned ch, int64_t dt_us, bool lea
     const int64_t dt = dt_us < SD_DT_MAX_US ? dt_us : SD_DT_MAX_US;
     const float s = (float)dt / (float)SD_REF_SWEEP_US * (learning ? SD_LEARN_RATE : 1.0f);
     if (c->smooth_db < c->rest_db) c->rest_db -= SD_REST_DOWN_DB * s;
-    else if (sd->det.ch[ch].state == PD_IDLE) c->rest_db += SD_REST_UP_DB * s;
+    else if (sd->det.ch[ch].state == PD_IDLE && !sd->det.ch[ch].rel) c->rest_db += SD_REST_UP_DB * s;
     if (c->rest_db > sd->cap_db) c->rest_db = sd->cap_db;
 }
 
@@ -147,7 +148,8 @@ static bool hop_saturated(scan_detector_t *sd, unsigned hop, bool sat, int64_t t
 }
 
 /* A held channel fed again: its median restarts on fresh readings, a real pass under way catches
- * up once it is full (sd_feed_hop), and a long hold resumes in COOLDOWN. */
+ * up once it is full (sd_feed_hop), and a long hold resumes in COOLDOWN, the relative re-arm's
+ * reference starting again from the level it resumes at (not from a peak before the hold). */
 static void resume(scan_detector_t *sd, unsigned ch, int64_t t_us)
 {
     sd_channel_t *c = &sd->c[ch];
@@ -160,6 +162,8 @@ static void resume(scan_detector_t *sd, unsigned ch, int64_t t_us)
         pd_channel_t *pc = &sd->det.ch[ch];   /* go_stale keeps a COOLDOWN */
         pc->state = PD_COOLDOWN;
         pc->cooldown_until_ms = (uint32_t)(t_us / 1000);
+        pc->peak = pc->smooth;
+        pc->rel = false;
     }
 }
 

@@ -41,16 +41,21 @@ channel (`components/checkpoint/cp_scan.c`, `checkpoint.c`; pure C:
   learnt again: nothing rings for 3 s, as at boot.
 - **State machine** per channel: `IDLE → RISING → PEAK_PASSED → COOLDOWN` (see
   `pass_detector.h`). A hovering drone only rings once: to re-arm, the refractory period
-  must have elapsed **and** the level must have dropped back under
-  `active_db − hysteresis_db`.
+  must have elapsed **and** either the level must have dropped back under
+  `active_db − hysteresis_db`, or its 1 s average must stand 16 dB under the highest level
+  since the pass (the [relative re-arm](#relative-re-arm), for a drone that stays up
+  between laps). After a relative re-arm, the next pass must also rise 16 dB over the
+  lowest 1 s average since.
 - **One line per pass:**
-  `PASS channel=R3 freq=5732 peak_db=15.4 peak_ms=… at_ms=… delay_ms=… comp_ms=63 est_peak_ms=… tau_ms=61 held=0`,
+  `PASS channel=R3 freq=5732 peak_db=15.4 peak_ms=… at_ms=… delay_ms=… comp_ms=63 est_peak_ms=… tau_ms=61 held=0 rearm=abs`,
   and sent over the UART link as an `EVENT_PASS` (the C6 master plays the sound), timed
   at the smoothed peak `peak_ms`. The smoothing delays that peak by up to τ: `comp_ms`
   (τ plus one reading interval) and `est_peak_ms` (`peak_ms − comp_ms`) estimate the true
   peak, on the console only. The wire keeps the smoothed peak: every gate lags alike, so
   laps are unaffected ([fleet.md](fleet.md), "Limit"). `held` counts the channel's readings
   the pair guard held since its previous pass ([below](#pair-ghost-guard)), 0 on most passes.
+  `rearm` tells how the channel was armed for this pass: `abs` (it fell under the release)
+  or `rel` (the [relative re-arm](#relative-re-arm)).
 - **Side by side:** two channels peaking together are two passes. No pass is dropped as
   bleed from another channel. The two channels of an LO share a capture, and R1's image
   falls next to R2 (the same for every pair): the I/Q correction took the image rejection
@@ -150,6 +155,117 @@ reading model):
 - `K` `s`: `detector_us` includes the guard (the hop's time over its readings).
 - Bench B11 ([bench.md](bench.md#7-first-bench-b0-to-b11-and-results)) is the board check.
 
+## Relative re-arm
+
+**What it fixes.** A channel re-armed only once its level fell back under the release,
+`active_db − hysteresis_db` (5 dB over its rest). A drone that stays well up between laps
+never gets there, so every lap after the first was lost:
+
+- a 25 mW VTX held 3 m away indoors stays about +30 dB, and `scan_analyze.py` found one
+  22.5 s pass ([board] 2026-11-15, `K` `S`);
+- a 600 mW drone 30–80 m out reads 15–23 dB, and an indoor 25 mW track with its far side
+  5–15 m away reads 15–25 dB ([host] model).
+
+The rests cannot help. A rest climbs only in plain IDLE, never in COOLDOWN, and never more
+than 6 dB over the other channels' median.
+
+**The rule** (`pass_detector.c`; the drop D is `CONFIG_CHECKPOINT_REARM_DROP_DB`, 16 dB,
+0 = off):
+
+- **The re-arm.** Once the refractory period is over, COOLDOWN also goes to IDLE when the
+  level's 1 s average (`PD_REARM_TAU_MS`) stands D under the highest level since the pass.
+  That highest level follows the level up in COOLDOWN, so an early ring does not leave it
+  low. A fade shorter than the average does not re-arm: two 20 dB fades of 150 and 300 ms
+  inside a held pass ring once ([host] `test_pass_detector.c`).
+- **The prominence.** After a relative re-arm the level is still far above `active_db`, so
+  the next 3 dB wobble (`drop_db`) would ring a phantom at a high level. The next pass must
+  therefore also rise D over the trough, the lowest 1 s average since the re-arm. RISING
+  needs the level over both `active_db` and `trough + D`, so the rest of the fall and its
+  wobble ring nothing.
+- **Back to absolute.** Falling under the release ends the relative mode: the channel is
+  then armed exactly as before. With D = 0, or when the level always falls under the
+  release between laps, the passes are the same to the bit ([host] tests and the
+  simulation below).
+- **The rest.** A relatively re-armed channel is not quiet: its rest does not climb.
+- **The pair guard.** A hold over `SD_HOLD_LONG_US` resumes in COOLDOWN with the reference
+  at the level the channel resumes at, not at a peak from before it was blind.
+
+D is a build option, not a console key: it is not saved in NVS and not on the link
+(link_proto v3), so the bridges' pages do not show it. The boot line (`SDR ready …
+rearm_db=16`) and the `T` line (`CHECKPOINT … rearm_db=16`) show the build's value.
+
+**Why 16 dB** ([host] simulation of races, 2026-11-15: the repository's detector, fed
+readings drawn from its DSP on synthetic captures; its key cases are host tests:
+`test_pass_detector.c`, `test_scan_detector.c` checks 27–28). The simulated races:
+
+- outdoor laps at 25 and 600 mW, the gate pass 1–3 m away, the far side 30–80 m, 15–40 s
+  laps; indoor 25 mW tracks, 8–15 s laps, the far side 5–15 m; 600 mW indoors; the IPEX
+  antenna (+8 dB);
+- deep fades inside each pass; tracks that come back near the gate; 10 s hovers and
+  crashes by the gate; 30 s on a start pad 2 m away; two drones on one LO pair with the
+  guard on;
+- 40 runs a scenario, 7616 laps in all.
+
+Fading: mild (1.5 dB slow plus 1 dB per capture), or rough (2.5–4 dB slow plus deep
+notches). A parked drone wobbles like a VTX held at 3 m on the bench: sd 5.3 dB, 0.45 s
+([board] recordings).
+
+- The current firmware (D = 0) misses 98 % of the laps.
+- Total lap errors (missed plus extra) are lowest for D 14–15 with mild fading and 16–18
+  with rough fading.
+- D 16 is also the smallest D that rings no extra pass on the bench's recording of a VTX
+  held at 3 m. Replayed through the detector, that recording rings one extra pass at D 15
+  and two at D 12 ([board] recording).
+
+What D 16 costs ([host], laps missed % / extra %, mild and rough fading):
+
+| case | mild | rough |
+| --- | --- | --- |
+| outdoor 600 mW | 3 / 4 | 7 / 10 |
+| indoor 25 mW, the antenna at the gate (0.3–1 m) | 0 / 0 | 6 / 9 |
+| indoor 25 mW, the antenna 1–3 m from the line | 32 / 0 | 20 / 10 |
+| 600 mW indoors, IPEX included | 48 / 0 | 28 / 9 |
+| a track coming back within 4–8 m of the gate | 20 / 41 | 28 / 53 |
+
+Against other values of D (the same cases, mild fading):
+
+| D | indoor 1–3 m | outdoor 600 mW | hover (extra per 10 s) |
+| --- | --- | --- | --- |
+| 10 | 6 / 10 | 4 / 77 | 0.8–1.1 |
+| 12 | 9 / 2 | 9 / 36 | 0.4–0.6 |
+| **16** | **32 / 0** | **3 / 4** | **0.03** |
+| 20 | 67 / 0 | 3 / 2 | 0 |
+
+- **It needs contrast.** A lap is caught when its gate pass stands about D + 2 dB over the
+  far side of the track. Put the antenna at the gate (the drone within 1 m), or build with
+  a lower D for a small indoor track. A hot link narrows the contrast: the gate pass hits
+  the ADC ceiling (54.5–56.7 dB over the floor at gain 40, [host]), so the IPEX antenna
+  indoors loses half its laps at 16 dB.
+- **A parked drone.** It rings an extra pass when its level swings D and back. At 16 dB
+  ([host]):
+  - 0.03 per 10 s hover;
+  - none for a still drone, crashed or on the pad;
+  - about 1 per 30 s on the pad if it wobbles like the bench's hand-held VTX.
+- **A track that comes back near the gate** rings there, as the absolute re-arm would if
+  the drone fell under the release.
+- **Timing.** The relative re-arm changes no pass the absolute re-arm rings: where the
+  absolute path works, the passes are the same to the millisecond. In the model, `drop_db`
+  3 rings early on a long approach, whichever path armed the channel (D 16, mild: mean
+  −298 ms, p95 1.3 s over all laps; −91 ms on the indoor track). Bench B6 retunes
+  `drop_db`.
+- **The start pad.** A drone that rang as it powered up on the pad stays in COOLDOWN until
+  its 1 s average falls 16 dB under its highest level, so its holeshot is lost, as before.
+
+**On the board.**
+
+- `SDR ready … rearm_db=16` at boot, and `rearm_db=` on `T`'s `CHECKPOINT` line. An
+  existing build dir may not see a new Kconfig option: after pulling it, `tools/fw.sh
+  clean`, then build.
+- `PASS … rearm=rel`: the pass followed a relative re-arm.
+- `tools/scan_analyze.py` splits a long rise the same way (`--rearm`, 16 dB by default,
+  0 for the old segments), so a recording reads as the board's `PASS` lines do.
+- Bench B6 (d) checks it ([bench.md](bench.md#7-first-bench-b0-to-b11-and-results)).
+
 ## Parameters (console `K`, saved in NVS namespace "checkpoint", key "prefs")
 
 | Parameter | Default | Keys |
@@ -161,6 +277,7 @@ reading model):
 | `min_peak_db` (below it, the drone is too far: no pass) | 10 dB | `m`/`M` ±1 dB |
 | `refractory_ms` | 1500 ms | `r`/`R` ±250 ms |
 | `stale_ms` | 1000 ms | (fixed) |
+| relative re-arm drop (`CONFIG_CHECKPOINT_REARM_DROP_DB`, [above](#relative-re-arm)) | 16 dB | (build option, not saved) |
 | RX gain (forced index) | 40 | `g`/`G` ±2 (relearns the rests) |
 
 The record is version 3 (`PREFS_VERSION`): the meter changed (band power, 10-bit,
@@ -187,5 +304,6 @@ mode. The top-level keys are in `components/checkpoint/cp_console.c`, the `K` ke
 `checkpoint.c`.
 
 **Setting `active_db`:** put it below the rise of a drone passing the gate, but above the
-rise of the same drone elsewhere on the track. Otherwise the channel never re-arms between
-laps.
+rise of the same drone elsewhere on the track. Otherwise only the [relative
+re-arm](#relative-re-arm) re-arms the channel between laps, and only if the drone falls
+16 dB under its pass.

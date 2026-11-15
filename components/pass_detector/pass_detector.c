@@ -33,8 +33,11 @@ void pd_reset_all(pass_detector_t *d) { memset(d->ch, 0, sizeof(d->ch)); }
 void pd_init(pass_detector_t *d, const pd_config_t *cfg)
 {
     d->cfg = pd_config_valid(cfg) ? *cfg : pd_config_default();
+    d->rearm_db = 0.0f;
     pd_reset_all(d);
 }
+
+void pd_set_rearm(pass_detector_t *d, float drop_db) { d->rearm_db = drop_db > 0.0f ? drop_db : 0.0f; }
 
 bool pd_set_config(pass_detector_t *d, const pd_config_t *cfg)
 {
@@ -79,20 +82,35 @@ bool pd_update_w(pass_detector_t *d, unsigned channel, float level_db, float wei
     const pd_config_t *cfg = &d->cfg;
     pd_channel_t *c = &d->ch[channel];
     if (stale(d, c, now_ms)) go_stale(c);
+    const uint32_t dt_ms = now_ms - c->last_ms;
     /* weight 1 is exact: a + 1 * (b - a) is not always b in float */
     c->smooth = c->primed && weight < 1.0f ? c->smooth + weight * (level_db - c->smooth) : level_db;
+    if (!c->primed) {
+        c->slow = c->smooth;
+    } else {                                 /* time-weighted: the same average at any rate */
+        const float w = (float)dt_ms / (float)PD_REARM_TAU_MS;
+        c->slow += (w < 1.0f ? w : 1.0f) * (c->smooth - c->slow);
+    }
     c->primed = true;
     c->last_ms = now_ms;
     const float release = cfg->active_db - cfg->hysteresis_db;
+    const float rearm = d->rearm_db;
 
     switch (c->state) {
-    case PD_IDLE:
-        if (c->smooth > cfg->active_db) {
+    case PD_IDLE: {
+        if (c->rel) {
+            if (c->smooth < release) c->rel = false;   /* armed as without the relative re-arm */
+            else if (c->slow < c->trough) c->trough = c->slow;
+        }
+        /* after a relative re-arm a pass must stand out of the trough, not just above active_db */
+        const float rise = c->rel && c->trough + rearm > cfg->active_db ? c->trough + rearm : cfg->active_db;
+        if (c->smooth > rise) {
             c->state = PD_RISING;
             c->peak = c->smooth;
             c->peak_ms = now_ms;
         }
         return false;
+    }
     case PD_RISING:
         if (c->smooth > c->peak) {
             c->peak = c->smooth;
@@ -100,17 +118,30 @@ bool pd_update_w(pass_detector_t *d, unsigned channel, float level_db, float wei
         } else if (c->peak - c->smooth >= cfg->drop_db && c->peak >= cfg->min_peak_db) {
             c->state = PD_PEAK_PASSED;
             c->cooldown_until_ms = now_ms + cfg->refractory_ms;
-            if (event) *event = (pd_event_t){(uint8_t)channel, c->peak, c->peak_ms, now_ms};
+            if (event) *event = (pd_event_t){(uint8_t)channel, c->peak, c->peak_ms, now_ms, c->rel};
+            c->rel = false;
             return true;
         } else if (c->smooth < release) {
             c->state = PD_IDLE;   /* a far drone: never reached min_peak_db */
+            c->rel = false;
+        } else if (c->rel && c->smooth < c->trough + rearm - cfg->hysteresis_db) {
+            c->state = PD_IDLE;   /* the same, out of a trough */
         }
         return false;
     case PD_PEAK_PASSED:
         c->state = PD_COOLDOWN;
         /* fall through */
     case PD_COOLDOWN:
-        if (reached(now_ms, c->cooldown_until_ms) && c->smooth < release) c->state = PD_IDLE;
+        if (rearm > 0.0f && c->smooth > c->peak) c->peak = c->smooth;   /* the highest level since the pass */
+        if (reached(now_ms, c->cooldown_until_ms)) {
+            if (c->smooth < release) {
+                c->state = PD_IDLE;
+            } else if (rearm > 0.0f && c->slow <= c->peak - rearm) {
+                c->state = PD_IDLE;   /* the drone has left, but not under the release */
+                c->rel = true;
+                c->trough = c->slow;
+            }
+        }
         return false;
     }
     return false;

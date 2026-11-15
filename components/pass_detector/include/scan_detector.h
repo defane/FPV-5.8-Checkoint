@@ -26,6 +26,10 @@
  * pd's stale_ms (pd has forgotten the channel), starts again from that median. A late
  * reading (over twice the usual interval) weighs in the average as one on time.
  *
+ * Relative re-arm (pd_set_rearm(&sd->det, drop), pass_detector.h; off after sd_init): a channel
+ * re-armed by it is not quiet, so its rest does not climb, and a long hold of the pair guard
+ * restarts its reference from the level it resumes at.
+ *
  * Pair guard (sd_feed_hop, the readings of one capture). In PAIRS mode one capture carries two
  * channels 37 MHz apart, each in the other's image window. While a strong channel drives the ADC
  * into its rails (SD_FLAG_SATURATED, one flag per capture), the I/Q correction no longer holds and

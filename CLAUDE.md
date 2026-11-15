@@ -123,7 +123,10 @@ a saturated capture the reading of a channel 15 dB under its partner (smoothed) 
 the rails' products ring ghosts on it (docs/detector.md "Pair ghost guard"). The pass time on the
 wire is the smoothed peak (the console's `PASS` line adds a delay estimate). States
 `IDLE → RISING → PEAK_PASSED → COOLDOWN`; re-arm needs the refractory period
-elapsed AND the level under `active_db - hysteresis_db`. The glue is
+elapsed AND either the level under `active_db - hysteresis_db` or its 1 s average
+`CONFIG_CHECKPOINT_REARM_DROP_DB` (16 dB, 0 = off) under the highest level since the pass
+(the relative re-arm, for a drone that stays up between laps; the next pass must then rise
+that much over the lowest 1 s average since: docs/detector.md "Relative re-arm"). The glue is
 `components/checkpoint`; the parameters are editable from the console (`K`+key:
 `components/checkpoint/cp_console.c` and `checkpoint.c`) and the C3 web UI (pushed over
 the link as `CONFIG_SET`, echoed as `CONFIG_STATE`), saved in NVS namespace `checkpoint`

@@ -31,6 +31,7 @@ _Static_assert(SD_HOPS_MAX >= SDR_RX_MAX_HOPS, "one saturated-run record per pla
 #else
 #define CP_PAIR_GUARD 0u
 #endif
+#define CP_REARM_DB ((float)CONFIG_CHECKPOINT_REARM_DROP_DB)   /* the relative re-arm, 0 = off */
 
 bool cp_wdt_subscribed;
 
@@ -67,10 +68,11 @@ void cp_on_pass(cp_t *cp, const pd_event_t *e)
     const unsigned ch = e->channel % SDR_RX_CHANNELS;
     const uint32_t held = cp->sd.held[ch] - cp->held_at_pass[ch];
     cp->held_at_pass[ch] = cp->sd.held[ch];
+    /* rearm: how the channel was armed for it, the release (abs) or the relative re-arm (rel). */
     printf("PASS channel=R%u freq=%u peak_db=%.1f peak_ms=%" PRIu32 " at_ms=%" PRIu32 " delay_ms=%" PRIu32
-           " comp_ms=%" PRIu32 " est_peak_ms=%" PRIu32 " tau_ms=%.0f held=%" PRIu32 "\n",
+           " comp_ms=%" PRIu32 " est_peak_ms=%" PRIu32 " tau_ms=%.0f held=%" PRIu32 " rearm=%s\n",
            e->channel + 1u, (unsigned)s_ch_mhz[ch], (double)e->peak_db, e->peak_ms, e->at_ms, e->at_ms - e->peak_ms,
-           comp_ms, e->peak_ms - comp_ms, (double)sd_tau_ms(&cp->sd), held);
+           comp_ms, e->peak_ms - comp_ms, (double)sd_tau_ms(&cp->sd), held, e->rel ? "rel" : "abs");
     checkpoint_link_report_pass(e);
 }
 
@@ -187,11 +189,14 @@ static void print_ready(uint32_t cal_ms)
         len += (size_t)snprintf(lo + len, sizeof(lo) - len, "%s%u", j ? "," : "", (unsigned)h.lo_mhz[j]);
     esp_chip_info_t chip;
     esp_chip_info(&chip);
-    /* tools/flash.py waits for this line (BOOT_DONE). verify_tries and pair_guard show the build's
-     * settings: an sdkconfig kept from a bench control (verify_tries=1: the verify only logs;
-     * pair_guard=0: CONFIG_CHECKPOINT_PAIR_GUARD=n) is visible in every log. */
-    printf("SDR ready lo=%s gain=%u verify_tries=%u pair_guard=%u cal_ms=%" PRIu32 " boot_ms=%lld chip_rev=v%u.%u\n",
-           lo, (unsigned)sdr_rx_gain(), (unsigned)CONFIG_SDR_RX_VERIFY_TRIES, CP_PAIR_GUARD, cal_ms,
+    /* tools/flash.py waits for this line (BOOT_DONE). verify_tries, pair_guard and rearm_db show the
+     * build's settings: an sdkconfig kept from a bench control (verify_tries=1: the verify only logs;
+     * pair_guard=0: CONFIG_CHECKPOINT_PAIR_GUARD=n; rearm_db=0: no relative re-arm) is visible in
+     * every log. */
+    printf("SDR ready lo=%s gain=%u verify_tries=%u pair_guard=%u rearm_db=%u cal_ms=%" PRIu32
+           " boot_ms=%lld chip_rev=v%u.%u\n",
+           lo, (unsigned)sdr_rx_gain(), (unsigned)CONFIG_SDR_RX_VERIFY_TRIES, CP_PAIR_GUARD,
+           (unsigned)CONFIG_CHECKPOINT_REARM_DROP_DB, cal_ms,
            (esp_timer_get_time() - s_boot_t0_us) / 1000, (unsigned)(chip.revision / 100u),
            (unsigned)(chip.revision % 100u));
 }
@@ -222,6 +227,7 @@ static void scan_task(void *arg)
     cp->wanted_dirty = false;
     portEXIT_CRITICAL(&cp_mux);
     sd_init(&cp->sd, &cfg);
+    pd_set_rearm(&cp->sd.det, CP_REARM_DB);      /* sd_init turns it off */
     cp_mark_read(cp, cp_now_ms());
     cp->live = true;
     cp_yield_t y = {.last_us = esp_timer_get_time()};

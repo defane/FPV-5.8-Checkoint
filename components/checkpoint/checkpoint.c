@@ -97,6 +97,7 @@ void checkpoint_start(int64_t boot_t0_us)
     cp->recal_req = -1;
     prefs_load(&cp->wanted, &cp->gain);
     sd_init(&cp->sd, &cp->wanted);
+    pd_set_rearm(&cp->sd.det, (float)CONFIG_CHECKPOINT_REARM_DROP_DB);   /* the build's, not saved */
     if (!cp_scan_start(cp, boot_t0_us)) {
         free(cp);
         printf("CHECKPOINT disabled: no memory for the scan task\n");
@@ -117,11 +118,11 @@ void checkpoint_print(void)
     printf("CHECKPOINT source=sdr live=%u learning=%u bench=%u engine_failed=%u stalled=%u stalls=%" PRIu32
            " gain=%u top=R%u rise_db=%.1f state=%s rotations=%" PRIu32 " readings=%" PRIu32 " passes=%" PRIu32
            " alpha=%.2f tau_ms=%.1f active_db=%.1f hyst_db=%.1f drop_db=%.1f min_peak_db=%.1f refractory_ms=%" PRIu32
-           " stale_ms=%" PRIu32 "\n",
+           " stale_ms=%" PRIu32 " rearm_db=%.0f\n",
            live, cp->learning, cp->bench_running, cp->engine_failed, stalled, s_stalls, (unsigned)cp->gain, top + 1u,
            (double)sd_rise_db(&cp->sd, top), pd_state_name(cp->sd.det.ch[top].state), cp->rotations, cp->readings,
            cp->passes, (double)c->alpha, (double)sd_tau_ms(&cp->sd), (double)c->active_db, (double)c->hysteresis_db,
-           (double)c->drop_db, (double)c->min_peak_db, c->refractory_ms, c->stale_ms);
+           (double)c->drop_db, (double)c->min_peak_db, c->refractory_ms, c->stale_ms, (double)cp->sd.det.rearm_db);
     if (cp->has_last)
         printf("CHECKPOINT last_pass channel=R%u peak_db=%.1f peak_ms=%" PRIu32 "\n", cp->last.channel + 1u,
                (double)cp->last.peak_db, cp->last.peak_ms);
