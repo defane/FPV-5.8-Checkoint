@@ -68,6 +68,8 @@ the lid (103.3 mm deep for a node), without the arm.
 - **Positions:** the arm turns about an axis square to the right wall and locks in 8
   positions 45° apart (up, down, front, back and the diagonals). Loosen its M3 screw, turn it
   a notch, tighten it.
+- **Length:** 75 mm from the dial's axis to the roll joint (`arm_l`), so the antenna stands
+  clear of the box. Its bar runs on the side of the axis away from the wall's SMA bulkhead.
 - **Roll:** the antenna also turns about its own axis, in 8 steps of 45°: its dipole along the
   wall, square to it or at 45°. Its beam is 64° wide in the board's plane and 84° square to it
   ([`../antenna/README.md`](../antenna/README.md#simulation)), so the roll chooses which way it
@@ -77,13 +79,15 @@ the lid (103.3 mm deep for a node), without the arm.
 - **Clamps:** the roll clamp's rear jaw and two front jaws hold the antenna by its ground band,
   5.5 to 15 mm from the SMA edge, and stay clear of the line, the PI and the balun. A pocket in
   the rear jaw takes the SMA's legs.
-- **Clearance:** rolled 90°, the jaws pass 4 mm from the wall. The arm's rise (`riser`, 12 mm)
-  is set for that.
-- **Pointing down:** the antenna then reaches 39 mm below the bottom of the box, so raise the box.
-- **Coax:** up to 150 mm from the bulkhead to the antenna. At the antenna it needs a straight
-  plug: the cable runs down the roll axis, through the 12 mm bore of the clamp and the seat.
-  Its plug on the wall must stand under 15 mm, or the antenna hits it when pointing back and
-  rolled 45°.
+- **Clearance:** pointing back, the roll joint is partly beside the wall. Rolled 90°, the jaws
+  come within 4 mm of the wall's plane and never closer: the arm's rise (`riser`, 12 mm) is set
+  for that.
+- **Pointing down:** the antenna then reaches 91 mm below the bottom of the box, so raise the
+  box or point it another way.
+- **Coax:** 200 mm from the bulkhead to the antenna (`coax_l`): 125 mm in a straight line at
+  the worst arm angle, plus the way round the hub. At the antenna it needs a straight plug: the
+  cable runs down the roll axis, through the 12 mm bore of the clamp and the seat, then along
+  the arm. No arm angle or roll reaches the plug on the wall, whatever its height.
 - **Firmware:** flash the C5 with `make flash FW=detector-ipex` (`CONFIG_CHECKPOINT_ANTENNA_IPEX=y`),
   then calibrate again with every VTX off. Without it, the C5 listens on its onboard antenna,
   inside the box.

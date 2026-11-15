@@ -43,4 +43,4 @@ enclosure,,1,M3 x 10 screw and washer,,yes,any,,the arm on the dial post
 enclosure,,2,M3 x 12 screw and nut,,yes,any,,the antenna's front jaws; the nuts sit in the roll clamp
 enclosure,,2,M2 x 6 screw,,yes,any,,master only: the speaker's ears
 enclosure,,1,IPEX to SMA bulkhead pigtail rated to 6 GHz,"6 mm thread 10 mm long, 8 mm nut",yes,any,,"SMA, not RP-SMA: from the C5-Zero to the right wall"
-enclosure,,1,Coax SMA male to SMA male rated to 6 GHz,up to 150 mm,yes,any,,"wall to antenna; straight at the antenna, down the roll axis; its plug on the wall must stand under 15 mm"
+enclosure,,1,Coax SMA male to SMA male rated to 6 GHz,200 mm,yes,any,,"wall to antenna, along the arm; straight at the antenna, down the roll axis"
