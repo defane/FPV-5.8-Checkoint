@@ -15,6 +15,47 @@ menu "Checkpoint antenna"
 
 endmenu
 
+menu "Checkpoint detector"
+
+    config CHECKPOINT_PAIR_GUARD
+        bool "Hold a pair's dominated reading on saturated captures"
+        default y
+        help
+            One capture carries two Raceband channels, each in the other's image
+            window. A drone close enough to drive the ADC into its rails makes the
+            partner channel read the rails' products (host model: a median 23-29
+            dB under the strong channel), which rang phantom passes on the bench
+            (a 25 mW VTX within about 30 cm of the onboard antenna at gain 40).
+
+            On, a saturated capture's reading of a channel whose smoothed level
+            stands more than 15 dB under its partner's is held, not fed; a hover
+            (a run of saturated captures over 150 ms) holds it 30 ms longer after
+            each one, and a hold over 0.5 s resumes in COOLDOWN. Off, every
+            reading is fed as it comes, the phantoms included. The rules:
+            docs/detector.md, "Pair ghost guard", and scan_detector.h.
+
+            Its limits:
+            - The partner channel is blind while the strong one clips: about
+              80 ms for 600 mW passing 0.3 m away at 20 m/s (host model). A real
+              pass on it inside that window is timed from what follows: up to
+              about 70 ms off, and lost when it is 45 dB weaker (host model).
+            - The blind window grows as 1/speed: about 310 ms at 5 m/s, where
+              a partner 20-30 dB weaker crossing at the same instant rang on
+              time in 5 runs of 20 and 150-170 ms late in the others (host
+              model).
+            - It grows with the link gain too: the IPEX connector with a better
+              antenna, or a directional one, clips from further out (about
+              870 ms at 5 m/s with about 8 dB more, host model).
+            - It keys on the saturated flag only: a compression before the
+              ADC rails (no rail hit, no flag) is not covered. Bench B11
+              checks whether the board does that.
+            - Held for 1 s (a drone parked by the gate), the channel reads
+              unknown in STATS.
+            - The IPEX build (detector-ipex) keeps this default for now: decide
+              its default after bench B9 measures the IPEX link.
+
+endmenu
+
 menu "Checkpoint C5<->C3 link"
 
     config CHECKPOINT_LINK_ENABLE

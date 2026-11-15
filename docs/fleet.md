@@ -120,8 +120,10 @@ page for a gate with no master.
   and the firmware id. *Calibration needed* (`CAL_NEEDED`) is an LO's DC offset or IQ
   estimate out of range, or most of its captures failing, for 3 s; no engine (its start
   failed); or a stalled scan (no rotation for 1 s outside a calibration or a bench). A
-  channel with no reading for 1 s while the gate scans (its LO's captures fail) shows an
-  unknown level, not a rise of 0. *Calibrating* is a calibration,
+  channel with no reading for 1 s while the gate scans shows an unknown level, not a rise
+  of 0: its LO's captures fail, or the pair guard holds it while the other channel of its
+  LO clips the ADC (a drone parked close to the gate; no fault, no badge;
+  [detector.md](detector.md#pair-ghost-guard)). *Calibrating* is a calibration,
   the rests' learning (3 s) or a console bench: the gate is blind. The faults count
   capture timeouts, short or overrun dumps, DSP errors and scan stalls, since boot. A C5
   silent for **3 s** is shown as absent: no stale health, and commands to it fail.

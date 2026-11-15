@@ -1,5 +1,7 @@
 /* Host test for components/pass_detector's scan detector, fed per-channel readings at the
- * sdr_rx rate (490 Hz per channel, R1..R8 in LO pairs) and at the old 57 Hz sweep.
+ * sdr_rx rate (490 Hz per channel, R1..R8 in LO pairs) and at the old 57 Hz sweep, then the pair
+ * guard (sd_feed_hop) on a reading model of a clipping pair (test_pair_ghost.c runs it on the
+ * real DSP).
  * Build/run:
  *   cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/pass_detector/include \
  *      test_scan_detector.c ../components/pass_detector/scan_detector.c \
@@ -173,6 +175,112 @@ static pass_result_t one_pass(int32_t dt_us, uint64_t s)
     o.lag_ms = (float)(r.last.peak_ms - centre_ms);
     o.err_ms = (float)(r.last.peak_ms - sd_delay_ms(&r.sd, 3) - centre_ms);
     return o;
+}
+
+/* ---- Pair guard (sd_feed_hop): a reading model of one PAIRS hop (R5 at -19 MHz, R6 at +18 MHz).
+ * Band levels in dBFS: the floor -59.5 dB, 1.2 dB per reading; a drone is 40 dB up at 0.9 m for
+ * 25 mW, -20 log10(d), +13.8 dB at 600 mW, 20 m/s (or v_ms), 1 dB of fading per capture. A capture clips once
+ * R6 stands over PAIR_CLIP_DBFS (the first rail hit of a 12 MHz-deviation VTX); then R6 reads
+ * compressed and R5 reads R6's clipping products, R6's reading + X, X drawn from PAIR_CLIP_X (the
+ * quantiles of R5 - R6 on captures clipped 1-10 dB deep in a host simulation of the C5 capture
+ * through sdr_psd.c, as test_pair_ghost.c builds them), plus a real R5 signal 3 dB down (the rails
+ * suppress the weaker). The other six channels read the floor. */
+#define PAIR_LO        4u        /* R5 */
+#define PAIR_HI        5u        /* R6 */
+#define PAIR_HOP       2u        /* LO 5825 */
+#define PAIR_FLOOR     (-59.5)
+#define PAIR_CLIP_DBFS (-5.3)
+static const double PAIR_CLIP_X[][2] = {{0.0, -45}, {0.5, -28}, {0.75, -17}, {0.88, -13}, {0.95, -3}, {0.99, 10}, {1.0, 12}};
+
+typedef struct {
+    double mw, d_m, t0_s;    /* mw 0: absent */
+    int laps;
+    double lap_s;
+    double hover_d_m, hover_t0_s, hover_t1_s;   /* hover_d_m > 0: parked at that distance meanwhile */
+    double v_ms;                                /* speed past the gate, 0 = 20 m/s */
+} pdrone_t;
+typedef struct {
+    unsigned n[PD_CHANNELS];
+    double peak_s[PD_CHANNELS][8];   /* scene time of each pass's peak_ms */
+    float peak_db[PD_CHANNELS][8];
+    unsigned held[PD_CHANNELS];
+} pair_out_t;
+
+static double pdrone_db(const pdrone_t *d, double ts)
+{
+    if (d->mw <= 0.0) return -999.0;
+    const double base = -19.5 + 10.0 * log10(d->mw / 25.0);
+    if (d->hover_d_m > 0.0) {   /* flies in at 20 m/s, parks, flies off */
+        const double away = ts < d->hover_t0_s ? d->hover_t0_s - ts : ts > d->hover_t1_s ? ts - d->hover_t1_s : 0.0;
+        return base - 20.0 * log10((d->hover_d_m + 20.0 * away) / 0.9) - (away > 0.75 ? 40.0 * (away - 0.75) : 0.0);
+    }
+    double best = -999.0;
+    for (int k = 0; k < (d->laps ? d->laps : 1); k++) {
+        const double dt = ts - (d->t0_s + k * d->lap_s), x = (d->v_ms > 0.0 ? d->v_ms : 20.0) * dt;
+        double v = base - 10.0 * log10((d->d_m * d->d_m + x * x) / 0.81);
+        if (fabs(dt) > 0.75) v -= 40.0 * (fabs(dt) - 0.75);   /* off round the track */
+        if (v > best) best = v;
+    }
+    return best;
+}
+static double psum(double a, double b) { return 10.0 * log10(pow(10.0, a / 10.0) + pow(10.0, b / 10.0)); }
+static double clip_x(void)
+{
+    const double u = uniform();
+    unsigned k = 1;
+    while (PAIR_CLIP_X[k][0] < u) k++;
+    const double *a = PAIR_CLIP_X[k - 1], *b = PAIR_CLIP_X[k];
+    return a[1] + (b[1] - a[1]) * (u - a[0]) / (b[0] - a[0]);
+}
+
+/* 3.5 s of floor (the rests settle), then dur_s of the scene; guard: sd_feed_hop, else sd_feed per
+ * reading (cp_scan.c before the guard). Scene time 0 = T0 + 3.5 s. */
+static void pair_run(const pdrone_t *hi, const pdrone_t *lo, int guard, uint64_t s, double dur_s, pair_out_t *o,
+                     scan_detector_t *sd)
+{
+    memset(o, 0, sizeof(*o));
+    const pd_config_t c = sd_config_default();
+    sd_init(sd, &c);
+    seed(s);
+    for (int64_t t = T0_US; t < T0_US + S(3.5 + dur_s); t += RATE_A_US) {
+        for (unsigned hop = 0; hop < 4u; hop++) {
+            const int64_t th = t + (int64_t)hop * RATE_A_US / 4;
+            const double ts = (double)(th - T0_US) * 1e-6 - 3.5;
+            double ra = PAIR_FLOOR + gauss(1.2f), rb = PAIR_FLOOR + gauss(1.2f);
+            uint8_t fl = 0;
+            if (hop == PAIR_HOP && ts >= 0.0) {
+                const double b = pdrone_db(hi, ts) + gauss(1.0f), a = pdrone_db(lo, ts) + gauss(1.0f);
+                if (b > PAIR_CLIP_DBFS) {
+                    fl = SD_FLAG_SATURATED;
+                    rb = PAIR_CLIP_DBFS + 7.5 * tanh((b - PAIR_CLIP_DBFS) / 10.0) + gauss(0.3f);
+                    ra = psum(psum(ra, a - 3.0), rb + clip_x());
+                } else {
+                    ra = psum(ra, a);
+                    rb = psum(rb, b);
+                }
+            }
+            const sd_reading_t r[2] = {{th, qdb((float)ra), (uint8_t)(2u * hop), fl},
+                                       {th, qdb((float)rb), (uint8_t)(2u * hop + 1u), fl}};
+            pd_event_t ev[2];
+            unsigned rang = 0, held = 0;
+            if (guard) {
+                rang = sd_feed_hop(sd, hop, r, 2, ev, &held);
+            } else {
+                for (unsigned i = 0; i < 2; i++)
+                    if (sd_feed(sd, r[i].channel, r[i].level_qdb, r[i].flags, r[i].t_us, &ev[i])) rang |= 1u << i;
+            }
+            for (unsigned i = 0; i < 2; i++) {
+                const unsigned ch = r[i].channel;
+                if (held & (1u << i)) o->held[ch]++;
+                if ((rang & (1u << i)) && o->n[ch] < 8u) {
+                    o->peak_s[ch][o->n[ch]] = ev[i].peak_ms / 1000.0 - (T0_US / 1e6 + 3.5);
+                    o->peak_db[ch][o->n[ch]] = ev[i].peak_db;
+                    o->n[ch]++;
+                }
+            }
+        }
+        sd_rotation(sd, t + 3 * RATE_A_US / 4);
+    }
 }
 
 int main(void)
@@ -543,6 +651,169 @@ int main(void)
         play(&r, 25.0, &sc);
         printf("     hover across a 1.2 s reading gap: %u pass(es), %u before it\n", r.total, rang);
         CHECK(rang == 1 && r.passes[5] == 1 && r.total == 1, "a drone hovering across a 1.2 s reading gap rings once");
+    }
+
+    /* 22. Pair guard: without a saturated capture, sd_feed_hop is sd_feed of each reading, to the
+     *     bit (passes on both channels of a hop, 10 dB apart, and on others). */
+    {
+        static scan_detector_t a, b;
+        const pd_config_t c = sd_config_default();
+        sd_init(&a, &c);
+        sd_init(&b, &c);
+        seed(181);
+        const scene_t sc = {4, {gpass(4, 30.0f, 6.0, 80.0f), gpass(5, 40.0f, 6.05, 60.0f), gpass(1, 20.0f, 8.0, 150.0f),
+                                rect(5, 12.0f, 9.0, 11.0)}};
+        unsigned ea = 0, eb = 0, diff = 0;
+        for (int64_t t = T0_US; t < T0_US + S(14.0); t += RATE_A_US) {
+            for (unsigned hop = 0; hop < 4u; hop++) {
+                const int64_t th = t + (int64_t)hop * RATE_A_US / 4;
+                const sd_reading_t rd[2] = {
+                    {th, qdb(QUIET_DB + scene_db(&sc, 2u * hop, th) + gauss(NOISE_DB)), (uint8_t)(2u * hop), 0},
+                    {th, qdb(QUIET_DB + scene_db(&sc, 2u * hop + 1u, th) + gauss(NOISE_DB)), (uint8_t)(2u * hop + 1u), 0}};
+                pd_event_t e1[2], e2[2];
+                unsigned rang = 0, held = 1;
+                for (unsigned i = 0; i < 2; i++)
+                    if (sd_feed(&a, rd[i].channel, rd[i].level_qdb, rd[i].flags, rd[i].t_us, &e1[i])) rang |= 1u << i;
+                const unsigned rang2 = sd_feed_hop(&b, hop, rd, 2, e2, &held);
+                diff += rang != rang2 || held;
+                for (unsigned i = 0; i < 2; i++)
+                    if (rang & rang2 & (1u << i)) {
+                        ea++;
+                        diff += e1[i].channel != e2[i].channel || e1[i].peak_db != e2[i].peak_db ||
+                                e1[i].peak_ms != e2[i].peak_ms || e1[i].at_ms != e2[i].at_ms;
+                    }
+                eb += (unsigned)__builtin_popcount(rang2);
+            }
+            sd_rotation(&a, t + 3 * RATE_A_US / 4);
+            sd_rotation(&b, t + 3 * RATE_A_US / 4);
+        }
+        bool same = true;
+        for (unsigned ch = 0; ch < PD_CHANNELS; ch++)
+            same = same && same_channel(&a.c[ch], &b.c[ch]) && !memcmp(&a.det.ch[ch], &b.det.ch[ch], sizeof(a.det.ch[ch]));
+        printf("     clean pairs: %u passes per reading, %u per hop, %u differences\n", ea, eb, diff);
+        CHECK(ea >= 3 && eb == ea && diff == 0 && same, "without a saturated capture sd_feed_hop is sd_feed, to the bit");
+    }
+
+    /* 23. The bench's ghost: a 600 mW R6 passing 0.3 m from the gate clips the ADC for ~80 ms; R5,
+     *     alone in the air, reads R6's clipping products. Fed one reading at a time (cp_scan.c until
+     *     now) R5 rings a phantom; through the pair guard it is held while R6 clips and rings
+     *     nothing, and R6's own pass is the same pass to the millisecond (R6 is never held). */
+    {
+        static scan_detector_t sd;
+        const pdrone_t r6 = {.mw = 600, .d_m = 0.3, .t0_s = 2.0}, none = {0};
+        unsigned ghost_base = 0, ghost_guard = 0, r6_same = 0, r6_held = 0;
+        float ghost_db = 0.0f;
+        for (uint64_t k = 0; k < 10u; k++) {
+            pair_out_t base, gd;
+            pair_run(&r6, &none, 0, 300 + k, 4.0, &base, &sd);
+            pair_run(&r6, &none, 1, 300 + k, 4.0, &gd, &sd);
+            ghost_base += base.n[PAIR_LO] > 0;
+            ghost_guard += gd.n[PAIR_LO] > 0;
+            if (base.n[PAIR_LO] && base.peak_db[PAIR_LO][0] > ghost_db) ghost_db = base.peak_db[PAIR_LO][0];
+            r6_same += base.n[PAIR_HI] == 1 && gd.n[PAIR_HI] == 1 && base.peak_s[PAIR_HI][0] == gd.peak_s[PAIR_HI][0];
+            r6_held += gd.held[PAIR_HI];
+        }
+        printf("     600 mW at 0.3 m: R5 phantom in %u/10 runs fed per reading (up to %.1f dB), %u/10 guarded\n", ghost_base,
+               (double)ghost_db, ghost_guard);
+        CHECK(ghost_base >= 9 && ghost_db >= 13.0f, "fed per reading, a clipping R6 rings a phantom R5 pass (the bench's ghost)");
+        CHECK(ghost_guard == 0, "through sd_feed_hop it rings none");
+        CHECK(r6_same == 10 && r6_held == 0, "and R6's pass is unchanged: the strong channel is never held");
+    }
+
+    /* 24. A real R5 pilot 30 dB under that R6, on the same line, 200 ms behind it, then at the same
+     *     instant. Per reading, the phantom at R6's time takes the pass and its refractory kills the
+     *     real one; guarded, R5 rings once, on its own pass, within 30 ms (200 ms) or 80 ms (same
+     *     instant: blind while R6 clips) of R5 alone in the air. */
+    {
+        static scan_detector_t sd;
+        const pdrone_t r6 = {.mw = 600, .d_m = 0.3, .t0_s = 2.0}, none = {0};
+        unsigned base_ok = 0, guard_ok = 0, same_ok = 0;
+        double worst = 0.0, worst_same = 0.0;
+        for (uint64_t k = 0; k < 10u; k++) {
+            const pdrone_t r5 = {.mw = 0.6, .d_m = 0.3, .t0_s = 2.2}, r5s = {.mw = 0.6, .d_m = 0.3, .t0_s = 2.0};
+            pair_out_t base, gd, alone, gs, alone_s;
+            pair_run(&r6, &r5, 0, 400 + k, 4.0, &base, &sd);
+            pair_run(&r6, &r5, 1, 400 + k, 4.0, &gd, &sd);
+            pair_run(&none, &r5, 0, 400 + k, 4.0, &alone, &sd);
+            pair_run(&r6, &r5s, 1, 500 + k, 4.0, &gs, &sd);
+            pair_run(&none, &r5s, 0, 500 + k, 4.0, &alone_s, &sd);
+            base_ok += base.n[PAIR_LO] == 1 && fabs(base.peak_s[PAIR_LO][0] - alone.peak_s[PAIR_LO][0]) <= 0.03;
+            if (gd.n[PAIR_LO] == 1 && alone.n[PAIR_LO] == 1) {
+                guard_ok++;
+                worst = fmax(worst, fabs(gd.peak_s[PAIR_LO][0] - alone.peak_s[PAIR_LO][0]));
+            }
+            if (gs.n[PAIR_LO] == 1 && alone_s.n[PAIR_LO] == 1) {
+                same_ok++;
+                worst_same = fmax(worst_same, fabs(gs.peak_s[PAIR_LO][0] - alone_s.peak_s[PAIR_LO][0]));
+            }
+        }
+        printf("     R5 30 dB under, +200 ms: %u/10 right per reading, %u/10 guarded (worst %.0f ms); same instant %u/10 (worst %.0f ms)\n",
+               base_ok, guard_ok, worst * 1e3, same_ok, worst_same * 1e3);
+        CHECK(base_ok <= 2, "per reading, the phantom replaces a real R5 pass 200 ms behind a clipping R6");
+        CHECK(guard_ok == 10 && worst <= 0.03, "guarded, R5 rings its own pass, within 30 ms of R5 alone");
+        CHECK(same_ok == 10 && worst_same <= 0.08, "at the same instant too, within 80 ms (blind while R6 clips)");
+    }
+
+    /* 25. A 600 mW R6 parked 0.5 m from the gate for 10 s (clipping) while R5 laps at 1 m every 3 s:
+     *     R5 is held throughout (unmeasurable under the clipping products) and rings nothing, no
+     *     phantom and no mistimed lap; when R6 leaves, R5 resumes in COOLDOWN, so the tail of the
+     *     lap it missed at 10 s does not ring either. */
+    {
+        static scan_detector_t sd;
+        const pdrone_t r6 = {.mw = 600, .hover_d_m = 0.5, .hover_t0_s = 0.5, .hover_t1_s = 10.5};
+        const pdrone_t r5 = {.mw = 25, .d_m = 1.0, .t0_s = 1.0, .laps = 4, .lap_s = 3.0};
+        unsigned rang = 0, held_ok = 0;
+        for (uint64_t k = 0; k < 5u; k++) {
+            pair_out_t gd;
+            pair_run(&r6, &r5, 1, 600 + k, 12.0, &gd, &sd);
+            rang += gd.n[PAIR_LO];
+            /* sd.held, the per-channel count the console prints (K l, PASS), is the bits returned. */
+            held_ok += gd.held[PAIR_LO] > 4000u && gd.held[PAIR_HI] == 0u && sd.held[PAIR_LO] == gd.held[PAIR_LO] &&
+                       sd.held[PAIR_HI] == 0u;
+            for (unsigned i = 0; i < gd.n[PAIR_LO]; i++) printf("     (R5 pass at %.3f s, %.1f dB; held %u)\n", gd.peak_s[PAIR_LO][i], (double)gd.peak_db[PAIR_LO][i], gd.held[PAIR_LO]);
+        }
+        printf("     10 s clipping hover: %u R5 passes over 5 runs\n", rang);
+        CHECK(rang == 0 && held_ok == 5, "a clipping hover blinds its partner: no lap, no phantom, no tail");
+    }
+
+    /* 26. Known loss, kept as it is: a slow co-pass. The 600 mW R6 of 23-24 passes 0.3 m away at
+     *     5 m/s, so it clips for about 320 ms instead of 80; a real R5 20 or 30 dB under it crosses at
+     *     the same instant, on the same line. Guarded, R5 is blind for that whole window, which holds
+     *     its own peak: it rings once, but timed at an edge of the window (its last readings before
+     *     the hold, or its first after it), 0.17-0.22 s from R5 alone in the air. Per reading it looks
+     *     right only because its phantom peaks at R6's instant, which is R5's here (at another
+     *     offset the phantom takes the pass: 24). The host model of the eval saw the same (5 of 20
+     *     on time at 5 m/s); the window grows as 1/speed and with the link gain (Kconfig
+     *     CHECKPOINT_PAIR_GUARD). Bench B11 measures it on the board; retune from that, not here. */
+    {
+        static scan_detector_t sd;
+        const pdrone_t r6 = {.mw = 600, .d_m = 0.3, .t0_s = 2.0, .v_ms = 5.0}, none = {0};
+        unsigned once = 0, base_ok = 0, r6_same = 0, runs = 0;
+        double lo = 1e9, hi = 0.0;
+        for (int dl = 20; dl <= 30; dl += 10) {
+            const pdrone_t r5 = {.mw = 600.0 * pow(10.0, -dl / 10.0), .d_m = 0.3, .t0_s = 2.0, .v_ms = 5.0};
+            for (uint64_t k = 0; k < 10u; k++) {
+                pair_out_t base, gd, alone;
+                pair_run(&r6, &r5, 0, 700 + k, 4.0, &base, &sd);
+                pair_run(&r6, &r5, 1, 700 + k, 4.0, &gd, &sd);
+                pair_run(&none, &r5, 0, 700 + k, 4.0, &alone, &sd);
+                runs++;
+                r6_same += base.n[PAIR_HI] == 1 && gd.n[PAIR_HI] == 1 && base.peak_s[PAIR_HI][0] == gd.peak_s[PAIR_HI][0];
+                if (alone.n[PAIR_LO] != 1) continue;
+                base_ok += base.n[PAIR_LO] == 1 && fabs(base.peak_s[PAIR_LO][0] - alone.peak_s[PAIR_LO][0]) <= 0.1;
+                if (gd.n[PAIR_LO] == 1) {
+                    once++;
+                    const double err = fabs(gd.peak_s[PAIR_LO][0] - alone.peak_s[PAIR_LO][0]);
+                    lo = fmin(lo, err);
+                    hi = fmax(hi, err);
+                }
+            }
+        }
+        printf("     5 m/s co-pass, R5 20/30 dB under: guarded %u/%u ring once, %.0f-%.0f ms from R5 alone; per reading "
+               "%u/%u within 100 ms\n", once, runs, lo * 1e3, hi * 1e3, base_ok, runs);
+        CHECK(once == runs && lo >= 0.12 && hi <= 0.30,
+              "known loss: a 5 m/s co-pass rings once, at an edge of the ~320 ms clip window (0.12-0.30 s off)");
+        CHECK(base_ok == runs && r6_same == runs, "per reading it rings near R5's time (its phantom's), and R6 is the same");
     }
 
     printf("%d/%d scan_detector checks passed\n", g_pass, g_pass + g_fail);

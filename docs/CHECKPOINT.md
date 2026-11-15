@@ -20,14 +20,14 @@ semitones, R4 = the original pitch).
 ## Pages
 
 - **[Detector: operation and parameters](detector.md)** — the band-power signal, the
-  state machine, the `K`-console parameters (saved in NVS).
+  state machine, the pair ghost guard, the `K`-console parameters (saved in NVS).
 - **[No local output (detector)](no-video-audio.md)** — the detector has no
   local output; what it may and may not be wired to.
 - **[Race-timing fleet (C6 master)](fleet.md)** — C6 + C3 nodes: protocols,
   pairing, web roles, degraded mode, the centralized sound, C5-as-master.
 - **[Status LED](status-led.md)** — the per-board WS2812, state ↔ colour scheme.
 - **[Bench procedure](bench.md)** — build/flash, detector tests, the engine bench, the
-  first bench plan (B0–B10).
+  first bench plan (B0–B11).
 
 ## Two-ESP platform
 

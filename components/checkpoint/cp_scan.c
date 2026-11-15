@@ -1,5 +1,6 @@
 /* The scan task: the one task that owns the sdr_rx engine. It calibrates every LO at boot, then
- * steps the engine hop by hop (one LO, two channels) and feeds each reading to the scan detector;
+ * steps the engine hop by hop (one LO, two channels) and feeds each hop's readings to the scan
+ * detector (sd_feed_hop: the pair guard holds a dominated reading of a saturated capture);
  * a pass prints a PASS line and goes over the link. Requests from the console and the link
  * (detector settings, gain, recalibrations, benches) are applied here, between two hops, so the
  * engine and the detector stay single-threaded. Priority 1, like the link task: they time-slice
@@ -22,6 +23,14 @@
 _Static_assert(SD_FLAG_SATURATED == SDR_RD_SATURATED, "sd_feed takes the engine's reading flags as they are");
 _Static_assert(SD_LEVEL_NONE == SDR_LEVEL_NONE, "a missing reading is the same code on both sides");
 _Static_assert(PD_CHANNELS == SDR_RX_CHANNELS, "one detector slot per channel");
+_Static_assert(SD_HOP_READINGS == SDR_RX_PER_HOP, "sd_feed_hop takes every reading of a hop");
+_Static_assert(SD_HOPS_MAX >= SDR_RX_MAX_HOPS, "one saturated-run record per plan hop");
+
+#if CONFIG_CHECKPOINT_PAIR_GUARD
+#define CP_PAIR_GUARD 1u
+#else
+#define CP_PAIR_GUARD 0u
+#endif
 
 bool cp_wdt_subscribed;
 
@@ -54,15 +63,20 @@ void cp_on_pass(cp_t *cp, const pd_event_t *e)
     /* peak_ms (console and wire) is the smoothed peak; comp_ms and est_peak_ms estimate the true
      * one, for the console only (the fleet times every gate on the same smoothed peak). */
     const uint32_t comp_ms = (uint32_t)lroundf(sd_delay_ms(&cp->sd, e->channel));
+    /* held: the channel's readings the pair guard held since its previous pass (or the boot). */
+    const unsigned ch = e->channel % SDR_RX_CHANNELS;
+    const uint32_t held = cp->sd.held[ch] - cp->held_at_pass[ch];
+    cp->held_at_pass[ch] = cp->sd.held[ch];
     printf("PASS channel=R%u freq=%u peak_db=%.1f peak_ms=%" PRIu32 " at_ms=%" PRIu32 " delay_ms=%" PRIu32
-           " comp_ms=%" PRIu32 " est_peak_ms=%" PRIu32 " tau_ms=%.0f\n",
-           e->channel + 1u, (unsigned)s_ch_mhz[e->channel % SDR_RX_CHANNELS], (double)e->peak_db, e->peak_ms,
-           e->at_ms, e->at_ms - e->peak_ms, comp_ms, e->peak_ms - comp_ms, (double)sd_tau_ms(&cp->sd));
+           " comp_ms=%" PRIu32 " est_peak_ms=%" PRIu32 " tau_ms=%.0f held=%" PRIu32 "\n",
+           e->channel + 1u, (unsigned)s_ch_mhz[ch], (double)e->peak_db, e->peak_ms, e->at_ms, e->at_ms - e->peak_ms,
+           comp_ms, e->peak_ms - comp_ms, (double)sd_tau_ms(&cp->sd), held);
     checkpoint_link_report_pass(e);
 }
 
 /* K l: the rises, then each plan hop's saturated captures since the previous line (sat=, hop order:
- * a capture that hit an ADC rail, the flag the detector sees on both of its readings). */
+ * a capture that hit an ADC rail, the flag the detector sees on both of its readings), then each
+ * channel's readings the pair guard held since the previous line (held=, R1..R8). */
 static void cp_trace(cp_t *cp, int64_t now_us)
 {
     const scan_detector_t *sd = &cp->sd;
@@ -74,8 +88,31 @@ static void cp_trace(cp_t *cp, int64_t now_us)
            (double)sd_rise_db(sd, 3), (double)sd_rise_db(sd, 4), (double)sd_rise_db(sd, 5),
            (double)sd_rise_db(sd, 6), (double)sd_rise_db(sd, 7), top + 1u, pd_state_name(sd->det.ch[top].state));
     for (unsigned j = 0; j < nhops; j++) printf("%s%u", j ? "," : "", (unsigned)cp->trace_sat[j]);
+    printf(" held=");
+    for (unsigned ch = 0; ch < SDR_RX_CHANNELS; ch++) {
+        printf("%s%" PRIu32, ch ? "," : "", sd->held[ch] - cp->held_at_trace[ch]);
+        cp->held_at_trace[ch] = sd->held[ch];
+    }
     printf("\n");
     memset(cp->trace_sat, 0, sizeof(cp->trace_sat));
+}
+
+unsigned cp_feed_hop(scan_detector_t *sd, const sdr_hop_t *h, pd_event_t ev[SDR_RX_PER_HOP], unsigned *held)
+{
+    unsigned rang = 0;
+    *held = 0;
+#if CP_PAIR_GUARD
+    sd_reading_t r[SD_HOP_READINGS];
+    const unsigned n = h->n < SD_HOP_READINGS ? h->n : SD_HOP_READINGS;
+    for (unsigned i = 0; i < n; i++)
+        r[i] = (sd_reading_t){.t_us = h->r[i].t_us, .level_qdb = h->r[i].level_qdb, .channel = h->r[i].channel,
+                              .flags = h->r[i].flags};
+    rang = sd_feed_hop(sd, h->hop, r, n, ev, held);
+#else
+    for (unsigned i = 0; i < h->n && i < SDR_RX_PER_HOP; i++)
+        if (sd_feed(sd, h->r[i].channel, h->r[i].level_qdb, h->r[i].flags, h->r[i].t_us, &ev[i])) rang |= 1u << i;
+#endif
+    return rang;
 }
 
 /* A bench in this task (the console posted it), then the production settings again. */
@@ -150,10 +187,11 @@ static void print_ready(uint32_t cal_ms)
         len += (size_t)snprintf(lo + len, sizeof(lo) - len, "%s%u", j ? "," : "", (unsigned)h.lo_mhz[j]);
     esp_chip_info_t chip;
     esp_chip_info(&chip);
-    /* tools/flash.py waits for this line (BOOT_DONE). verify_tries shows the build's setting: an
-     * sdkconfig kept from a bench control (1 = the verify only logs) is visible in every log. */
-    printf("SDR ready lo=%s gain=%u verify_tries=%u cal_ms=%" PRIu32 " boot_ms=%lld chip_rev=v%u.%u\n", lo,
-           (unsigned)sdr_rx_gain(), (unsigned)CONFIG_SDR_RX_VERIFY_TRIES, cal_ms,
+    /* tools/flash.py waits for this line (BOOT_DONE). verify_tries and pair_guard show the build's
+     * settings: an sdkconfig kept from a bench control (verify_tries=1: the verify only logs;
+     * pair_guard=0: CONFIG_CHECKPOINT_PAIR_GUARD=n) is visible in every log. */
+    printf("SDR ready lo=%s gain=%u verify_tries=%u pair_guard=%u cal_ms=%" PRIu32 " boot_ms=%lld chip_rev=v%u.%u\n",
+           lo, (unsigned)sdr_rx_gain(), (unsigned)CONFIG_SDR_RX_VERIFY_TRIES, CP_PAIR_GUARD, cal_ms,
            (esp_timer_get_time() - s_boot_t0_us) / 1000, (unsigned)(chip.revision / 100u),
            (unsigned)(chip.revision % 100u));
 }
@@ -201,11 +239,14 @@ static void scan_task(void *arg)
         if (cp->trace && h.n && (h.r[0].flags & SDR_RD_SATURATED) && h.hop < SDR_RX_MAX_HOPS &&
             cp->trace_sat[h.hop] < UINT16_MAX)
             cp->trace_sat[h.hop]++;              /* one flag per capture, on both of its readings */
+        pd_event_t ev[SDR_RX_PER_HOP];
+        unsigned held;
+        const unsigned rang = cp_feed_hop(&cp->sd, &h, ev, &held);
         for (unsigned i = 0; i < h.n; i++) {
-            pd_event_t e;
             cp->readings++;
-            cp->last_reading_ms[h.r[i].channel % SDR_RX_CHANNELS] = (uint32_t)(h.r[i].t_us / 1000);
-            if (sd_feed(&cp->sd, h.r[i].channel, h.r[i].level_qdb, h.r[i].flags, h.r[i].t_us, &e)) cp_on_pass(cp, &e);
+            /* A held reading is none: a channel held CP_STALL_MS reads unknown in STATS. */
+            if (!(held & (1u << i))) cp->last_reading_ms[h.r[i].channel % SDR_RX_CHANNELS] = (uint32_t)(h.r[i].t_us / 1000);
+            if (rang & (1u << i)) cp_on_pass(cp, &ev[i]);
         }
         const int64_t now = esp_timer_get_time();
         if (h.rotation_end) {

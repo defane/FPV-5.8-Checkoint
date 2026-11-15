@@ -46,6 +46,8 @@ typedef struct {
     uint8_t image_floor_gain;                              /* 0 = no floor run yet */
     int64_t last_trace_us;
     uint16_t trace_sat[SDR_RX_MAX_HOPS];                   /* K l: saturated captures per hop since the last line */
+    uint32_t held_at_trace[SDR_RX_CHANNELS];               /* sd.held as the last K l line printed */
+    uint32_t held_at_pass[SDR_RX_CHANNELS];                /* sd.held as the channel's last pass printed */
     uint32_t readings, rotations, passes;
     bool has_last; pd_event_t last;
 } cp_t;
@@ -92,6 +94,9 @@ bool cp_scan_reserve(void);                  /* the scan task's stack and TCB, a
 bool cp_scan_start(cp_t *cp, int64_t boot_t0_us);
 TaskHandle_t cp_scan_task(void);
 void cp_on_pass(cp_t *cp, const pd_event_t *e);
+/* [scan] One hop's readings into sd: sd_feed_hop (CONFIG_CHECKPOINT_PAIR_GUARD) or sd_feed each.
+ * A bit per reading that completed a pass (ev[i]); *held a bit per reading the guard held. */
+unsigned cp_feed_hop(scan_detector_t *sd, const sdr_hop_t *h, pd_event_t ev[SDR_RX_PER_HOP], unsigned *held);
 
 /* cp_console.c */
 TaskHandle_t cp_console_task(void);

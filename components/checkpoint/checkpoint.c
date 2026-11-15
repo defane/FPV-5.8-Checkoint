@@ -264,9 +264,10 @@ void checkpoint_link_get_config(lp_config_t *out)
 /* What T would show, as reads only (no print, no allocation, no engine call but its [any] reads).
  * live is computed now rather than trusted from the scan task: a scan task that stopped rotating
  * outside a calibration or a bench is "stalled", which flags CAL_NEEDED and counts a fault. A
- * channel with no reading for CP_STALL_MS while the gate rotates (its LO's captures fail: the
- * engine flags CAL_NEEDED after 3 s and the faults count them) reads LP_LEVEL_UNKNOWN, not a
- * rise of 0. */
+ * channel with no reading for CP_STALL_MS while the gate rotates reads LP_LEVEL_UNKNOWN, not a
+ * rise of 0: its LO's captures fail (the engine flags CAL_NEEDED after 3 s and the faults count
+ * them), or the pair guard held every reading of it (a held reading counts as none, cp_scan.c:
+ * its partner on the same LO clips the ADC, a drone hovering by the gate; no fault, no flag). */
 void checkpoint_link_get_stats(lp_stats_t *out)
 {
     const cp_t *cp = s_cp;

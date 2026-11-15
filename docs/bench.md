@@ -6,7 +6,7 @@ on the console (`python tools/flash.py PORT --monitor-only --log run.log`); the
 coin sound is the C6 master's ([fleet.md](fleet.md)).
 
 The receive engine is `components/sdr_rx` ([detector.md](detector.md)). B0 to B4 of
-[§7](#7-first-bench-b0-to-b10-and-results) were run on a C5-Zero on 2026-11-15 (results and
+[§7](#7-first-bench-b0-to-b11-and-results) were run on a C5-Zero on 2026-11-15 (results and
 gaps in its table). The other expected values are still widscan58's (CapnBry, `PLAN.md` at
 `a9fff97`), and the rest of §7 is the bench that settles them. The C5VRX-era results are in
 [History](#history).
@@ -37,10 +37,11 @@ Startup prints, in order:
   calibrations (`tries`).
   `irr_db=skip_saturated` means too many clipped captures: a VTX too close, verify skipped;
   `irr_db=skip_faults` means the captures failed (8 failed captures end a verify try).
-- `SDR ready lo=5677,5751,5825,5899 gain=40 verify_tries=3 cal_ms=… boot_ms=… chip_rev=v…`
-  (`verify_tries` is the build's `CONFIG_SDR_RX_VERIFY_TRIES`: 1 only in B0's control), expected within
-  about 2 s of the reset; `tools/flash.py --check` waits for it. Passes can ring 3 s later,
-  once the rests are learnt.
+- `SDR ready lo=5677,5751,5825,5899 gain=40 verify_tries=3 pair_guard=1 cal_ms=… boot_ms=…
+  chip_rev=v…` (`verify_tries` is the build's `CONFIG_SDR_RX_VERIFY_TRIES`: 1 only in B0's
+  control; `pair_guard` its `CONFIG_CHECKPOINT_PAIR_GUARD`: 0 only in B11's control), expected
+  within about 2 s of the reset; `tools/flash.py --check` waits for it. Passes can ring 3 s
+  later, once the rests are learnt.
 - `HB t_s=… stage=… live=… rot_hz_x10=… faults=… cal=…` every 5 s, from the USB reader,
   whatever the rest does.
 
@@ -69,8 +70,9 @@ capture (8 per LO, so 33, when the dump never answers).
   or its IQ estimate (`iq_bad`, one bit per LO) stayed out of range for 3 s; recalibrate
   (`F`, VTX off). The same when an LO's captures failed on most of its hops for 3 s (`cap_bad`,
   one bit per LO, with `timeout`, `short`, `overrun` or `dsp` climbing); its two channels
-  refresh slower or not at all. A channel that gets no reading at all for 1 s (every capture
-  of its LO fails) shows an unknown level on the bridges.
+  refresh slower or not at all. A channel that gets no reading at all for 1 s shows an
+  unknown level on the bridges: every capture of its LO fails, or the pair guard holds it
+  while the other channel of its LO clips the ADC ([detector.md](detector.md#pair-ghost-guard)).
 - `CHECKPOINT source=sdr live= learning= bench= engine_failed= stalled= stalls= gain= top=
   rise_db= state= rotations= readings= passes= alpha= tau_ms= active_db= …`, and
   `CHECKPOINT last_pass …` once a pass rang.
@@ -83,15 +85,18 @@ from the `CHECK` line, or pass `--heap-min-warn 20000`.
 
 ## 2. Signal
 
-- Send `K` then `l` (trace): `CP_TRACE t_ms=… rise_db=r1,r2,…,r8 top=R… state=… sat=a,b,c,d`,
-  5 lines a second, each channel's rise above its rest in dB. VTX off, every rise stays
-  near 0. VTX on and close, its channel rises well above the others (20 dB or more at
-  0.9 m for 25 mW).
+- Send `K` then `l` (trace): `CP_TRACE t_ms=… rise_db=r1,r2,…,r8 top=R… state=… sat=a,b,c,d
+  held=h1,…,h8`, 5 lines a second, each channel's rise above its rest in dB. VTX off, every
+  rise stays near 0. VTX on and close, its channel rises well above the others (20 dB or
+  more at 0.9 m for 25 mW).
 - `sat=` counts, per LO in hop order (5677, 5751, 5825, 5899 MHz: R1+R2, R3+R4, R5+R6,
-  R7+R8), the captures that hit an ADC rail since the previous line (about 100 a line per
-  LO at 508 rotations a second, [board] B1). A saturated capture flags both of its readings,
-  so this is what the detector sees. A 25 mW VTX clips within about 30 cm of the onboard
-  antenna at gain 40 ([board] 2026-11-15).
+  R7+R8), the captures that hit an ADC rail since the previous line (up to about 100 a line
+  per LO at 508 rotations a second, [board] B1). A saturated capture flags both of its
+  readings, so this is what the detector sees. A 25 mW VTX clips within about 30 cm of the
+  onboard antenna at gain 40 ([board] 2026-11-15).
+- `held=` counts, per channel R1 to R8, the readings the pair guard held since the previous
+  line ([detector.md](detector.md#pair-ghost-guard)): only the weaker channel of a clipping
+  LO, never the strong one.
 - **If the levels stay flat with a strong VTX**, report it: the first suspect is the Wi-Fi
   promiscuous filter (`CONFIG_SDR_RX_PROMISC_FILTER_ALL=y`, bench B0).
 - Stop the trace (`K` `l`) before the quality measurements.
@@ -139,7 +144,9 @@ SDRBENCH done
 The timings are min/median/max. Per hop: `tune_us` tunes the next LO, `cap_us` is the
 capture with what is left of its settle wait, `wait_us` that wait alone (the DSP hides the
 100 µs settle), `dsp_us` the PSD and the two band levels; `detector_us` is the detector per
-reading. `rot_us` leaves out the rotations that contain the scan task's tick of yield
+reading: the time to feed a hop (the pair guard, then its two readings) over its readings, as
+production feeds it since the guard (before it, each reading was timed alone: 11 µs median,
+[board] B1). `rot_us` leaves out the rotations that contain the scan task's tick of yield
 (`yields=`); `per_channel_hz_x10` is the refresh per channel × 10 from its median.
 
 ### `K` `z`: settle after a hop off a strong LO (B2)
@@ -308,7 +315,7 @@ when a gate needs to know more precisely where and when a drone passed:
 Too much attenuation misses a drone passing high or far from the antenna, and every pilot
 must fly the same power (25 mW and 600 mW are 14 dB apart).
 
-## 7. First bench (B0 to B10) and results
+## 7. First bench (B0 to B11) and results
 
 Setup: the detector on USB, logged (`python tools/flash.py PORT --monitor-only --log
 run.log`); a 25 mW VTX on a known channel at 0.9 m; the onboard antenna. Before B0, run
@@ -426,6 +433,45 @@ decide from them whether the IPEX lead needs a fixed attenuator (a PI pad, see
 - If the download key fails: report it; the suspect is the engine's quiesce before the
   restart.
 
+**B11, pair ghost guard.** The guard ([detector.md](detector.md#pair-ghost-guard)) keys on
+the saturated flag only, and its constants come from a host model: these steps show
+whether the board behaves as the model assumes. A 25 mW VTX on R6 (25 mW at a distance d
+clips like 600 mW at 4.9 d); the production build, from a `tools/fw.sh clean` tree (the
+boot prints `pair_guard=1`), logged (`flash.py --log`). In this order:
+
+1. **B-g4, link anchor.** R6 held still at 3.0, 1.0, 0.5, 0.3, 0.2, 0.15, 0.10 and
+   0.06 m, `K` `p` three times at each; note R6's and R5's `pairs_qdb`. The host model
+   expects about −78 qdb at 0.9 m (its 40 dB anchor) and the first clipped captures from
+   0.175 m.
+2. **B-g2, compression before the rails.** Store a floor first (every VTX off, `K` `x`).
+   Then the same steps from 0.3 to 0.06 m: at each, `K` `l` for a few lines (R5's rise,
+   `sat=`), then `K` `x` on R6 (`irr_on_db`, `partner_on_qdb`), until it refuses `clipped`.
+   If R5 rises 3 dB or more while `sat=`'s third field (LO 5825) still reads 0, the
+   receiver compresses before the rails: the guard misses that, report it.
+3. **B-g1, the flag.** `K` `l` on: 10 swipes at 6 cm, 10 passes at 1 m/s at 6 cm, 10 at
+   15 cm. Pass: every rise of R5 comes with saturated captures on LO 5825 (`sat=`), R5's
+   `held=` count rises, no R5 `PASS`, and 30 R6 `PASS` lines of 30.
+4. **B-g3, recording.** `K` `S`: 3 swipes and 3 hand-speed passes at 6 cm, a 5 s hold at
+   6 cm, 3 passes at 30 cm; stop within 60 s; `python3 tools/scan_analyze.py run.log`.
+   Note each pass's `saturated` share: R5's rises should sit in rows where 5+6 clipped.
+5. **B-g5, a real partner.** A second VTX on R5 held still at 0.6 m while R6 swipes at
+   6 cm: R5 must not `PASS`, and its rise comes back within about 100 ms of the last
+   saturated capture. Then move both together, 10 times. Compare the `PASS` count and
+   `peak_ms` with a guard-off build, made like B0's control: `CONFIG_CHECKPOINT_PAIR_GUARD=n`
+   in `/tmp/guard0.defaults`, `( cd firmware/detector && idf.py -B build-guard0
+   -DSDKCONFIG=sdkconfig.guard0 "-DSDKCONFIG_DEFAULTS=sdkconfig.defaults;/tmp/guard0.defaults"
+   build )`, `python tools/flash.py PORT --build firmware/detector/build-guard0` (its boot
+   prints `pair_guard=0`). Afterwards reflash the normal build and delete
+   `firmware/detector/build-guard0` and `firmware/detector/sdkconfig.guard0`.
+6. **B-g6, other LOs.** R6 held at 6 cm, `K` `p` during the hold. A rise over 3 dB on R7,
+   R8 or R1–R4 is a leak the guard does not cover (`K` `S` recordings already show +4 to
+   +7 dB at most on the other LOs with R6 at the ceiling, [board] 2026-11-15).
+7. **B-g7, hover.** R6 held 10 s at 6 cm while R5 passes at 1 m every 3 s. Expect no R5
+   lap, no phantom, and R5 *unknown* in `STATS` (the C3's page) during the hold.
+
+- Retune the constants (`SD_HOLD_*` in `scan_detector.h`) from these numbers, not from the
+  host model. Missed rises (B-g2) or leaks (B-g6) need another guard: report them.
+
 | Step | Date | Board, firmware id | Result | Numbers |
 | --- | --- | --- | --- | --- |
 | B0 boot | 2026-11-15 | C5-Zero, onboard antenna, `5.0.0-dev+34259ce5b8b7` | Partial: `heap_min`, the four `*_stack_free` and the 10 min run not done yet | `boot_ms` 982–1034, `faults=0`; `irr_db` 31.5/28.7/27.7/34.9 and 31.8/26.5/30.7/31.7 (two boots), `tries` up to 3 (the threshold was 30 then, 25 since) |
@@ -440,6 +486,7 @@ decide from them whether the IPEX lead needs a fixed attenuator (a PI pad, see
 | B8 XIAO | | | | |
 | B9 IPEX | | | TODO, deferred (see B9) | |
 | B10 link | | | | badge times, download key 5/5 |
+| B11 pair guard | | | | B-g4 R6/R5 `pairs_qdb` per distance; B-g2 R5's rise before the first saturated capture; B-g1 R5 `PASS`/30, R6 `PASS`/30; B-g3 saturated share per pass; B-g5 `PASS` counts and `peak_ms`, guard on/off; B-g6 worst rise on the other LOs; B-g7 R5 laps, phantoms |
 
 B6 (c), far drones (`peak_db` of each pass, `—` if none rang):
 

@@ -170,7 +170,7 @@ static int hop_of(const sdr_plan_t *p, unsigned ch, unsigned *j)
 }
 
 /* Production steps up to the next rotation end, its readings in o. t (K s): the per-hop
- * timings and, with feed, each reading's sd_feed time; feed: the readings also go to that
+ * timings and, with feed, the detector's time per reading; feed: the readings also go to that
  * detector, as in production. False when no rotation ended within ROT_STEPS_MAX steps. A yield
  * before a step falls in this rotation. */
 static bool next_rotation(cp_yield_t *y, rotation_t *o, hs_hist_t *t, scan_detector_t *feed)
@@ -192,15 +192,15 @@ static bool next_rotation(cp_yield_t *y, rotation_t *o, hs_hist_t *t, scan_detec
         }
         /* One flag per capture, on both of its readings. */
         if (h.n && (h.r[0].flags & SDR_RD_SATURATED) && h.hop < SDR_RX_MAX_HOPS) o->sat_hops |= (uint8_t)(1u << h.hop);
-        for (unsigned i = 0; i < h.n; i++) {
-            if (feed) {
-                pd_event_t e;
-                const int64_t t0 = esp_timer_get_time();
-                (void)sd_feed(feed, h.r[i].channel, h.r[i].level_qdb, h.r[i].flags, h.r[i].t_us, &e);
-                if (t) hs_hist_add(&t[T_DETECTOR], (uint32_t)(esp_timer_get_time() - t0));
-            }
-            if (o->n < ROT_READINGS) o->r[o->n++] = h.r[i];
+        if (feed && h.n) {                         /* as production feeds it; the time per reading */
+            pd_event_t ev[SDR_RX_PER_HOP];
+            unsigned held;
+            const int64_t t0 = esp_timer_get_time();
+            (void)cp_feed_hop(feed, &h, ev, &held);
+            if (t) hs_hist_add(&t[T_DETECTOR], (uint32_t)((esp_timer_get_time() - t0) / h.n));
         }
+        for (unsigned i = 0; i < h.n; i++)
+            if (o->n < ROT_READINGS) o->r[o->n++] = h.r[i];
         if (h.rotation_end) {
             if (feed) sd_rotation(feed, esp_timer_get_time());
             return true;

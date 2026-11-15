@@ -5,6 +5,8 @@
 
 #define QDB_PER_DB 4.0f   /* level codes per dB (= SDR_QDB_PER_DB) */
 
+_Static_assert(PD_CHANNELS <= 8u, "held_mask and fresh_mask are 8 bits");
+
 pd_config_t sd_config_default(void)
 {
     return (pd_config_t){.alpha = 0.25f, .active_db = 8.0f, .hysteresis_db = 3.0f, .drop_db = 3.0f,
@@ -38,6 +40,10 @@ void sd_relearn(scan_detector_t *sd)
     pd_reset_all(&sd->det);
     sd->cap_db = INFINITY;
     sd->learn_end_us = 0;
+    memset(sd->sat_run_us, 0, sizeof(sd->sat_run_us));
+    memset(sd->sat_last_us, 0, sizeof(sd->sat_last_us));
+    sd->held_mask = 0;
+    sd->fresh_mask = 0;
 }
 
 static int16_t median3(int16_t a, int16_t b, int16_t c)
@@ -122,6 +128,83 @@ bool sd_feed(scan_detector_t *sd, unsigned channel, int16_t level_qdb, uint8_t f
     if (!(flags & SD_FLAG_SATURATED)) learn_rest(sd, channel, dt, learning);
     if (learning || !c->rest_primed) return false;   /* nothing rings while the rests settle */
     return pd_update_w(&sd->det, channel, c->smooth_db - c->rest_db, 1.0f, (uint32_t)(t_us / 1000), event);
+}
+
+/* Whether the guard treats this capture of `hop` as saturated: its own flag, or a clean capture
+ * within SD_HOLD_TAIL_US of the last saturated one of a run that has lasted SD_HOLD_HOVER_US (a
+ * drone hovering by the gate fades in and out of the rails; feeding the partner only in the fades'
+ * gaps would sample it in bursts). Records the run. */
+static bool hop_saturated(scan_detector_t *sd, unsigned hop, bool sat, int64_t t_us)
+{
+    if (hop >= SD_HOPS_MAX) return sat;
+    int64_t *run = &sd->sat_run_us[hop], *last = &sd->sat_last_us[hop];
+    if (sat) {
+        if (!*last || t_us - *last > SD_HOLD_TAIL_US) *run = t_us;   /* a new run */
+        *last = t_us;
+        return true;
+    }
+    return *last && t_us - *last <= SD_HOLD_TAIL_US && *last - *run >= SD_HOLD_HOVER_US;
+}
+
+/* A held channel fed again: its median restarts on fresh readings, a real pass under way catches
+ * up once it is full (sd_feed_hop), and a long hold resumes in COOLDOWN. */
+static void resume(scan_detector_t *sd, unsigned ch, int64_t t_us)
+{
+    sd_channel_t *c = &sd->c[ch];
+    const uint8_t bit = (uint8_t)(1u << ch);
+    sd->held_mask &= (uint8_t)~bit;
+    c->nhist = 0;
+    c->hidx = 0;
+    if (sd->held_rise_db[ch] >= sd->det.cfg.min_peak_db) sd->fresh_mask |= bit;
+    if (t_us - sd->held_since_us[ch] > SD_HOLD_LONG_US) {
+        pd_channel_t *pc = &sd->det.ch[ch];   /* go_stale keeps a COOLDOWN */
+        pc->state = PD_COOLDOWN;
+        pc->cooldown_until_ms = (uint32_t)(t_us / 1000);
+    }
+}
+
+unsigned sd_feed_hop(scan_detector_t *sd, unsigned hop, const sd_reading_t *r, unsigned n, pd_event_t *ev,
+                     unsigned *held)
+{
+    unsigned rang = 0, hold = 0;
+    if (n > SD_HOP_READINGS) n = SD_HOP_READINGS;
+    const bool sat = n && (r[0].flags & SD_FLAG_SATURATED);   /* one flag per capture */
+    if (n == 2u && r[0].channel < PD_CHANNELS && r[1].channel < PD_CHANNELS && r[0].channel != r[1].channel &&
+        hop_saturated(sd, hop, sat, r[0].t_us)) {
+        const sd_channel_t *a = &sd->c[r[0].channel], *b = &sd->c[r[1].channel];
+        if (a->primed && b->primed) {                          /* the smoothed levels, not these readings */
+            if (a->smooth_db < b->smooth_db - SD_HOLD_DOM_DB) hold = 1u;
+            else if (b->smooth_db < a->smooth_db - SD_HOLD_DOM_DB) hold = 2u;
+        }
+    }
+    for (unsigned i = 0; i < n; i++) {
+        const unsigned ch = r[i].channel;
+        if (ch >= PD_CHANNELS || r[i].level_qdb == SD_LEVEL_NONE) continue;   /* sd_feed ignores these too */
+        const uint8_t bit = (uint8_t)(1u << ch);
+        if (hold & (1u << i)) {
+            if (!(sd->held_mask & bit)) {
+                sd->held_since_us[ch] = r[i].t_us;
+                sd->held_rise_db[ch] = sd->det.ch[ch].primed ? sd->det.ch[ch].smooth : 0.0f;
+            }
+            sd->held_mask |= bit;
+            sd->held[ch]++;
+            continue;
+        }
+        if (sd->held_mask & bit) resume(sd, ch, r[i].t_us);
+        sd_channel_t *c = &sd->c[ch];
+        if ((sd->fresh_mask & bit) && c->nhist == 2u) {          /* this reading fills the fresh median */
+            sd->fresh_mask &= (uint8_t)~bit;
+            const float up = (float)median3(c->hist[0], c->hist[1], r[i].level_qdb) / QDB_PER_DB - sd->det.cfg.drop_db;
+            if (c->primed && up > c->smooth_db) c->smooth_db = up;
+        }
+        pd_event_t e;
+        if (sd_feed(sd, ch, r[i].level_qdb, r[i].flags, r[i].t_us, &e)) {
+            if (ev) ev[i] = e;
+            rang |= 1u << i;
+        }
+    }
+    if (held) *held = hold;
+    return rang;
 }
 
 void sd_rotation(scan_detector_t *sd, int64_t t_us)
