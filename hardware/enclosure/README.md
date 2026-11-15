@@ -28,9 +28,13 @@ The design has two configurations, `master` and `node`. They differ in:
 The box keeps the same width for both. A narrower node box would put the cut-off against the
 lid columns and the XT60.
 
+The standoffs of plates 1 and 2 are dimensioned in their `standoffs` sketch from an outline of
+the module (construction lines driven by its size and position). The insert holes are centred on
+those standoffs, projected into the `inserts` sketch, so they follow them.
+
 After a change, activate each configuration and export its printed bodies again, with "lay on
-print faces": their print faces are set in the design. The envelopes of the modules, the
-antenna and its SMA jack are references, not parts.
+print faces": their print faces are set in the design. The envelopes of the modules and of the
+XT60E-M (from its STEP model), the antenna and its SMA jack are references, not parts.
 
 ## Layout
 
@@ -46,9 +50,12 @@ the lid (103.3 mm deep for a node), without the arm.
 - **Walls:**
   - front: a recess brings the window to 1 mm from the display, and two printed pushers
     reach the cut-off's buttons;
-  - left: the XT60E-M for the LiPo;
+  - left: the XT60E-M for the LiPo, its flange inside against the wall and its nose 0.55 mm
+    out. Its solder cups end 2.9 mm from the cut-off: bend the wires right away;
   - right: the SMA bulkhead under the carrier, and the dial of the antenna arm;
-  - back, master only: the speaker in its frame (28 × 31 mm, 15 mm deep), behind a grille.
+  - back, master only: the speaker (28 × 31 mm, 15 mm deep) behind a grille. Its front 6 mm
+    sit in a frame, cable out at the top, and its two ears rest on the frame's edge and screw
+    into M2 inserts on two pillars rising from the floor.
 - **Vents:** grilles low and high, on both sides of the DC-DC and carrier compartments.
 - **Lid:** 4 M3 screws into inserts; it also holds the plates down.
 
@@ -74,9 +81,11 @@ in its 4.2 mm holes (`insert_d`).
 
 ## Assembly
 
-1. Set the heat-set inserts (16 M3x5x5, 1 M3x6x5 in the dial post).
+1. Set the heat-set inserts (16 M3x5x5, 1 M3x6x5 in the dial post, and on a master 2 M2x4x3.2
+   for the speaker).
 2. Screw the dial post on from inside the box (2 M3 x 8), before plate 1 goes in.
-3. Fit the XT60E-M (2 M2.5 screws and nuts), the SMA bulkhead and, on a master, the speaker.
+3. Fit the XT60E-M from inside (2 M2.5 x 10 screws and nuts), the SMA bulkhead and, on a
+   master, the speaker (2 M2 x 6).
 4. Screw each module on its plate. Put the two pushers in their holes, then slide plate 1 in,
    then plates 2 and 3.
 5. Wire through the plate notches, then screw the lid on (4 M3 x 8).
@@ -94,5 +103,3 @@ Measure these on the real parts and change the parameter if it differs:
 | `disp_t`, `btn_t` | 8, 5 mm | assumed: height of the cut-off's display and buttons above its board |
 | `disp_x0`, `disp_z0`, `disp_w`, `disp_h`, `btn1_x`, `btn2_x`, `btn_z` | from a photo | cut-off display and buttons, about 1 mm |
 | `relay_z0` | 25.9 mm | from a photo: the relay slides past the recess, `relay_clear` must stay above 0 |
-| XT60E-M flange | not drawn | its size, to check it misses the lid column and plate 1's rail |
-| `cutoff_hole_d`, `dcdc_hole_d` | 3 mm | assumed mounting holes of the cut-off and DC-DC |
