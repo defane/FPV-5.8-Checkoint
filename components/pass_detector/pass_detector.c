@@ -70,6 +70,24 @@ void pd_expire(pass_detector_t *d, uint32_t now_ms)
         if (stale(d, &d->ch[k], now_ms)) go_stale(&d->ch[k]);
 }
 
+void pd_resume(pass_detector_t *d, unsigned channel, float level_db, uint32_t now_ms)
+{
+    if (channel >= PD_CHANNELS || level_db != level_db) return;
+    pd_channel_t *c = &d->ch[channel];
+    memset(c, 0, sizeof(*c));
+    c->primed = true;
+    c->smooth = c->slow = level_db;
+    c->last_ms = now_ms;
+    if (level_db < d->cfg.active_db - d->cfg.hysteresis_db) return;   /* armed */
+    if (d->rearm_db > 0.0f) {
+        c->rel = true;
+        c->trough = level_db;
+    } else {
+        c->state = PD_COOLDOWN;
+        c->cooldown_until_ms = now_ms;
+    }
+}
+
 bool pd_update(pass_detector_t *d, unsigned channel, float level_db, uint32_t now_ms, pd_event_t *event)
 {
     return pd_update_w(d, channel, level_db, d->cfg.alpha, now_ms, event);

@@ -110,8 +110,14 @@ under the strong channel, a few % of captures above it ([host]).
 - When a held channel is fed again, its median restarts on fresh readings. If it stood
   `min_peak_db` up when the hold began (a real pass under way), its average catches up
   to the fresh median less `drop_db`, upwards only, so a catch-up never rings by itself.
-  After a hold over `SD_HOLD_LONG_US` (0.5 s) it resumes in `COOLDOWN`: what follows is the
-  tail of what it could not see.
+  After a hold over `SD_HOLD_LONG_US` (0.5 s) what it did while blind is unknown, so once
+  its fresh median is full its average and its state start again from that median,
+  whatever the hold's length (`pd_resume()`): armed under the release; over it, relatively
+  armed with that level as its trough (with the re-arm off, in `COOLDOWN` until it falls
+  under the release). The tail of a pass it missed never rises the re-arm's 16 dB over the
+  level it came back at, so it rings nothing; its next pass does ([host] check 28). A pass
+  that began to rise while the channel was blind must still rise 16 dB over the level it
+  comes back at, or it is lost with the blind window.
 - A capture without the flag (outside a hover's tail) goes through exactly as before: the
   same passes to the bit ([host] `test_scan_detector.c` check 22).
 - A held reading counts as none: a channel held for 1 s reads *unknown* on the bridges
@@ -203,8 +209,12 @@ than 6 dB over the other channels' median.
   release between laps, the passes are the same to the bit ([host] tests and the
   simulation below).
 - **The rest.** A relatively re-armed channel is not quiet: its rest does not climb.
-- **The pair guard.** A hold over `SD_HOLD_LONG_US` resumes in COOLDOWN with the reference
-  at the level the channel resumes at, not at a peak from before it was blind.
+- **The pair guard.** A channel back from a hold over `SD_HOLD_LONG_US` is relatively
+  armed at the level it comes back at (armed as usual under the release), for any hold
+  length (`pd_resume()`). Forced into
+  COOLDOWN with the level from before the hold as its reference, a channel that stays up
+  between laps lost its next lap after any hold over 0.5 s: in check 28, the 17 s lap in
+  20 runs of 20, and in a run whose hold covered a lap, the lap after it too ([host]).
 
 D is a build option, not a console key: it is not saved in NVS and not on the link
 (link_proto v3), so the bridges' pages do not show it. The boot line (`SDR ready …

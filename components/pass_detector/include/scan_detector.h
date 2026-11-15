@@ -27,8 +27,8 @@
  * reading (over twice the usual interval) weighs in the average as one on time.
  *
  * Relative re-arm (pd_set_rearm(&sd->det, drop), pass_detector.h; off after sd_init): a channel
- * re-armed by it is not quiet, so its rest does not climb, and a long hold of the pair guard
- * restarts its reference from the level it resumes at.
+ * re-armed by it is not quiet, so its rest does not climb, and a channel back from a long hold of
+ * the pair guard is relatively armed at the level it comes back at (pd_resume).
  *
  * Pair guard (sd_feed_hop, the readings of one capture). In PAIRS mode one capture carries two
  * channels 37 MHz apart, each in the other's image window. While a strong channel drives the ADC
@@ -49,8 +49,12 @@
  * there both rules hold the same channel. When a held channel is fed again, its median
  * restarts on fresh readings; if it stood min_peak_db up as its hold began (a real pass under way),
  * its average catches up to the fresh median less drop_db (never down, so a catch-up never rings by
- * itself); after a hold longer than SD_HOLD_LONG_US it resumes in COOLDOWN (what follows is the tail
- * of whatever happened while it was blind). Unsaturated captures go through exactly as sd_feed. */
+ * itself). After a hold longer than SD_HOLD_LONG_US, what it did while blind is unknown: once its
+ * median is full, its average and pd start again from that median, whatever the hold's length
+ * (pd_resume: armed under the release; over it relatively armed with that level as its trough, or
+ * in COOLDOWN with the re-arm off). The tail of a pass it missed never rises the re-arm's drop over
+ * the level it came back at, so it rings nothing; its next pass does. Unsaturated captures go
+ * through exactly as sd_feed. */
 #pragma once
 #include "pass_detector.h"
 #include <stdbool.h>
@@ -75,7 +79,7 @@ extern "C" {
 #define SD_HOLD_JUMP_DB   20.0f       /* a channel's last 3 readings this far over its average: it jumped */
 #define SD_HOLD_TAIL_US   30000       /* a saturated run: saturated captures this close; a hover's tail */
 #define SD_HOLD_HOVER_US  150000      /* a run this long is a hover (a pass clips ~80 ms at 0.3 m) */
-#define SD_HOLD_LONG_US   500000      /* a longer hold resumes in COOLDOWN */
+#define SD_HOLD_LONG_US   500000      /* after a longer hold the channel starts again (pd_resume) */
 
 /* One reading of a capture (the fields of sdr_reading_t). */
 typedef struct {
@@ -114,6 +118,7 @@ typedef struct {
     float held_rise_db[PD_CHANNELS];  /* pd's smoothed rise as the hold began */
     uint8_t held_mask;                /* channels whose last reading was held */
     uint8_t fresh_mask;               /* channels catching up once their median is full again */
+    uint8_t long_mask;                /* channels back from a long hold, restarting once it is full */
     uint32_t held[PD_CHANNELS];       /* per channel, readings held since sd_init (diagnostics) */
 } scan_detector_t;
 

@@ -373,6 +373,41 @@ int main(void)
     check("re-arm 16: after a stale gap in COOLDOWN, the reference restarts from the level it comes back at",
           r.ch[0].state == PD_COOLDOWN && !r.ch[0].rel && r.ch[0].peak > 29.0f && r.ch[0].peak < 31.0f);
 
+    /* pd_resume (the pair guard's long hold): the channel starts again at the level it comes back
+     * at, whatever it was before. A pass rang at 3 s and the drone stays 30 dB up; blind from 4 to
+     * 6 s, it comes back at 30: relatively armed there, a 4 dB wobble rings nothing, a +20 dB pass
+     * does. Under the release it is armed; with the re-arm off it waits in COOLDOWN as before. */
+    {
+        (void)run_trace(plateau_laps, 4.0f, 16.0f, 0.5f, 3u, &r);
+        const bool was_cooling = r.ch[0].state == PD_COOLDOWN && r.ch[0].peak > 49.0f;
+        pd_resume(&r, 0u, 30.0f, 6000u);
+        const pd_channel_t c0 = r.ch[0];
+        unsigned n = 0, rel = 0;
+        for (uint32_t t = 6000u; t <= 12000u; t += TICK_MS) {
+            const float x = (float)t / 1000.0f;
+            const float db = 30.0f + 2.0f * sinf(6.2831853f * x / 0.8f) + tri(x, 10.0f, 20.0f, 0.6f);
+            pd_event_t ev;
+            if (pd_update_w(&r, 0u, db, 1.0f, t, &ev)) { n++; rel += ev.rel && near_ms(ev.peak_ms, 10000u, 100u); }
+        }
+        check("pd_resume over the release: relatively armed, trough and smoothing at the level it comes back at",
+              was_cooling && c0.state == PD_IDLE && c0.rel && c0.primed && c0.trough == 30.0f && c0.smooth == 30.0f &&
+                  c0.slow == 30.0f && c0.last_ms == 6000u);
+        check("pd_resume: a 4 dB wobble at that level rings nothing, the next +20 dB pass rings (rel)", n == 1u && rel == 1u);
+        pd_resume(&r, 0u, 8.0f, 13000u);
+        check("pd_resume under the release: armed (IDLE, not relative)", r.ch[0].state == PD_IDLE && !r.ch[0].rel);
+        const pd_channel_t keep = r.ch[0];
+        pd_resume(&r, 0u, NAN, 13050u);
+        pd_resume(&r, PD_CHANNELS, 30.0f, 13050u);
+        check("pd_resume: a NaN level or a bad channel changes nothing", !memcmp(&keep, &r.ch[0], sizeof(keep)));
+        pass_detector_t off;
+        pd_init(&off, &cfg);
+        pd_resume(&off, 0u, 30.0f, 1000u);
+        bool held = off.ch[0].state == PD_COOLDOWN && off.ch[0].cooldown_until_ms == 1000u;
+        for (uint32_t t = 1000u; t <= 6000u; t += TICK_MS) held &= !pd_update_w(&off, 0u, 30.0f, 1.0f, t, NULL) && off.ch[0].state == PD_COOLDOWN;
+        (void)pd_update_w(&off, 0u, 5.0f, 1.0f, 6050u, NULL);
+        check("pd_resume, re-arm off: COOLDOWN until under the release, as before", held && off.ch[0].state == PD_IDLE);
+    }
+
     printf("%u/%u pass detector checks passed\n", s_run - s_fail, s_run);
     return s_fail != 0;
 }

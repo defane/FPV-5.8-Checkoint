@@ -477,11 +477,13 @@ boot prints `pair_guard=1`), logged (`flash.py --log`). In this order:
    +7 dB at most on the other LOs with R6 at the ceiling, [board] 2026-11-15).
 7. **B-g7, hover.** R6 held 10 s at 6 cm while R5 passes at 1 m every 3 s. Expect no R5
    lap, no phantom, and R5 *unknown* in `STATS` (the C3's page) during the hold.
-8. **B-g8, a step into the rails.** R5's VTX held still at 1 m (about 25 dB up), then R6's
-   VTX switched on (battery plugged in, or out of pit mode) with the drone held at 6 cm,
-   for about 0.3 s and for about 2 s, 5 times each, `K` `l` on. Expect no R5 `PASS`, R6's
-   `held=` a few readings per onset at most, R5's `held=` rising, and one R6 `PASS` per
-   onset. Then the same with R5 off.
+8. **B-g8, a step into the rails.** R5's VTX held still at 3 m (about 30 dB up, [board]
+   2026-11-15), then R6's VTX switched on (battery plugged in, or out of pit mode) with
+   the drone held at 6 cm, for about 0.3 s and for about 2 s, 5 times each, `K` `l` on.
+   Expect no R5 `PASS`, R6's `held=` a few readings per onset at most, R5's `held=`
+   rising, and one R6 `PASS` per onset. After each 2 s onset, R5 brought to 0.3 m and back
+   (about 20 dB more) rings one `PASS … rearm=rel` (the long hold restarts R5 at its level,
+   relatively armed). Then the same with R5 off.
 
 - Retune the constants (`SD_HOLD_*` in `scan_detector.h`) from these numbers, not from the
   host model. Missed rises (B-g2) or leaks (B-g6) need another guard: report them.

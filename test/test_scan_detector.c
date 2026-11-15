@@ -935,59 +935,56 @@ int main(void)
         s_rearm_db = 0.0f;
     }
 
-    /* 28. The pair guard's long hold and the relative re-arm. R5 passes close (45 dB up at 4.5 s) and
-     *     stays 25 dB up, so it re-arms relatively; then a 600 mW R6 parks clipping beside the gate
-     *     for 0.8 s (over SD_HOLD_LONG_US, under stale_ms) and holds it. R5 resumes in COOLDOWN with
-     *     its reference at the level it resumes at: it does not re-arm at once on the old peak
-     *     (COOLDOWN 4 s later, no R5 pass). Then 25 again with the re-arm on: no R5 lap. */
+    /* 28. The pair guard's long hold and the relative re-arm. R5 laps (5, 11, 17, 23 s) 25 dB up
+     *     between laps, so it re-arms relatively; a 600 mW R6 flown in parks clipping beside the gate
+     *     from 13.5 s for 0.6-2.5 s (over SD_HOLD_LONG_US, under and over stale_ms) and holds it, and
+     *     R5 stands 15 dB up after it. Once its fresh median is full, R5 starts again from it, whatever
+     *     the hold's length: relatively armed, its trough the level it came back at (15 dB, not the
+     *     25 before), so it rings its next lap at 17 s and every other one, and nothing else. Forced
+     *     into COOLDOWN with the level from before the hold as the reference (c8f0256), it lost that
+     *     lap in all 20 runs. The tail of a lap it missed (the 17 s one inside a 3.6 s hold) rings
+     *     nothing: it never rises 16 dB over the level R5 came back at; R5 rings its 23 s lap (lost
+     *     too before). The same after a step onset; with the re-arm off, R5 waits in COOLDOWN as
+     *     before (only its first lap rings, at 25 dB between laps). */
     {
-        static scan_detector_t sd;
-        unsigned ok = 0, armed = 0, rang = 0;
-        for (uint64_t k = 0; k < 5u; k++) {
-            bool probed = false;
-            const pd_config_t c = sd_config_default();
-            sd_init(&sd, &c);
-            pd_set_rearm(&sd.det, 16.0f);
-            seed(880 + k);
-            for (int64_t t = T0_US; t < T0_US + S(13.0); t += RATE_A_US) {
-                for (unsigned hop = 0; hop < 4u; hop++) {
-                    const int64_t th = t + (int64_t)hop * RATE_A_US / 4;
-                    const double ts = (double)(th - T0_US) * 1e-6;
-                    double ra = PAIR_FLOOR + gauss(1.2f), rb = PAIR_FLOOR + gauss(1.2f);
-                    uint8_t fl = 0;
-                    if (hop == PAIR_HOP && ts >= 4.0) {
-                        const double x = (ts - 4.5) / 0.15;
-                        ra = psum(ra, PAIR_FLOOR + 25.0 + 20.0 * exp(-0.5 * x * x) + gauss(1.0f));
-                        /* R6 flies in over 0.5 s, clips 8-8.8 s (R5 reads its products: held), flies off */
-                        const double in = ts < 8.0 ? 8.0 - ts : ts > 8.8 ? ts - 8.8 : 0.0;
-                        if (in == 0.0) {
-                            fl = SD_FLAG_SATURATED;
-                            rb = PAIR_CLIP_DBFS + 5.0 + gauss(0.3f);
-                            ra = psum(ra, rb + clip_x());
-                        } else if (in < 0.5) {
-                            rb = psum(rb, PAIR_CLIP_DBFS - 1.0 - 60.0 * in + gauss(1.0f));
-                        }
-                    }
-                    if (hop == PAIR_HOP && ts >= 7.9 && !probed) {   /* before R6 comes in */
-                        probed = true;
-                        armed += sd.det.ch[PAIR_LO].state == PD_IDLE && sd.det.ch[PAIR_LO].rel;
-                    }
-                    const sd_reading_t rd[2] = {{th, qdb((float)ra), (uint8_t)(2u * hop), fl},
-                                                {th, qdb((float)rb), (uint8_t)(2u * hop + 1u), fl}};
-                    pd_event_t ev[2];
-                    const unsigned got = sd_feed_hop(&sd, hop, rd, 2, ev, NULL);
-                    if ((got & 1u) && hop == PAIR_HOP && ts > 5.0) rang++;
-                }
-                sd_rotation(&sd, t + 3 * RATE_A_US / 4);
+        static const double clips[4] = {0.6, 0.8, 1.5, 2.5};
+        unsigned runs = 0, ref_ok = 0, laps_ok = 0, tail_ok = 0, step_ok = 0, off_ok = 0;
+        float lo = 1e9f, hi = -1e9f;
+        for (unsigned c = 0; c < 4u; c++)
+            for (uint64_t k = 0; k < 5u; k++) {
+                const step_t p = {.base = 25.0, .after = 15.0, .clip_s = clips[c], .ramp = 1, .rearm = 16.0f};
+                step_out_t o;
+                step_run(&p, 880 + 10u * c + k, &o);
+                runs++;
+                const float tr = o.probe.trough;
+                ref_ok += o.probe.state == PD_IDLE && o.probe.rel && fabsf(tr - 15.0f) < 2.0f && o.held > 250u;
+                laps_ok += step_laps(&o) == 0xFu;
+                lo = fminf(lo, tr);
+                hi = fmaxf(hi, tr);
             }
-            ok += sd.det.ch[PAIR_LO].state == PD_COOLDOWN && !sd.det.ch[PAIR_LO].rel && sd.held[PAIR_LO] > 300u;
+        for (uint64_t k = 0; k < 5u; k++) {
+            step_out_t o;
+            const step_t tail = {.base = 25.0, .after = 15.0, .clip_s = 3.6, .ramp = 1, .rearm = 16.0f};
+            step_run(&tail, 920 + k, &o);
+            tail_ok += step_laps(&o) == 0xBu;   /* 5, 11 and 23 s */
+            const step_t step = {.base = 25.0, .after = 15.0, .clip_s = 2.0, .rearm = 16.0f};
+            step_run(&step, 930 + k, &o);
+            step_ok += step_laps(&o) == 0xFu && o.n_src == 1u;
+            const step_t off = {.base = 25.0, .after = 15.0, .clip_s = 0.8, .ramp = 1, .rearm = 0.0f};
+            step_run(&off, 940 + k, &o);
+            off_ok += step_laps(&o) == 0x1u && o.probe.state == PD_COOLDOWN;
         }
-        CHECK(armed == 5 && ok == 5 && rang == 0,
-              "after a long hold the reference restarts from the level R5 resumes at: no re-arm on the old peak");
+        printf("     long hold, R5 25 dB up then 15: trough %.1f-%.1f dB after it, all laps in %u/%u; a missed lap's tail "
+               "silent %u/5; step onset %u/5; re-arm off %u/5\n", (double)lo, (double)hi, laps_ok, runs, tail_ok, step_ok, off_ok);
+        CHECK(ref_ok == runs, "after a long hold of any length R5 is relatively armed at the level it comes back at");
+        CHECK(laps_ok == runs && step_ok == 5u, "and rings its next lap and every other one, nothing else (flown in or a step)");
+        CHECK(tail_ok == 5u, "the tail of a lap missed during the hold rings nothing");
+        CHECK(off_ok == 5u, "with the re-arm off it waits in COOLDOWN, as before");
+        static scan_detector_t sd;
         s_rearm_db = 16.0f;
         const pdrone_t r6 = {.mw = 600, .hover_d_m = 0.5, .hover_t0_s = 0.5, .hover_t1_s = 10.5};
         const pdrone_t r5 = {.mw = 25, .d_m = 1.0, .t0_s = 1.0, .laps = 4, .lap_s = 3.0};
-        rang = 0;
+        unsigned rang = 0;
         for (uint64_t k = 0; k < 5u; k++) {
             pair_out_t gd;
             pair_run(&r6, &r5, 1, 600 + k, 12.0, &gd, &sd);

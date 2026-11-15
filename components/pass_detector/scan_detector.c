@@ -47,6 +47,7 @@ void sd_relearn(scan_detector_t *sd)
     memset(sd->raw_i, 0, sizeof(sd->raw_i));
     sd->held_mask = 0;
     sd->fresh_mask = 0;
+    sd->long_mask = 0;
 }
 
 static int16_t median3(int16_t a, int16_t b, int16_t c)
@@ -192,9 +193,8 @@ static unsigned pair_hold(scan_detector_t *sd, unsigned hop, unsigned ca, unsign
     return 0;
 }
 
-/* A held channel fed again: its median restarts on fresh readings, a real pass under way catches
- * up once it is full (sd_feed_hop), and a long hold resumes in COOLDOWN, the relative re-arm's
- * reference starting again from the level it resumes at (not from a peak before the hold). */
+/* A held channel fed again: its median restarts on fresh readings. Once it is full (sd_feed_hop),
+ * a real pass under way catches up, and a channel back from a long hold starts again from it. */
 static void resume(scan_detector_t *sd, unsigned ch, int64_t t_us)
 {
     sd_channel_t *c = &sd->c[ch];
@@ -202,14 +202,29 @@ static void resume(scan_detector_t *sd, unsigned ch, int64_t t_us)
     sd->held_mask &= (uint8_t)~bit;
     c->nhist = 0;
     c->hidx = 0;
-    if (sd->held_rise_db[ch] >= sd->det.cfg.min_peak_db) sd->fresh_mask |= bit;
-    if (t_us - sd->held_since_us[ch] > SD_HOLD_LONG_US) {
-        pd_channel_t *pc = &sd->det.ch[ch];   /* go_stale keeps a COOLDOWN */
-        pc->state = PD_COOLDOWN;
-        pc->cooldown_until_ms = (uint32_t)(t_us / 1000);
-        pc->peak = pc->smooth;
-        pc->rel = false;
+    if (t_us - sd->held_since_us[ch] > SD_HOLD_LONG_US) sd->long_mask |= bit;
+    else if (sd->held_rise_db[ch] >= sd->det.cfg.min_peak_db) sd->fresh_mask |= bit;
+}
+
+/* The reading that fills a resumed channel's fresh median (m, dB). Back from a long hold, the
+ * average and pd start again at m (pd_resume), whatever the hold's length: held readings never
+ * reach pd, which would otherwise keep its level from before the hold up to stale_ms and forget it
+ * past that. Else a pass under way catches up to m less drop_db, upwards only, so a catch-up never
+ * rings by itself. */
+static void refill(scan_detector_t *sd, unsigned ch, float m, int64_t t_us)
+{
+    sd_channel_t *c = &sd->c[ch];
+    const uint8_t bit = (uint8_t)(1u << ch);
+    if (sd->long_mask & bit) {
+        c->smooth_db = m;
+        c->primed = true;
+        if (c->rest_primed) pd_resume(&sd->det, ch, m - c->rest_db, (uint32_t)(t_us / 1000));
+    } else {
+        const float up = m - sd->det.cfg.drop_db;
+        if (c->primed && up > c->smooth_db) c->smooth_db = up;
     }
+    sd->long_mask &= (uint8_t)~bit;
+    sd->fresh_mask &= (uint8_t)~bit;
 }
 
 unsigned sd_feed_hop(scan_detector_t *sd, unsigned hop, const sd_reading_t *r, unsigned n, pd_event_t *ev,
@@ -243,11 +258,8 @@ unsigned sd_feed_hop(scan_detector_t *sd, unsigned hop, const sd_reading_t *r, u
         }
         if (sd->held_mask & bit) resume(sd, ch, r[i].t_us);
         sd_channel_t *c = &sd->c[ch];
-        if ((sd->fresh_mask & bit) && c->nhist == 2u) {          /* this reading fills the fresh median */
-            sd->fresh_mask &= (uint8_t)~bit;
-            const float up = (float)median3(c->hist[0], c->hist[1], r[i].level_qdb) / QDB_PER_DB - sd->det.cfg.drop_db;
-            if (c->primed && up > c->smooth_db) c->smooth_db = up;
-        }
+        if (((sd->fresh_mask | sd->long_mask) & bit) && c->nhist == 2u)   /* this reading fills the fresh median */
+            refill(sd, ch, (float)median3(c->hist[0], c->hist[1], r[i].level_qdb) / QDB_PER_DB, r[i].t_us);
         pd_event_t e;
         if (sd_feed(sd, ch, r[i].level_qdb, r[i].flags, r[i].t_us, &e)) {
             if (ev) ev[i] = e;
