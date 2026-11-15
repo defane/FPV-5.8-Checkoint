@@ -142,6 +142,27 @@ def defaults_values(text):
     return want
 
 
+def kconfig_choices(build):
+    """Each member of a Kconfig choice -> every member of that choice (build/config/kconfig_menus.json).
+
+    {} when the build has no menus file.
+    """
+    members = {}
+
+    def walk(items):
+        for item in items:
+            children = item.get("children") or []
+            if item.get("type") == "choice":
+                names = [c["name"] for c in children if c.get("type") == "bool" and c.get("name")]
+                for name in names:
+                    members[name] = names
+            walk(children)
+
+    with contextlib.suppress(OSError, ValueError, KeyError, AttributeError, TypeError):
+        walk(json.loads((build / "config" / "kconfig_menus.json").read_text()))
+    return members
+
+
 def config_drift(build):
     """Values the build's sdkconfig sets differently from the project's sdkconfig.defaults.
 
@@ -150,13 +171,19 @@ def config_drift(build):
     with contextlib.suppress(OSError, ValueError, KeyError):
         desc = json.loads((build / "project_description.json").read_text())
         project = Path(desc["project_path"])
+        choices = kconfig_choices(build)
         want = {}
         # ESP-IDF records the ordered defaults list, including board overlays.
-        # Later files override earlier values, just as they do at configure time.
+        # Later files override earlier values, just as they do at configure time;
+        # a choice member set to y replaces whichever member an earlier file chose.
         defaults = desc.get("config_defaults", "sdkconfig.defaults")
         for path in defaults.split(";"):
             if path:
-                want.update(defaults_values((project / path).read_text()))
+                for k, v in defaults_values((project / path).read_text()).items():
+                    if v is True:
+                        for other in choices.get(k, ()):
+                            want.pop(other, None)
+                    want[k] = v
         have = json.loads((build / "config" / "sdkconfig.json").read_text())
         return [f"{k}={have[k]} (sdkconfig.defaults: {v})" for k, v in want.items() if k in have and have[k] != v]
     return []

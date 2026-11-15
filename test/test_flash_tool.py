@@ -382,6 +382,28 @@ class ConfigDriftTest(unittest.TestCase):
         self.assertEqual(flash.config_drift(build),
                          ["ESP_WIFI_STATIC_RX_BUFFER_NUM=4 (sdkconfig.defaults: 2)"])
 
+    def board_overlay_choice(self, have_4mb):
+        # The XIAO overlay picks another member of the base defaults' flash-size choice.
+        build = self.build("CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y\n",
+                           {"ESPTOOLPY_FLASHSIZE_4MB": have_4mb, "ESPTOOLPY_FLASHSIZE_8MB": not have_4mb})
+        project = build.parent
+        (project / "sdkconfig.xiao-c5.defaults").write_text("CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y\n")
+        (build / "project_description.json").write_text(json.dumps({
+            "project_path": str(project),
+            "config_defaults": "sdkconfig.defaults;sdkconfig.xiao-c5.defaults"}))
+        members = [{"name": f"ESPTOOLPY_FLASHSIZE_{n}MB", "type": "bool"} for n in (1, 2, 4, 8)]
+        (build / "config" / "kconfig_menus.json").write_text(json.dumps([
+            {"type": "menu", "name": None, "children": [
+                {"type": "choice", "name": "ESPTOOLPY_FLASHSIZE", "children": members}]}]))
+        return build
+
+    def test_overlay_choice_member_replaces_the_base_one(self):
+        self.assertEqual(flash.config_drift(self.board_overlay_choice(have_4mb=False)), [])
+
+    def test_overlay_choice_still_reports_a_stale_member(self):
+        self.assertEqual(flash.config_drift(self.board_overlay_choice(have_4mb=True)),
+                         ["ESPTOOLPY_FLASHSIZE_8MB=False (sdkconfig.defaults: True)"])
+
     def test_drift_warned_before_flashing(self):
         drift = mock.Mock(return_value=["ESP_WIFI_STATIC_RX_BUFFER_NUM=4 (sdkconfig.defaults: 2)"])
         with mock.patch.object(flash, "config_drift", drift):
