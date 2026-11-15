@@ -69,6 +69,17 @@ int main(void)
     check("min peak under the activity threshold is refused", !pd_config_valid(&bad));
     bad = cfg; bad.alpha = 0.0f;
     check("alpha 0 is refused", !pd_config_valid(&bad));
+    /* The only guard on a pushed set (the C3 web copies any value): stale_ms 0 would make every
+     * sample stale and the gate silent. */
+    bad = cfg; bad.stale_ms = 0u;
+    check("stale_ms 0 is refused", !pd_config_valid(&bad));
+    bad = cfg; bad.drop_db = 0.0f;
+    check("drop 0 is refused", !pd_config_valid(&bad));
+    bad = cfg; bad.hysteresis_db = 0.0f;
+    check("hysteresis 0 is refused", !pd_config_valid(&bad));
+    bad = cfg; bad.min_peak_db = cfg.active_db;
+    check("min peak equal to the activity threshold is accepted", pd_config_valid(&bad));
+    bad = cfg; bad.alpha = 0.0f;   /* the invalid set pd_set_config is offered */
     pass_detector_t d;
     pd_init(&d, &cfg);
     check("pd_set_config refuses an invalid set and keeps the old one", !pd_set_config(&d, &bad) && d.cfg.alpha == cfg.alpha);
@@ -99,6 +110,15 @@ int main(void)
     /* Far drone: maximum under min_peak_db */
     e = run_pass(22.0f, 1.0f, 3u, 0u, 0u);
     check("far drone (peak 22 dB < 25): never rings", e.n == 0u);
+    pd_init(&d, &cfg);
+    e = (events_t){0};
+    s_seed = 3u;
+    bool far_rose = false;
+    for (uint32_t k = 0; k < 200u; ++k) {
+        feed(&d, 0u, pass_db((float)(k * TICK_MS) / 1000.0f, 5.0f, 22.0f, 10.0f, 20.0f) + gauss(1.0f), k * TICK_MS, &e);
+        far_rose |= d.ch[0].state == PD_RISING;
+    }
+    check("far drone: RISING, then released to IDLE once it fades", far_rose && d.ch[0].state == PD_IDLE && e.n == 0u);
 
     /* Two drones, two channels, same time (interleaved samples) */
     pd_init(&d, &cfg);

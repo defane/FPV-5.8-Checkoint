@@ -314,16 +314,20 @@ int main(void)
     }
     CHECK(r.passes[0] == 1 && r.total == 1, "the refractory period holds a bumpy pass");
 
-    /* 10. A weak bump never reaches the minimum peak. */
+    /* 10. A weak bump never reaches the minimum peak, and its channel goes back to IDLE: the rest
+     *     only climbs in IDLE, so a channel left RISING would stop following its floor. */
     {
         unsigned rang = 0;
+        bool idle = true;
         for (unsigned s = 0; s < 5u; s++) {
             start(&r, RATE_A_US, NOISE_DB, 10u + s);
             const scene_t sc = {1, {rect(2, 9.0f, 5.0, 5.5)}};
             play(&r, 8.0, &sc);
             rang += r.total;
+            idle &= r.sd.det.ch[2].state == PD_IDLE;
         }
         CHECK(rang == 0, "a +9 dB bump rings nothing (5 seeds)");
+        CHECK(idle, "a +9 dB bump that never reached min_peak_db is released to IDLE (5 seeds)");
     }
 
     /* 11. A missed reading is no sample. */
@@ -493,6 +497,53 @@ int main(void)
     /* sd_relearn starts over. */
     sd_relearn(&r.sd);
     CHECK(sd_learning(&r.sd, r.t) && !r.sd.c[0].rest_primed && !r.sd.det.ch[0].primed, "sd_relearn forgets the rests");
+
+    /* 19. A late reading (a gap under SD_DT_MAX_US: no median restart) weighs as one on time:
+     *     noise-free, R6 steps +6 dB 50 ms before a 90 ms gap; the first reading after it moves
+     *     the average by one interval's weight (~0.2 dB), not the gap's (~2.1 dB). */
+    start(&r, RATE_A_US, 0.0f, 1);
+    {
+        const scene_t sc = {1, {rect(5, 6.0f, 9.95, 1e6)}};
+        play(&r, 10.0, &sc);
+        const float before = r.sd.c[5].smooth_db;
+        r.t += S(0.09);
+        rotation(&r, &sc);
+        const float step = r.sd.c[5].smooth_db - before;
+        printf("     late reading after 90 ms: R6 average +%.3f dB\n", step);
+        CHECK(step > 0.0f && step < 0.5f, "a late reading moves the average by one interval's weight, not the gap's");
+    }
+
+    /* 20. Test 17 with gaps under SD_DT_MAX_US (90 ms: a stale re-tune, a PHY-tracking
+     *     recalibration): the median is not restarted, and the late reading's weight is bounded,
+     *     so a parked VTX still rings nothing. 2000 gaps, 1.3 s apart. */
+    start(&r, RATE_A_US, NOISE_DB, 171);
+    {
+        const scene_t sc = {1, {rect(4, 15.0f, 5.0, 1e6)}};
+        play(&r, 8.0, &sc);
+        for (unsigned g = 0; g < 2000u; g++) {
+            r.t += S(0.09);
+            play(&r, 8.0 + 1.3 * (g + 1u), &sc);
+        }
+        printf("     parked VTX across 2000 gaps of 90 ms: %u passes, R5 %s\n", r.total, pd_state_name(r.sd.det.ch[4].state));
+        CHECK(r.total == 0 && r.sd.det.ch[4].state == PD_RISING, "a VTX parked across 2000 gaps of 90 ms rings nothing");
+    }
+
+    /* 21. A pass rings on R6, the drone then hovers by the gate (+13 dB, so the channel holds in
+     *     COOLDOWN), and R5/R6 get no reading for 1.2 s (their LO's captures fail: past stale_ms,
+     *     without a relearn). The kept cooldown holds when readings resume: when the drone
+     *     leaves, nothing rings a second time. */
+    start(&r, RATE_A_US, NOISE_DB, 173);
+    {
+        const scene_t sc = {2, {gpass(5, 25.0f, 6.0, 120.0f), rect(5, 13.0f, 6.4, 20.0)}};
+        play(&r, 9.0, &sc);
+        const unsigned rang = r.total;
+        r.only_mask = 0xCF;                  /* R5 and R6 unread */
+        play(&r, 10.2, &sc);
+        r.only_mask = 0;
+        play(&r, 25.0, &sc);
+        printf("     hover across a 1.2 s reading gap: %u pass(es), %u before it\n", r.total, rang);
+        CHECK(rang == 1 && r.passes[5] == 1 && r.total == 1, "a drone hovering across a 1.2 s reading gap rings once");
+    }
 
     printf("%d/%d scan_detector checks passed\n", g_pass, g_pass + g_fail);
     return g_fail ? 1 : 0;
