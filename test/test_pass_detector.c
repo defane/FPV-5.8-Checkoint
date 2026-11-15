@@ -179,6 +179,33 @@ int main(void)
     check("a NaN sample is ignored", d.ch[0].smooth == 12.0f && d.ch[0].last_ms == 89u * TICK_MS + 1600u);
     check("out-of-range channel is ignored", !pd_update(&d, PD_CHANNELS, 40.0f, 0u, NULL));
 
+    /* pd_update_w: weight 1 is no smoothing, exactly; pd_update is pd_update_w(alpha). */
+    pass_detector_t w, u, v;
+    pd_init(&w, &cfg);
+    pd_init(&u, &cfg);
+    pd_init(&v, &cfg);
+    s_seed = 17u;
+    bool exact = true, same = true;
+    unsigned events_w = 0, events_u = 0;
+    for (uint32_t k = 0; k < 20000u; ++k) {
+        const uint32_t now = k * 2u + (k / 3000u) * 1500u;   /* 2 ms, and a stale gap now and then */
+        const unsigned ch = k % 3u;
+        const float db = 20.0f * uniform() + (k % 400u < 60u ? 25.0f : 0.0f) + gauss(1.0f);
+        pd_event_t eu, ev;
+        events_w += pd_update_w(&w, ch, db, 1.0f, now, NULL);
+        exact &= w.ch[ch].smooth == db;
+        const bool ru = pd_update(&u, ch, db, now, &eu), rv = pd_update_w(&v, ch, db, cfg.alpha, now, &ev);
+        events_u += ru;
+        same &= ru == rv && (!ru || (eu.channel == ev.channel && eu.peak_db == ev.peak_db && eu.peak_ms == ev.peak_ms &&
+                                     eu.at_ms == ev.at_ms));
+        same &= u.ch[ch].state == v.ch[ch].state && u.ch[ch].smooth == v.ch[ch].smooth &&
+                u.ch[ch].peak == v.ch[ch].peak && u.ch[ch].peak_ms == v.ch[ch].peak_ms &&
+                u.ch[ch].cooldown_until_ms == v.ch[ch].cooldown_until_ms;
+    }
+    printf("     random sequence: %u events at weight 1, %u at alpha\n", events_w, events_u);
+    check("pd_update_w weight 1: smooth == level exactly, every sample", exact);
+    check("pd_update equals pd_update_w(alpha), every sample", same && events_u > 0u);
+
     printf("%u/%u pass detector checks passed\n", s_run - s_fail, s_run);
     return s_fail != 0;
 }

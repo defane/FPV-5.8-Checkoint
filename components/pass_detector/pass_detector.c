@@ -69,11 +69,18 @@ void pd_expire(pass_detector_t *d, uint32_t now_ms)
 
 bool pd_update(pass_detector_t *d, unsigned channel, float level_db, uint32_t now_ms, pd_event_t *event)
 {
+    return pd_update_w(d, channel, level_db, d->cfg.alpha, now_ms, event);
+}
+
+bool pd_update_w(pass_detector_t *d, unsigned channel, float level_db, float weight, uint32_t now_ms,
+                 pd_event_t *event)
+{
     if (channel >= PD_CHANNELS || level_db != level_db) return false;   /* NaN: no sample */
     const pd_config_t *cfg = &d->cfg;
     pd_channel_t *c = &d->ch[channel];
     if (stale(d, c, now_ms)) go_stale(c);
-    c->smooth = c->primed ? c->smooth + cfg->alpha * (level_db - c->smooth) : level_db;
+    /* weight 1 is exact: a + 1 * (b - a) is not always b in float */
+    c->smooth = c->primed && weight < 1.0f ? c->smooth + weight * (level_db - c->smooth) : level_db;
     c->primed = true;
     c->last_ms = now_ms;
     const float release = cfg->active_db - cfg->hysteresis_db;

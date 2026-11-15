@@ -1,6 +1,9 @@
 /* Scan detector. See scan_detector.h. */
 #include "scan_detector.h"
 #include <math.h>
+#include <string.h>
+
+#define QDB_PER_DB 4.0f   /* level codes per dB (= SDR_QDB_PER_DB) */
 
 pd_config_t sd_config_default(void)
 {
@@ -8,62 +11,127 @@ pd_config_t sd_config_default(void)
                          .min_peak_db = 10.0f, .refractory_ms = 1500u, .stale_ms = 1000u};
 }
 
+/* alpha is the weight per reference sweep: 1 - exp(-SD_REF_SWEEP_US / tau) = alpha. */
+static float tau_of(float alpha)
+{
+    return alpha >= 1.0f ? 0.0f : -(float)SD_REF_SWEEP_US / logf(1.0f - alpha);
+}
+
 void sd_init(scan_detector_t *sd, const pd_config_t *cfg)
 {
-    *sd = (scan_detector_t){0};
+    memset(sd, 0, sizeof(*sd));
     pd_init(&sd->det, cfg);
+    sd->tau_us = tau_of(sd->det.cfg.alpha);
+    sd->cap_db = INFINITY;
 }
 
-float sd_power_db(uint32_t power)
+bool sd_set_config(scan_detector_t *sd, const pd_config_t *cfg)
 {
-    if (!power) return SD_FLOOR_DB;
-    const float db = 10.0f * log10f((float)power / 256.0f);
-    return db > SD_FLOOR_DB ? db : SD_FLOOR_DB;
+    if (!pd_set_config(&sd->det, cfg)) return false;
+    sd->tau_us = tau_of(sd->det.cfg.alpha);
+    return true;
 }
 
-static float median_rest(const scan_detector_t *sd)
+void sd_relearn(scan_detector_t *sd)
+{
+    memset(sd->c, 0, sizeof(sd->c));
+    pd_reset_all(&sd->det);
+    sd->cap_db = INFINITY;
+    sd->learn_end_us = 0;
+}
+
+static int16_t median3(int16_t a, int16_t b, int16_t c)
+{
+    const int16_t lo = a < b ? a : b, hi = a < b ? b : a;
+    return c < lo ? lo : c > hi ? hi : c;
+}
+
+/* The average's weight for a reading dt_us after the previous one: 1 - exp(-x),
+ * x = dt / tau, as its (2,2) Pade approximant x / (1 + x/2 + x^2/12) (widscan58's lap
+ * EMA, in float): within 1 % up to x = 2, and 1 from x = 4. */
+static float weight(float tau_us, int64_t dt_us)
+{
+    if (tau_us <= 0.0f) return 1.0f;
+    const float x = (float)dt_us / tau_us;
+    return x >= 4.0f ? 1.0f : x / (1.0f + x * (0.5f + x / 12.0f));
+}
+
+/* The rest follows the low smoothed values; never from a saturated capture. */
+static void learn_rest(scan_detector_t *sd, unsigned ch, int64_t dt_us, bool learning)
+{
+    sd_channel_t *c = &sd->c[ch];
+    if (!c->rest_primed) {
+        c->rest_db = c->smooth_db;
+        c->rest_primed = true;
+        return;
+    }
+    const int64_t dt = dt_us < SD_DT_MAX_US ? dt_us : SD_DT_MAX_US;
+    const float s = (float)dt / (float)SD_REF_SWEEP_US * (learning ? SD_LEARN_RATE : 1.0f);
+    if (c->smooth_db < c->rest_db) c->rest_db -= SD_REST_DOWN_DB * s;
+    else if (sd->det.ch[ch].state == PD_IDLE) c->rest_db += SD_REST_UP_DB * s;
+    if (c->rest_db > sd->cap_db) c->rest_db = sd->cap_db;
+}
+
+bool sd_feed(scan_detector_t *sd, unsigned channel, int16_t level_qdb, uint8_t flags, int64_t t_us,
+             pd_event_t *event)
+{
+    if (channel >= PD_CHANNELS || level_qdb == SD_LEVEL_NONE) return false;
+    sd_channel_t *c = &sd->c[channel];
+    int64_t dt = 0;
+    if (c->primed) {
+        dt = t_us - c->last_us;
+        if (dt < 0) dt = 0;
+    }
+    c->last_us = t_us;
+    if (c->primed && dt > SD_DT_MAX_US) {   /* a gap: the old readings would come back */
+        c->nhist = 0;
+        c->hidx = 0;
+        c->primed = false;
+    }
+
+    c->hist[c->hidx] = level_qdb;
+    c->hidx = c->hidx >= 2u ? 0u : (uint8_t)(c->hidx + 1u);
+    if (c->nhist < 3u) c->nhist++;
+    const int16_t m = c->nhist == 3u ? median3(c->hist[0], c->hist[1], c->hist[2]) : level_qdb;
+    const float db = (float)m / QDB_PER_DB;
+    if (!c->primed) {                        /* (re-)primed from this reading; dt_avg kept */
+        c->smooth_db = db;
+        c->primed = true;
+    } else {
+        c->smooth_db += weight(sd->tau_us, dt) * (db - c->smooth_db);
+        if (!c->dt_avg_us) {
+            c->dt_avg_us = (int32_t)dt;
+        } else {                             /* one late reading barely moves it */
+            const int64_t most = 2 * (int64_t)c->dt_avg_us + 1000;
+            const int32_t dtc = (int32_t)(dt < most ? dt : most);
+            c->dt_avg_us += (dtc - c->dt_avg_us) / 8;
+        }
+    }
+
+    if (!sd->learn_end_us) sd->learn_end_us = t_us + SD_LEARN_US;
+    const bool learning = t_us < sd->learn_end_us;
+    if (!(flags & SD_FLAG_SATURATED)) learn_rest(sd, channel, dt, learning);
+    if (learning || !c->rest_primed) return false;   /* nothing rings while the rests settle */
+    return pd_update_w(&sd->det, channel, c->smooth_db - c->rest_db, 1.0f, (uint32_t)(t_us / 1000), event);
+}
+
+void sd_rotation(scan_detector_t *sd, int64_t t_us)
 {
     float v[PD_CHANNELS];
     unsigned n = 0;
     for (unsigned k = 0; k < PD_CHANNELS; k++) {
-        if (!sd->primed[k]) continue;
+        if (!sd->c[k].rest_primed) continue;
         unsigned i = n++;
-        for (; i && v[i - 1u] > sd->rest_db[k]; i--) v[i] = v[i - 1u];
-        v[i] = sd->rest_db[k];
+        for (; i && v[i - 1u] > sd->c[k].rest_db; i--) v[i] = v[i - 1u];
+        v[i] = sd->c[k].rest_db;
     }
-    return n ? v[n / 2u] : 0.0f;
+    sd->cap_db = n ? v[n / 2u] + SD_REST_SPREAD_DB : INFINITY;
+    pd_expire(&sd->det, (uint32_t)(t_us / 1000));
 }
 
-static void learn_rest(scan_detector_t *sd, unsigned ch, float db, float cap)
+bool sd_learning(const scan_detector_t *sd, int64_t t_us)
 {
-    if (!sd->primed[ch]) {
-        sd->primed[ch] = true;
-        sd->rest_db[ch] = db;
-        return;
-    }
-    const float rate = sd->sweeps < SD_LEARN_SWEEPS ? SD_LEARN_RATE : 1.0f;
-    if (db < sd->rest_db[ch]) sd->rest_db[ch] -= SD_REST_DOWN_DB * rate;
-    else if (sd->det.ch[ch].state == PD_IDLE) sd->rest_db[ch] += SD_REST_UP_DB * rate;
-    if (sd->rest_db[ch] > cap) sd->rest_db[ch] = cap;
-}
-
-unsigned sd_sweep(scan_detector_t *sd, const uint16_t power[PD_CHANNELS], uint32_t now_ms, pd_event_t *events)
-{
-    const float cap = median_rest(sd) + SD_REST_SPREAD_DB;
-    unsigned n = 0;
-    for (unsigned ch = 0; ch < PD_CHANNELS; ch++) {
-        if (power[ch] == SD_NO_DATA) continue;
-        const float db = sd_power_db(power[ch]);
-        const bool first = !sd->primed[ch];
-        learn_rest(sd, ch, db, first ? db : cap);
-        if (sd->sweeps < SD_LEARN_SWEEPS) continue;
-        float rise = db - sd->rest_db[ch];
-        const float signal = db - SD_SIGNAL_DB + sd->det.cfg.active_db;   /* active only from SD_SIGNAL_DB up */
-        if (rise > signal) rise = signal;
-        if (pd_update(&sd->det, ch, rise, now_ms, &events[n])) n++;
-    }
-    sd->sweeps++;
-    return n;
+    return !sd->learn_end_us || t_us < sd->learn_end_us;
 }
 
 float sd_rise_db(const scan_detector_t *sd, unsigned channel)
@@ -77,4 +145,34 @@ unsigned sd_strongest(const scan_detector_t *sd)
     for (unsigned k = 1; k < PD_CHANNELS; k++)
         if (sd->det.ch[k].smooth > sd->det.ch[top].smooth) top = k;
     return top;
+}
+
+float sd_tau_ms(const scan_detector_t *sd) { return sd->tau_us / 1000.0f; }
+
+float sd_delay_ms(const scan_detector_t *sd, unsigned channel)
+{
+    return channel < PD_CHANNELS ? (sd->tau_us + (float)sd->c[channel].dt_avg_us) / 1000.0f : 0.0f;
+}
+
+/* Legacy sweep API (see scan_detector.h). */
+#define LEGACY_FLOOR_DB (-30.0f)   /* power 0 after the DC removal */
+
+float sd_power_db(uint32_t power)
+{
+    if (!power) return LEGACY_FLOOR_DB;
+    const float db = 10.0f * log10f((float)power / 256.0f);
+    return db > LEGACY_FLOOR_DB ? db : LEGACY_FLOOR_DB;
+}
+
+unsigned sd_sweep(scan_detector_t *sd, const uint16_t power[PD_CHANNELS], uint32_t now_ms, pd_event_t *events)
+{
+    const int64_t t_us = (int64_t)now_ms * 1000;
+    unsigned n = 0;
+    for (unsigned ch = 0; ch < PD_CHANNELS; ch++) {
+        if (power[ch] == SD_NO_DATA) continue;
+        const int16_t q = (int16_t)lroundf(QDB_PER_DB * sd_power_db(power[ch]));
+        if (sd_feed(sd, ch, q, 0u, t_us, &events[n])) n++;
+    }
+    sd_rotation(sd, t_us);
+    return n;
 }

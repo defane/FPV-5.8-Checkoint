@@ -69,6 +69,11 @@ void pd_reset_all(pass_detector_t *d);
 
 /* One sample of `channel`. True when it completes a pass: *event filled. */
 bool pd_update(pass_detector_t *d, unsigned channel, float level_db, uint32_t now_ms, pd_event_t *event);
+/* The same with the smoothing weight of this sample instead of cfg.alpha (a caller that
+ * smooths itself, or weighs by the sample's interval). weight >= 1: smooth = level_db
+ * exactly. */
+bool pd_update_w(pass_detector_t *d, unsigned channel, float level_db, float weight, uint32_t now_ms,
+                 pd_event_t *event);
 /* Stale channels back to IDLE without a sample (call when none is available). */
 void pd_expire(pass_detector_t *d, uint32_t now_ms);
 
