@@ -101,8 +101,10 @@ void pd_expire(pass_detector_t *d, uint32_t now_ms);
  * meanwhile is unknown, so it starts again from level_db, the level it comes back at (its
  * smoothing primed there, a running refractory period dropped). Under the release it is armed
  * (IDLE). Over it, with the relative re-arm on, it is relatively armed with level_db as its
- * trough: a pass must rise the drop over it, which the tail of a pass it missed never does; with
- * the re-arm off, it waits in COOLDOWN until it falls under the release. */
+ * trough: a pass must rise the drop over it, which the falling tail of a pass it missed does not;
+ * with the re-arm off, it waits in COOLDOWN until it falls under the release. It rings nothing and
+ * may be called on every sample: the scan detector calls it until its fresh average has settled,
+ * since one reading's level can sit 10 dB off. */
 void pd_resume(pass_detector_t *d, unsigned channel, float level_db, uint32_t now_ms);
 
 const char *pd_state_name(pd_state_t state);

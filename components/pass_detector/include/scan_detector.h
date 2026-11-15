@@ -27,8 +27,9 @@
  * reading (over twice the usual interval) weighs in the average as one on time.
  *
  * Relative re-arm (pd_set_rearm(&sd->det, drop), pass_detector.h; off after sd_init): a channel
- * re-armed by it is not quiet, so its rest does not climb, and a channel back from a long hold of
- * the pair guard is relatively armed at the level it comes back at (pd_resume).
+ * re-armed by it is not quiet, so its rest does not climb. A channel back from a long hold of the
+ * pair guard starts again from the level it comes back at (pd_resume): armed under the release; over
+ * it, relatively armed there, or in COOLDOWN until it falls under the release with the re-arm off.
  *
  * Pair guard (sd_feed_hop, the readings of one capture). In PAIRS mode one capture carries two
  * channels 37 MHz apart, each in the other's image window. While a strong channel drives the ADC
@@ -50,11 +51,13 @@
  * restarts on fresh readings; if it stood min_peak_db up as its hold began (a real pass under way),
  * its average catches up to the fresh median less drop_db (never down, so a catch-up never rings by
  * itself). After a hold longer than SD_HOLD_LONG_US, what it did while blind is unknown: once its
- * median is full, its average and pd start again from that median, whatever the hold's length
- * (pd_resume: armed under the release; over it relatively armed with that level as its trough, or
- * in COOLDOWN with the re-arm off). The tail of a pass it missed never rises the re-arm's drop over
- * the level it came back at, so it rings nothing; its next pass does. Unsaturated captures go
- * through exactly as sd_feed. */
+ * median is full, its average starts again from that median, whatever the hold's length. One median
+ * can sit 10 dB off the level (a VTX's FM swings its band power), so pd follows that average,
+ * ringing nothing, for SD_HOLD_SETTLE_TAUS time constants (0.3 s at the default alpha), then starts
+ * again from it (pd_resume: armed under the release; over it relatively armed with that level as its
+ * trough, or in COOLDOWN with the re-arm off). A hold that begins meanwhile counts as long. The
+ * falling tail of a pass it missed does not rise the re-arm's drop over that level, so it rings
+ * nothing; its next pass does. Unsaturated captures go through exactly as sd_feed. */
 #pragma once
 #include "pass_detector.h"
 #include <stdbool.h>
@@ -80,6 +83,7 @@ extern "C" {
 #define SD_HOLD_TAIL_US   30000       /* a saturated run: saturated captures this close; a hover's tail */
 #define SD_HOLD_HOVER_US  150000      /* a run this long is a hover (a pass clips ~80 ms at 0.3 m) */
 #define SD_HOLD_LONG_US   500000      /* after a longer hold the channel starts again (pd_resume) */
+#define SD_HOLD_SETTLE_TAUS 5.0f      /* then pd follows the fresh average this many tau before it may ring */
 
 /* One reading of a capture (the fields of sdr_reading_t). */
 typedef struct {
@@ -119,6 +123,8 @@ typedef struct {
     uint8_t held_mask;                /* channels whose last reading was held */
     uint8_t fresh_mask;               /* channels catching up once their median is full again */
     uint8_t long_mask;                /* channels back from a long hold, restarting once it is full */
+    uint8_t settle_mask;              /* channels restarted from a fresh median whose average still settles */
+    int64_t settle_from_us[PD_CHANNELS];   /* when that median filled */
     uint32_t held[PD_CHANNELS];       /* per channel, readings held since sd_init (diagnostics) */
 } scan_detector_t;
 

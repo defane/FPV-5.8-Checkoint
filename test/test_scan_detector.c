@@ -194,6 +194,16 @@ static pass_result_t one_pass(int32_t dt_us, uint64_t s)
 #define PAIR_FLOOR     (-59.5)
 #define PAIR_CLIP_DBFS (-5.3)
 static const double PAIR_CLIP_X[][2] = {{0.0, -45}, {0.5, -28}, {0.75, -17}, {0.88, -13}, {0.95, -3}, {0.99, 10}, {1.0, 12}};
+/* The DSP's FM spread (step_t.fm): one reading of a VTX's channel minus its steady level (the mean of
+ * its median of 3), quantiles of the re-arm study's reading pools (the ghost synthesiser through
+ * sdr_psd.c, 12 MHz deviation, 20-56 dB up, clipped or not; [host]): three readings in four 3-5 dB
+ * over it, the others 6-22 dB under it (the carrier swings out of the +-5 MHz band), sd 7.5 dB. A
+ * clipping source's reading spreads the same way about its median, and its products stay under it +
+ * PAIR_CLIP_TOP (the pools: 12.8 dB at most). */
+static const double PAIR_FM_X[][2] = {{0.0, -22}, {0.01, -21.3}, {0.05, -14.1}, {0.10, -13.8}, {0.16, -12},
+                                      {0.25, -6}, {0.5, 3.2}, {0.75, 4.7}, {0.99, 5.0}, {1.0, 5.2}};
+#define PAIR_FM_MEDIAN 3.2
+#define PAIR_CLIP_TOP  12.5
 
 typedef struct {
     double mw, d_m, t0_s;    /* mw 0: absent */
@@ -227,14 +237,17 @@ static double pdrone_db(const pdrone_t *d, double ts)
     return best;
 }
 static double psum(double a, double b) { return 10.0 * log10(pow(10.0, a / 10.0) + pow(10.0, b / 10.0)); }
-static double clip_x(void)
+/* A draw from a quantile table ({u, x} rows from u 0 to 1). */
+static double quantile_draw(const double (*q)[2])
 {
     const double u = uniform();
     unsigned k = 1;
-    while (PAIR_CLIP_X[k][0] < u) k++;
-    const double *a = PAIR_CLIP_X[k - 1], *b = PAIR_CLIP_X[k];
+    while (q[k][0] < u) k++;
+    const double *a = q[k - 1], *b = q[k];
     return a[1] + (b[1] - a[1]) * (u - a[0]) / (b[0] - a[0]);
 }
+static double clip_x(void) { return quantile_draw(PAIR_CLIP_X); }
+static double fm_x(void) { return quantile_draw(PAIR_FM_X); }
 
 /* 3.5 s of floor (the rests settle), then dur_s of the scene; guard: sd_feed_hop, else sd_feed per
  * reading (cp_scan.c before the guard). Scene time 0 = T0 + 3.5 s. */
@@ -292,17 +305,18 @@ static void pair_run(const pdrone_t *hi, const pdrone_t *lo, int guard, uint64_t
  * 11, 17 and 23 s; from STEP_CLIP_S, `after` dB instead. The other drone clips the capture from
  * STEP_CLIP_S for clip_s, switched on and off at once (a VTX armed by the antenna) or flown in and
  * out over 0.5 s (ramp). The pilot is R5 and the clipping drone R6, or the other way round (mirror).
- * Every run has the relative re-arm at `rearm`. */
+ * Every run has the relative re-arm at `rearm`. fm: both read with the DSP's FM spread (PAIR_FM_X)
+ * instead of 1 dB (the pilot) and 0.3 dB (the clipping source); nolaps: the pilot only parks. */
 #define STEP_CLIP_S 13.5
 typedef struct {
     double base, after, clip_s;
-    int ramp, mirror;
+    int ramp, mirror, fm, nolaps;
     float rearm;
 } step_t;
 typedef struct {
     unsigned n, n_src, held, held_src;   /* the pilot's passes and held readings; the clipping drone's */
     double t[8];                         /* the pilot's pass times (peak_ms), s */
-    pd_channel_t probe;                  /* the pilot's pd state 0.1 s after the clip */
+    pd_channel_t probe;                  /* the pilot's pd state 0.5 s after the clip */
     float probe_rest_db;
 } step_out_t;
 
@@ -326,22 +340,28 @@ static void step_run(const step_t *p, uint64_t s, step_out_t *o)
             if (hop == PAIR_HOP && ts >= 4.0) {
                 const double base = ts < STEP_CLIP_S ? p->base : p->after;
                 double v = base > 0.0 ? base : -999.0;
-                for (int k = 0; k < 4; k++) {
+                for (int k = 0; k < (p->nolaps ? 0 : 4); k++) {
                     const double x = (ts - (5.0 + 6.0 * k)) / 0.15;
                     v = fmax(v, (base > 0.0 ? base : 0.0) + 20.0 * exp(-0.5 * x * x));
                 }
-                const double a = PAIR_FLOOR + v + gauss(1.0f);
+                const double a = PAIR_FLOOR + v + (p->fm ? fm_x() : gauss(1.0f));
                 if (ts >= STEP_CLIP_S && ts < end) {
                     fl = SD_FLAG_SATURATED;
                     rs = PAIR_CLIP_DBFS + 5.0 + gauss(0.3f);
-                    rp = psum(psum(rp, a - 3.0), rs + clip_x());
+                    if (p->fm) {
+                        const double own = rs + fm_x() - PAIR_FM_MEDIAN;
+                        rp = psum(psum(rp, a - 3.0), fmin(rs + clip_x(), own + PAIR_CLIP_TOP));
+                        rs = own;
+                    } else {
+                        rp = psum(psum(rp, a - 3.0), rs + clip_x());
+                    }
                 } else {
                     rp = psum(rp, a);
                     const double away = ts < STEP_CLIP_S ? STEP_CLIP_S - ts : ts - end;
                     if (p->ramp && away < 0.5) rs = psum(rs, PAIR_CLIP_DBFS - 1.0 - 60.0 * away + gauss(1.0f));
                 }
             }
-            if (hop == PAIR_HOP && ts >= end + 0.1 && !probed) {
+            if (hop == PAIR_HOP && ts >= end + 0.5 && !probed) {
                 probed = true;
                 o->probe = sd.det.ch[pilot];
                 o->probe_rest_db = sd.c[pilot].rest_db;
@@ -364,17 +384,21 @@ static void step_run(const step_t *p, uint64_t s, step_out_t *o)
 }
 
 /* The laps of a step run the pilot rang (one pass within 0.3 s of each, nothing else), as a bit per
- * lap at 5, 11, 17 and 23 s; bit 4: a pass far from every lap (a phantom). */
-static unsigned step_laps(const step_out_t *o)
+ * lap at 5, 11, 17 and 23 s; bit 4: a pass far from every lap (a phantom). Passes before from_s are
+ * left out: with the FM spread the pilot's power-on at 4 s rings (detector.md, "The start pad"), and
+ * its refractory period then holds the 5 s lap. */
+static unsigned step_laps_from(const step_out_t *o, double from_s)
 {
     unsigned bits = 0;
     for (unsigned i = 0; i < o->n; i++) {
+        if (o->t[i] < from_s) continue;
         const int k = (int)lround((o->t[i] - 5.0) / 6.0);
         if (k >= 0 && k < 4 && fabs(o->t[i] - (5.0 + 6.0 * k)) < 0.3 && !(bits & (1u << k))) bits |= 1u << k;
         else bits |= 1u << 4;
     }
     return bits;
 }
+static unsigned step_laps(const step_out_t *o) { return step_laps_from(o, 0.0); }
 
 int main(void)
 {
@@ -849,8 +873,9 @@ int main(void)
 
     /* 25. A 600 mW R6 parked 0.5 m from the gate for 10 s (clipping) while R5 laps at 1 m every 3 s:
      *     R5 is held throughout (unmeasurable under the clipping products) and rings nothing, no
-     *     phantom and no mistimed lap; when R6 leaves, R5 resumes in COOLDOWN, so the tail of the
-     *     lap it missed at 10 s does not ring either. */
+     *     phantom and no mistimed lap; when R6 leaves, R5 starts again from its fresh level (without
+     *     the re-arm: in COOLDOWN until under the release), so the tail of the lap it missed at 10 s
+     *     does not ring either. */
     {
         static scan_detector_t sd;
         const pdrone_t r6 = {.mw = 600, .hover_d_m = 0.5, .hover_t0_s = 0.5, .hover_t1_s = 10.5};
@@ -938,14 +963,14 @@ int main(void)
     /* 28. The pair guard's long hold and the relative re-arm. R5 laps (5, 11, 17, 23 s) 25 dB up
      *     between laps, so it re-arms relatively; a 600 mW R6 flown in parks clipping beside the gate
      *     from 13.5 s for 0.6-2.5 s (over SD_HOLD_LONG_US, under and over stale_ms) and holds it, and
-     *     R5 stands 15 dB up after it. Once its fresh median is full, R5 starts again from it, whatever
-     *     the hold's length: relatively armed, its trough the level it came back at (15 dB, not the
-     *     25 before), so it rings its next lap at 17 s and every other one, and nothing else. Forced
-     *     into COOLDOWN with the level from before the hold as the reference (c8f0256), it lost that
-     *     lap in all 20 runs. The tail of a lap it missed (the 17 s one inside a 3.6 s hold) rings
+     *     R5 stands 15 dB up after it. Once its fresh average has settled, R5 starts again from it,
+     *     whatever the hold's length: relatively armed, its trough the level it came back at (15 dB,
+     *     not the 25 before), so it rings its next lap at 17 s and every other one, and nothing else.
+     *     Forced into COOLDOWN with the level from before the hold as the reference (c8f0256), it lost
+     *     that lap in all 20 runs. The tail of a lap it missed (the 17 s one inside a 3.6 s hold) rings
      *     nothing: it never rises 16 dB over the level R5 came back at; R5 rings its 23 s lap (lost
      *     too before). The same after a step onset; with the re-arm off, R5 waits in COOLDOWN as
-     *     before (only its first lap rings, at 25 dB between laps). */
+     *     before (only its first lap rings, at 25 dB between laps). Check 30 adds the FM spread. */
     {
         static const double clips[4] = {0.6, 0.8, 1.5, 2.5};
         unsigned runs = 0, ref_ok = 0, laps_ok = 0, tail_ok = 0, step_ok = 0, off_ok = 0;
@@ -1033,6 +1058,42 @@ int main(void)
         CHECK(ok_laps == runs && ok_src == runs && ok_held == runs,
               "a step into the rails: its partner is held, every lap kept, no phantom, the source rings its pass");
         CHECK(ramp_ok == 10u, "flown in, the smoothed levels hold the partner as before (the source never held)");
+    }
+
+    /* 30. Check 28's long hold with the DSP's FM spread (PAIR_FM_X), which check 28's 1 dB model hides:
+     *     R5 parked still 12-35 dB up (no lap), R6 switched on beside the antenna for 2 s (200 runs).
+     *     One fresh median of 3 sits up to 14 dB under the level (or 5 over): restarted from it, R5's
+     *     trough landed 18 dB under to 4 dB over its level, and its average climbing back rang a
+     *     phantom in 5 runs (d3032e9). pd follows the fresh average until it settles (5 tau), then
+     *     starts again from it: the trough within 3 dB of the level, nothing rings. Without the onset
+     *     R5 rings nothing either (the model's control). */
+    {
+        static const double lv[5] = {12.0, 18.0, 25.0, 30.0, 35.0};
+        unsigned runs = 0, phantom = 0, ctl = 0, held_ok = 0, tr_ok = 0;
+        float lo = 1e9f, hi = -1e9f;
+        for (unsigned l = 0; l < 5u; l++)
+            for (uint64_t k = 0; k < 40u; k++) {
+                const step_t p = {.base = lv[l], .after = lv[l], .clip_s = 2.0, .fm = 1, .nolaps = 1, .rearm = 16.0f};
+                step_out_t o;
+                step_run(&p, 3000 + 40u * l + k, &o);
+                runs++;
+                phantom += step_laps_from(&o, 6.0) != 0u;
+                held_ok += o.held > 900u;
+                const float d = o.probe.trough - (float)lv[l];
+                tr_ok += o.probe.state == PD_IDLE && o.probe.rel && fabsf(d) < 3.0f;
+                lo = fminf(lo, d);
+                hi = fmaxf(hi, d);
+                if (k < 4u) {
+                    const step_t c0 = {.base = lv[l], .after = lv[l], .fm = 1, .nolaps = 1, .rearm = 16.0f};
+                    step_run(&c0, 3000 + 40u * l + k, &o);
+                    ctl += step_laps_from(&o, 6.0) != 0u;
+                }
+            }
+        printf("     still R5 12-35 dB up, FM spread: trough %+.1f..%+.1f dB off its level after a 2 s hold, a phantom in %u/%u "
+               "runs; %u/20 without the onset\n", (double)lo, (double)hi, phantom, runs, ctl);
+        CHECK(ctl == 0u, "with the FM spread a still VTX rings nothing by itself");
+        CHECK(held_ok == runs && tr_ok == runs, "back from a 2 s hold, R5 is relatively armed within 3 dB of its level");
+        CHECK(phantom == 0u, "and rings nothing");
     }
 
     printf("%d/%d scan_detector checks passed\n", g_pass, g_pass + g_fail);

@@ -33,9 +33,12 @@ menu "Checkpoint detector"
             its average still low), the source is the channel whose last 3
             readings show it, and its partner is held until the run ends. A
             hover (a run of saturated captures over 150 ms) holds 30 ms longer
-            after each one, and a channel held over 0.5 s starts again from the
-            level it comes back at (relatively armed there). Off, every
-            reading is fed as it comes, the phantoms included. The rules:
+            after each one. A channel held over 0.5 s starts again from the
+            level it comes back at, once its fresh average has settled (0.3 s
+            at the default alpha, ringing nothing meanwhile): armed under the
+            release; over it, relatively armed there, or in COOLDOWN until it
+            falls under the release with CHECKPOINT_REARM_DROP_DB at 0. Off,
+            every reading is fed as it comes, the phantoms included. The rules:
             docs/detector.md, "Pair ghost guard", and scan_detector.h.
 
             Its limits:

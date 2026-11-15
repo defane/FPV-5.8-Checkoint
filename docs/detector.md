@@ -111,13 +111,20 @@ under the strong channel, a few % of captures above it ([host]).
   `min_peak_db` up when the hold began (a real pass under way), its average catches up
   to the fresh median less `drop_db`, upwards only, so a catch-up never rings by itself.
   After a hold over `SD_HOLD_LONG_US` (0.5 s) what it did while blind is unknown, so once
-  its fresh median is full its average and its state start again from that median,
-  whatever the hold's length (`pd_resume()`): armed under the release; over it, relatively
-  armed with that level as its trough (with the re-arm off, in `COOLDOWN` until it falls
-  under the release). The tail of a pass it missed never rises the re-arm's 16 dB over the
-  level it came back at, so it rings nothing; its next pass does ([host] check 28). A pass
-  that began to rise while the channel was blind must still rise 16 dB over the level it
-  comes back at, or it is lost with the blind window.
+  its fresh median is full its average starts again from that median, whatever the hold's
+  length. One median of a VTX's channel can sit 9–14 dB under its level, or 5 dB over it
+  (the FM swings the band power, [host]). So the state does not start from it: it follows
+  the fresh average, ringing nothing, for `SD_HOLD_SETTLE_TAUS` (5) time constants, 0.3 s at
+  the default `alpha`, then starts again from it (`pd_resume()`). Under the release the
+  channel is armed. Over it, it is relatively armed with that level as its trough (with the
+  re-arm off, in `COOLDOWN` until it falls under the release). A hold that begins meanwhile
+  counts as long. The falling tail of a pass it missed does not rise the re-arm's 16 dB over
+  that level, so it rings nothing; its next pass does ([host] check 28). Started from the
+  median itself, a still VTX 12–35 dB up rang a phantom after 3–11 % of 2 s holds ([host]
+  readings drawn from the DSP, 1000 holds per level; check 30's model: 5 of 200); from the
+  settled average, none of them. A pass that began
+  to rise while the channel was blind, or in the 0.3 s after, must still rise 16 dB over the
+  level it comes back at, or it is lost with the blind window.
 - A capture without the flag (outside a hover's tail) goes through exactly as before: the
   same passes to the bit ([host] `test_scan_detector.c` check 22).
 - A held reading counts as none: a channel held for 1 s reads *unknown* on the bridges
@@ -210,11 +217,11 @@ than 6 dB over the other channels' median.
   simulation below).
 - **The rest.** A relatively re-armed channel is not quiet: its rest does not climb.
 - **The pair guard.** A channel back from a hold over `SD_HOLD_LONG_US` is relatively
-  armed at the level it comes back at (armed as usual under the release), for any hold
-  length (`pd_resume()`). Forced into
-  COOLDOWN with the level from before the hold as its reference, a channel that stays up
-  between laps lost its next lap after any hold over 0.5 s: in check 28, the 17 s lap in
-  20 runs of 20, and in a run whose hold covered a lap, the lap after it too ([host]).
+  armed at the level it comes back at, once its fresh average has settled (armed as usual
+  under the release), for any hold length (`pd_resume()`, [above](#pair-ghost-guard)).
+  Forced into COOLDOWN with the level from before the hold as its reference, a channel that
+  stays up between laps lost its next lap after any hold over 0.5 s: in check 28, the 17 s
+  lap in 20 runs of 20, and in a run whose hold covered a lap, the lap after it too ([host]).
 
 D is a build option, not a console key: it is not saved in NVS and not on the link
 (link_proto v3), so the bridges' pages do not show it. The boot line (`SDR ready …

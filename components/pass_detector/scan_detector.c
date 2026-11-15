@@ -5,7 +5,7 @@
 
 #define QDB_PER_DB 4.0f   /* level codes per dB (= SDR_QDB_PER_DB) */
 
-_Static_assert(PD_CHANNELS <= 8u, "held_mask and fresh_mask are 8 bits");
+_Static_assert(PD_CHANNELS <= 8u, "the pair guard's channel masks are 8 bits");
 
 pd_config_t sd_config_default(void)
 {
@@ -48,6 +48,7 @@ void sd_relearn(scan_detector_t *sd)
     sd->held_mask = 0;
     sd->fresh_mask = 0;
     sd->long_mask = 0;
+    sd->settle_mask = 0;
 }
 
 static int16_t median3(int16_t a, int16_t b, int16_t c)
@@ -132,7 +133,19 @@ bool sd_feed(scan_detector_t *sd, unsigned channel, int16_t level_qdb, uint8_t f
     const bool learning = t_us < sd->learn_end_us;
     if (!(flags & SD_FLAG_SATURATED)) learn_rest(sd, channel, dt, learning);
     if (learning || !c->rest_primed) return false;   /* nothing rings while the rests settle */
-    return pd_update_w(&sd->det, channel, c->smooth_db - c->rest_db, 1.0f, (uint32_t)(t_us / 1000), event);
+    const float rise = c->smooth_db - c->rest_db;
+    const uint32_t now_ms = (uint32_t)(t_us / 1000);
+    const uint8_t bit = (uint8_t)(1u << channel);
+    if (sd->settle_mask & bit) {
+        /* Back from a long hold (refill): one median can sit 10 dB off the level (a VTX's FM swings
+         * its band power), so pd follows the fresh average, ringing nothing, until it has settled
+         * and starts again from there. */
+        pd_resume(&sd->det, channel, rise, now_ms);
+        if ((float)(t_us - sd->settle_from_us[channel]) >= SD_HOLD_SETTLE_TAUS * sd->tau_us)
+            sd->settle_mask &= (uint8_t)~bit;
+        return false;
+    }
+    return pd_update_w(&sd->det, channel, rise, 1.0f, now_ms, event);
 }
 
 /* Whether the guard treats this capture of `hop` as saturated: its own flag, or a clean capture
@@ -194,7 +207,9 @@ static unsigned pair_hold(scan_detector_t *sd, unsigned hop, unsigned ca, unsign
 }
 
 /* A held channel fed again: its median restarts on fresh readings. Once it is full (sd_feed_hop),
- * a real pass under way catches up, and a channel back from a long hold starts again from it. */
+ * a real pass under way catches up, and a channel back from a long hold starts again from it. A hold
+ * that began while the channel still settled from an earlier one counts as long: it was blind
+ * nearly all along. */
 static void resume(scan_detector_t *sd, unsigned ch, int64_t t_us)
 {
     sd_channel_t *c = &sd->c[ch];
@@ -202,15 +217,16 @@ static void resume(scan_detector_t *sd, unsigned ch, int64_t t_us)
     sd->held_mask &= (uint8_t)~bit;
     c->nhist = 0;
     c->hidx = 0;
-    if (t_us - sd->held_since_us[ch] > SD_HOLD_LONG_US) sd->long_mask |= bit;
+    if (t_us - sd->held_since_us[ch] > SD_HOLD_LONG_US || (sd->settle_mask & bit)) sd->long_mask |= bit;
     else if (sd->held_rise_db[ch] >= sd->det.cfg.min_peak_db) sd->fresh_mask |= bit;
 }
 
 /* The reading that fills a resumed channel's fresh median (m, dB). Back from a long hold, the
- * average and pd start again at m (pd_resume), whatever the hold's length: held readings never
- * reach pd, which would otherwise keep its level from before the hold up to stale_ms and forget it
- * past that. Else a pass under way catches up to m less drop_db, upwards only, so a catch-up never
- * rings by itself. */
+ * average starts again at m and pd follows it until it has settled (sd_feed: SD_HOLD_SETTLE_TAUS),
+ * then starts again from it (pd_resume), whatever the hold's length: held readings never reach pd,
+ * which would otherwise keep its level from before the hold up to stale_ms and forget it past that.
+ * Else a pass under way catches up to m less drop_db, upwards only, so a catch-up never rings by
+ * itself. */
 static void refill(scan_detector_t *sd, unsigned ch, float m, int64_t t_us)
 {
     sd_channel_t *c = &sd->c[ch];
@@ -218,7 +234,8 @@ static void refill(scan_detector_t *sd, unsigned ch, float m, int64_t t_us)
     if (sd->long_mask & bit) {
         c->smooth_db = m;
         c->primed = true;
-        if (c->rest_primed) pd_resume(&sd->det, ch, m - c->rest_db, (uint32_t)(t_us / 1000));
+        sd->settle_mask |= bit;
+        sd->settle_from_us[ch] = t_us;
     } else {
         const float up = m - sd->det.cfg.drop_db;
         if (c->primed && up > c->smooth_db) c->smooth_db = up;
