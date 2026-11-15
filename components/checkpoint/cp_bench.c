@@ -459,6 +459,13 @@ static const char *irr_text(char *buf, size_t size, const char *name, float s_db
     return buf;
 }
 
+/* Run 2's VTX is too weak: S stands over_qdb over its stored floor. */
+static void image_weak(unsigned s, int32_t over_qdb)
+{
+    printf("SDRIMAGE weak: bring the VTX closer (need >= 50 dB over the floor) strong=R%u over_db=%.1f\n"
+           "SDRIMAGE done\n", s + 1u, (double)over_qdb / SDR_QDB_PER_DB);
+}
+
 static void bench_image(cp_t *cp, cp_yield_t *y, x_bench_t *b)
 {
     const sdr_plan_t *p = sdr_bench_plan();
@@ -480,7 +487,13 @@ static void bench_image(cp_t *cp, cp_yield_t *y, x_bench_t *b)
     if (!signal) {                                 /* run 1: VTX off, the floor of every channel */
         int32_t tmp[SDR_RX_CHANNELS], excess = 0;
         const int top = hs_over_median_i32(med, SDR_RX_CHANNELS, SDR_LEVEL_NONE, tmp, &excess);
-        if (top >= 0 && excess > X_FLOOR_SPREAD_QDB) { /* a VTX is on: keep what was stored */
+        const hs_x_run_t run = hs_x_run(excess, X_FLOOR_SPREAD_QDB, stored);
+        const unsigned s = (unsigned)hs_strongest_i32(over, SDR_RX_CHANNELS);
+        if (run == HS_X_WEAK && over[s] != INT32_MIN) {   /* run 2, its VTX under X_SIGNAL_QDB */
+            image_weak(s, over[s]);
+            return;
+        }
+        if (run != HS_X_FLOOR) {                    /* a VTX is on: keep what was stored */
             printf("SDRIMAGE refused: R%d is %.1f dB over the channels' median (a floor allows %d dB), a VTX is on, "
                    "nothing stored: switch every VTX off, then K x\nSDRIMAGE done\n", top + 1,
                    (double)excess / SDR_QDB_PER_DB, X_FLOOR_SPREAD_QDB / SDR_QDB_PER_DB);
@@ -496,8 +509,7 @@ static void bench_image(cp_t *cp, cp_yield_t *y, x_bench_t *b)
     /* Run 2: S is the channel highest over its floor, P shares its LO. */
     const unsigned s = (unsigned)hs_strongest_i32(over, SDR_RX_CHANNELS);
     if (over[s] < X_NEED_QDB) {
-        printf("SDRIMAGE weak: bring the VTX closer (need >= 50 dB over the floor) strong=R%u over_db=%.1f\n"
-               "SDRIMAGE done\n", s + 1u, (double)over[s] / SDR_QDB_PER_DB);
+        image_weak(s, over[s]);
         return;
     }
     unsigned js = 0;

@@ -163,6 +163,18 @@ int main(void)
         CHECK("over median: no value", top == -1 && over == 0);
         top = hs_over_median_i32(off, 1, none, tmp, &over);
         CHECK("over median: one value is its own median", top == 0 && over == 0);
+        /* Run 2 with the VTX too weak to count as a signal (under 10 dB over its floor): R1 8 dB over
+         * its stored floor is 7.5 dB over the median. With that floor stored, K x asks to bring the VTX
+         * closer; refusing as a floor run would send the operator back to store the same floor. */
+        const int32_t r1_weak[8] = {-207, -237, -239, -238, -237, -236, -237, -234};
+        top = hs_over_median_i32(r1_weak, 8, none, tmp, &over);
+        CHECK("K x: a weak run 2 is weak with a floor stored, a refused floor run without",
+              top == 0 && over == 30 && hs_x_run(over, margin, true) == HS_X_WEAK &&
+                  hs_x_run(over, margin, false) == HS_X_REFUSED);
+        (void)hs_over_median_i32(off, 8, none, tmp, &over);
+        CHECK("K x: every VTX off is a floor run, stored floor or not",
+              hs_x_run(over, margin, true) == HS_X_FLOOR && hs_x_run(over, margin, false) == HS_X_FLOOR &&
+                  hs_x_run(0, margin, true) == HS_X_FLOOR);
     }
 
     CHECK("excess: twice the floor is the floor", near_f(hs_excess_db(-60.0f + 3.0103f, -60.0f), -60.0f, 0.01f));

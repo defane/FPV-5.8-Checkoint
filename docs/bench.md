@@ -184,6 +184,10 @@ Two runs, at the same gain.
    the 8 floors lie within 1 dB of their median, [board] 2026-11-15):
    `SDRIMAGE refused: R6 is 57.0 dB over the channels' median (a floor allows 6 dB), a VTX
    is on, nothing stored: switch every VTX off, then K x`. A floor stored before is kept.
+   With a floor already stored at this gain, such a run is run 2 with a VTX too weak to
+   count (over the 6 dB a floor allows, under 10 dB over its floor): it prints run 2's
+   `SDRIMAGE weak: bring the VTX closer …` instead, since switching the VTX off would only
+   store the same floor again.
 2. **VTX on one channel S**, 50 dB or more over its floor, not clipping (`strong_qdb`
    −40 to −20). Its partner P shares S's LO and S's image lands on it. 200 captures with
    the IQ correction on, 200 with it off (their raw I/Q moments summed too), and 200 with

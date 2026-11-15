@@ -5,6 +5,7 @@
  * floor. */
 #pragma once
 #include <math.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -147,6 +148,16 @@ static inline int hs_over_median_i32(const int32_t *v, size_t n, int32_t none, i
     }
     *over = best < 0 ? 0 : v[best] - hs_spread_i32(tmp, k).median;
     return best;
+}
+
+/* K x, a run with no channel X_SIGNAL_QDB over a stored floor: the top channel's excess over the
+ * median within `spread` is a floor run. Over it a VTX is on: with a floor stored for this gain,
+ * run 2 with the VTX too weak (bring it closer); without one, a floor run refused (switch it off). */
+typedef enum { HS_X_FLOOR, HS_X_WEAK, HS_X_REFUSED } hs_x_run_t;
+static inline hs_x_run_t hs_x_run(int32_t excess, int32_t spread, bool floor_stored)
+{
+    if (excess <= spread) return HS_X_FLOOR;
+    return floor_stored ? HS_X_WEAK : HS_X_REFUSED;
 }
 
 static inline size_t hs_strongest_i32(const int32_t *v, size_t n)   /* index of the max, 0 if n = 0 */
