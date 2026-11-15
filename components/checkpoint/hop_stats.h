@@ -2,7 +2,8 @@
  * of cp_bench.c: the spread of the hop timings (unsigned microseconds), and levels in 0.25 dB
  * codes (signed qdb, as sdr_rx reports them): medians, the highest value over the median, the
  * settle point of a trace against a control, the noise of a reading, and the excess power over a
- * floor. */
+ * floor. Also the benches' decisions a test should see: what a K x run is, and K S's packing of a
+ * row's saturated captures. */
 #pragma once
 #include <math.h>
 #include <stdbool.h>
@@ -150,14 +151,66 @@ static inline int hs_over_median_i32(const int32_t *v, size_t n, int32_t none, i
     return best;
 }
 
-/* K x, a run with no channel X_SIGNAL_QDB over a stored floor: the top channel's excess over the
+/* K x, a run with no channel HS_X_SIGNAL_QDB over a stored floor: the top channel's excess over the
  * median within `spread` is a floor run. Over it a VTX is on: with a floor stored for this gain,
- * run 2 with the VTX too weak (bring it closer); without one, a floor run refused (switch it off). */
-typedef enum { HS_X_FLOOR, HS_X_WEAK, HS_X_REFUSED } hs_x_run_t;
+ * run 2 with the VTX too weak (bring it closer); without one, a floor run refused (switch it off).
+ * HS_X_SIGNAL: hs_x_verdict's run 2. */
+typedef enum { HS_X_FLOOR, HS_X_WEAK, HS_X_REFUSED, HS_X_SIGNAL } hs_x_run_t;
 static inline hs_x_run_t hs_x_run(int32_t excess, int32_t spread, bool floor_stored)
 {
     if (excess <= spread) return HS_X_FLOOR;
     return floor_stored ? HS_X_WEAK : HS_X_REFUSED;
+}
+
+/* K x's thresholds (cp_bench.c's comment has the board's numbers): a channel this far over its
+ * stored floor carries a VTX (10 dB), and a floor run allows this much over the channels' median
+ * (6 dB). */
+#define HS_X_SIGNAL_QDB       40
+#define HS_X_FLOOR_SPREAD_QDB 24
+
+typedef struct {
+    hs_x_run_t run;
+    int top;          /* FLOOR, REFUSED: the channel highest over the median (-1: no reading); WEAK,
+                       * SIGNAL: the one highest over its stored floor */
+    int32_t excess;   /* that channel's excess over the median, or over its floor (WEAK, SIGNAL) */
+} hs_x_verdict_t;
+
+/* What a K x run is (cp_bench.c bench_image). med: the n channels' medians, `none` without a
+ * reading. floor: the floor stored for this gain, NULL when none is (no floor run yet, or one at
+ * another gain); `none` for a channel it lacks. over gets each channel's rise over its stored floor,
+ * INT32_MIN without one; tmp is the caller's room for n values.
+ * - SIGNAL: a channel stands HS_X_SIGNAL_QDB over its floor, run 2 with that VTX.
+ * - Else the top channel's excess over the run's median decides (hs_x_run, HS_X_FLOOR_SPREAD_QDB):
+ *   FLOOR, store it; WEAK, run 2's VTX too weak (a floor stored, a channel over it to name); REFUSED,
+ *   a floor run with a VTX on (or a weak run 2 with no channel over a stored floor to name). */
+static inline hs_x_verdict_t hs_x_verdict(const int32_t *med, const int16_t *floor, size_t n, int32_t none,
+                                          int32_t *over, int32_t *tmp)
+{
+    int strong = -1;
+    for (size_t i = 0; i < n; i++) {
+        const bool ok = floor && med[i] != none && floor[i] != none;
+        over[i] = ok ? med[i] - floor[i] : INT32_MIN;
+        if (ok && (strong < 0 || over[i] > over[strong])) strong = (int)i;
+    }
+    if (strong >= 0 && over[strong] >= HS_X_SIGNAL_QDB) return (hs_x_verdict_t){HS_X_SIGNAL, strong, over[strong]};
+    int32_t excess = 0;
+    const int top = hs_over_median_i32(med, n, none, tmp, &excess);
+    const hs_x_run_t run = hs_x_run(excess, HS_X_FLOOR_SPREAD_QDB, floor != NULL);
+    if (run == HS_X_WEAK && strong >= 0) return (hs_x_verdict_t){HS_X_WEAK, strong, over[strong]};
+    return (hs_x_verdict_t){run == HS_X_FLOOR ? HS_X_FLOOR : HS_X_REFUSED, top, excess};
+}
+
+/* K S: a recording row's saturated captures per hop (sat[0] the first hop's) as one 16-bit word,
+ * 4 bits a hop, hop 0 in the top nibble, each count capped at HS_SAT_MAX: the SCAN line's last field
+ * (`0f00`: the second hop clipped 15 times or more), tools/scan_analyze.py's read_sat. */
+#define HS_SAT_HOPS 4u
+#define HS_SAT_MAX  15u
+static inline uint16_t hs_sat_pack(const unsigned sat[HS_SAT_HOPS])
+{
+    uint16_t w = 0;
+    for (unsigned j = 0; j < HS_SAT_HOPS; j++)
+        w |= (uint16_t)((sat[j] < HS_SAT_MAX ? sat[j] : HS_SAT_MAX) << (4u * (HS_SAT_HOPS - 1u - j)));
+    return w;
 }
 
 static inline size_t hs_strongest_i32(const int32_t *v, size_t n)   /* index of the max, 0 if n = 0 */

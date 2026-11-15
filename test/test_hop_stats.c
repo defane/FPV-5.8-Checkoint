@@ -136,10 +136,12 @@ int main(void)
     si = hs_spread_i32(big, 3);
     CHECK("spread i32 extremes", si.min == INT32_MIN && si.median == 0 && si.max == INT32_MAX);
 
-    /* K x's floor check (cp_bench.c, X_FLOOR_SPREAD_QDB = 24, 6 dB), on the board's medians of
-     * 2026-11-15 at gain 40, R1..R8 in qdb. */
+    /* K x's floor check (HS_X_FLOOR_SPREAD_QDB = 24, 6 dB), on the board's medians of 2026-11-15 at
+     * gain 40, R1..R8 in qdb. */
     {
-        const int32_t none = INT16_MIN, margin = 24;
+        const int32_t none = INT16_MIN, margin = HS_X_FLOOR_SPREAD_QDB;
+        CHECK("K x margins: a floor allows 6 dB over the median, a signal is 10 dB over its floor",
+              HS_X_FLOOR_SPREAD_QDB == 24 && HS_X_SIGNAL_QDB == 40);
         int32_t tmp[8], over = -1;
         const int32_t off[8] = {-239, -237, -239, -238, -237, -236, -237, -234};   /* K n, VTX off */
         int top = hs_over_median_i32(off, 8, none, tmp, &over);
@@ -175,6 +177,63 @@ int main(void)
         CHECK("K x: every VTX off is a floor run, stored floor or not",
               hs_x_run(over, margin, true) == HS_X_FLOOR && hs_x_run(over, margin, false) == HS_X_FLOOR &&
                   hs_x_run(0, margin, true) == HS_X_FLOOR);
+
+        /* hs_x_verdict, the whole decision bench_image takes: no floor stored (NULL) or the VTX-off
+         * medians stored as the floor of this gain. */
+        int16_t floor16[8];
+        for (unsigned i = 0; i < 8u; i++) floor16[i] = (int16_t)off[i];
+        int32_t ov[8];
+        hs_x_verdict_t v = hs_x_verdict(off, NULL, 8, none, ov, tmp);
+        CHECK("verdict: VTX off, no floor stored: a floor run", v.run == HS_X_FLOOR && v.top == 7 && v.excess == 3 &&
+                                                                    ov[0] == INT32_MIN && ov[7] == INT32_MIN);
+        v = hs_x_verdict(off, floor16, 8, none, ov, tmp);
+        CHECK("verdict: VTX off again over its floor: a floor run (stored again)", v.run == HS_X_FLOOR && ov[3] == 0);
+        v = hs_x_verdict(r6_on, NULL, 8, none, ov, tmp);
+        CHECK("verdict: R6 on, no floor stored: refused, R6 57 dB over the median",
+              v.run == HS_X_REFUSED && v.top == 5 && v.excess == 228);
+        v = hs_x_verdict(r6_on, floor16, 8, none, ov, tmp);
+        CHECK("verdict: R6 on over a stored floor: run 2 with R6", v.run == HS_X_SIGNAL && v.top == 5 && v.excess == 228 &&
+                                                                       ov[4] == 16);
+        v = hs_x_verdict(r1_weak, floor16, 8, none, ov, tmp);
+        CHECK("verdict: R1 8 dB over its stored floor: weak, bring it closer", v.run == HS_X_WEAK && v.top == 0 && v.excess == 32);
+        v = hs_x_verdict(r1_weak, NULL, 8, none, ov, tmp);
+        CHECK("verdict: the same without a floor stored: a refused floor run", v.run == HS_X_REFUSED && v.top == 0 && v.excess == 30);
+        /* The margins to the code: R8 24 qdb (6 dB) over the median is a floor, 25 is not; R2 40 qdb
+         * (10 dB) over its floor is a signal, 39 is weak. */
+        int32_t edge[8] = {-238, -238, -238, -238, -238, -238, -238, -214};
+        v = hs_x_verdict(edge, NULL, 8, none, ov, tmp);
+        const bool at24 = v.run == HS_X_FLOOR && v.excess == 24;
+        edge[7] = -213;
+        v = hs_x_verdict(edge, NULL, 8, none, ov, tmp);
+        CHECK("verdict: 6 dB over the median is a floor run, 6.25 dB is refused", at24 && v.run == HS_X_REFUSED && v.excess == 25);
+        int32_t sig[8];
+        for (unsigned i = 0; i < 8u; i++) sig[i] = off[i];
+        sig[1] = off[1] + 40;
+        v = hs_x_verdict(sig, floor16, 8, none, ov, tmp);
+        const bool at40 = v.run == HS_X_SIGNAL && v.top == 1 && v.excess == 40;
+        sig[1] = off[1] + 39;
+        v = hs_x_verdict(sig, floor16, 8, none, ov, tmp);
+        CHECK("verdict: 10 dB over its floor is run 2, 9.75 dB is weak", at40 && v.run == HS_X_WEAK && v.top == 1 && v.excess == 39);
+        /* A stored floor with no channel to compare (LOs without readings then): nothing to name as
+         * weak, so a raised run is refused as a floor run. */
+        int16_t nofloor[8];
+        for (unsigned i = 0; i < 8u; i++) nofloor[i] = (int16_t)none;
+        v = hs_x_verdict(r6_on, nofloor, 8, none, ov, tmp);
+        CHECK("verdict: a stored floor without one channel in it: refused", v.run == HS_X_REFUSED && v.top == 5 && ov[5] == INT32_MIN);
+        const int32_t r6_gap[8] = {-239, -236, -238, -236, none, -8, -238, -233};
+        v = hs_x_verdict(r6_gap, floor16, 8, none, ov, tmp);
+        CHECK("verdict: a channel without a reading has no rise over its floor", v.run == HS_X_SIGNAL && ov[4] == INT32_MIN);
+    }
+
+    /* K S's saturated word (bench.md section 5: hop 0 in the top digit, `0f00` = R3+R4 clipped 15). */
+    {
+        const unsigned w0f00[HS_SAT_HOPS] = {0, 15, 0, 0}, w1234[HS_SAT_HOPS] = {1, 2, 3, 4}, wcap[HS_SAT_HOPS] = {16, 0, 0, 3},
+                       wbig[HS_SAT_HOPS] = {255, 300, 15, 14}, wnone[HS_SAT_HOPS] = {0, 0, 0, 0};
+        CHECK("sat word: the second hop clipped 15 times reads 0f00", hs_sat_pack(w0f00) == 0x0f00u);
+        CHECK("sat word: hop 0 in the top nibble", hs_sat_pack(w1234) == 0x1234u);
+        CHECK("sat word: a count over 15 (decim 16) reads 15, never wraps", hs_sat_pack(wcap) == 0xf003u &&
+                                                                              hs_sat_pack(wbig) == 0xfffeu);
+        CHECK("sat word: nothing clipped", hs_sat_pack(wnone) == 0u);
     }
 
     CHECK("excess: twice the floor is the floor", near_f(hs_excess_db(-60.0f + 3.0103f, -60.0f), -60.0f, 0.01f));
