@@ -98,7 +98,8 @@ they change nothing.
 ## Antenna
 
 [`antenna/`](antenna/README.md) holds a directive 5.8 GHz quasi-Yagi on FR-4, a separate board
-that reaches a C5-Zero through its IPEX connector. It has not been simulated or built.
+that reaches a C5-Zero through its IPEX connector. Its openEMS model gives about 4.5 dBi along its
+axis across the Raceband, in a beam 64° by 84° wide. It has not been built.
 
 ## Enclosure
 
