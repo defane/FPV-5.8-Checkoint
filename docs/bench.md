@@ -236,8 +236,10 @@ SINGLE (one LO per channel, 8 MHz below it; its 8 new LOs calibrate on their fir
 prints that plan, takes 100 rotations, then `SDRPLAN compare gain=… pairs_qdb=… single_qdb=…
 pairs_hz_x10=… single_hz_x10=…` and `SDRPLAN done (PAIRS again)`. `pairs_qdb` is also the
 quickest read of every channel's median level at the current gain. On the C5-Zero, a 25 mW
-VTX on R6 ([board] 2026-11-15): PAIRS 537 Hz per channel with R6 at +41 dB, SINGLE 269 Hz
-with R6 at +34 dB. PAIRS stays the plan: twice the rate, and the VTX reads at least as strong.
+VTX on R6 ([board] 2026-11-15): PAIRS 537 Hz per channel with R6 41 dB over the other
+channels' floor (`pairs_qdb` −73 against about −237), SINGLE 269 Hz with R6 34 dB over it
+(−100 against about −234). PAIRS stays the plan: twice the rate, and the VTX reads at least
+as strong.
 
 ## 5. Scan recording: do real passes stand out?
 
