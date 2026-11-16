@@ -397,12 +397,22 @@ at gains 30 to 50 in steps of 4 (`K` `G` twice a step), reading R4's level at ea
 - (c) **Far drones**, live: a VTX at 3, 6 and 10 m from the gate, at 25 and 200 mW, on 2
   channels, flown or walked past at each distance. Record each pass's `peak_db` in the
   table below. Pass: only the passes within the gate's radius ring.
-- (d) **Relative re-arm**, live: a 25 mW VTX held about 3 m away (`K` `l`: note its rise),
-  then 5 hand passes at 0.3 m, back to 3 m for 5–10 s after each; then walk it 10 m away
-  and back to 0.3 m, 3 times. Pass: one `PASS` per pass, `rearm=rel` on each after the
-  first, none while it is held at 3 m. Record each pass's `peak_db` and the rise at 3 m:
-  the drop between them is what the default (16 dB, [detector.md](detector.md#relative-re-arm))
-  must stay under.
+- (d) **Relative re-arm**, live: a 25 mW VTX switched on and left still on a stand about
+  3 m away for 10 s (`K` `l`: note its rise), then 5 hand passes at 0.3 m, back on the
+  stand for 5–10 s after each; then walk it 10 m away and back to 0.3 m, 3 times. Pass:
+  one `PASS` per pass, `rearm=rel` on each after the first, none while it stands at 3 m
+  (the [host] model: 40 runs of 40 so with a still VTX). Record each pass's `peak_db` and
+  the rise at 3 m: the drop between them is what the default (16 dB,
+  [detector.md](detector.md#relative-re-arm)) must stay under.
+  - **Not a fault**: a `PASS` as the VTX is switched on (or reaches 3 m), when it wobbles.
+    The channel then waits until its 1 s average falls 16 dB under its highest level, so
+    the first hand pass is lost with it ("The start pad" in detector.md): redo that pass.
+    Held by hand instead of on a stand, a VTX at 3 m wobbles about 5 dB ([board]
+    recordings): in the host model the power-on rang in 40 runs of 40 and took the first
+    hand pass in 34, about 1 extra `PASS` rang per 80 s held, and each extra cost the next
+    hand pass. Count the extras per minute held if you test it by hand.
+  - A hand pass that peaks under about 18 dB (D + 2) over the rise at 3 m can be lost: that
+    is the re-arm's contrast limit, not a fault.
 - If not: tune `min_peak_db` and `active_db` from the recorded rises until (c) holds, then
   change the C3 and C6 defaults with them ([detector.md](detector.md)). A fleet waits for
   (c) before using this engine.
@@ -482,13 +492,16 @@ boot prints `pair_guard=1`), logged (`flash.py --log`). In this order:
    +7 dB at most on the other LOs with R6 at the ceiling, [board] 2026-11-15).
 7. **B-g7, hover.** R6 held 10 s at 6 cm while R5 passes at 1 m every 3 s. Expect no R5
    lap, no phantom, and R5 *unknown* in `STATS` (the C3's page) during the hold.
-8. **B-g8, a step into the rails.** R5's VTX held still at 3 m (about 30 dB up, [board]
-   2026-11-15), then R6's VTX switched on (battery plugged in, or out of pit mode) with
-   the drone held at 6 cm, for about 0.3 s and for about 2 s, 5 times each, `K` `l` on.
-   Expect no R5 `PASS`, R6's `held=` a few readings per onset at most, R5's `held=`
-   rising, and one R6 `PASS` per onset. After each 2 s onset, R5 brought to 0.3 m and back
-   (about 20 dB more) rings one `PASS … rearm=rel` (the long hold restarts R5 at its level,
-   relatively armed). Then the same with R5 off.
+8. **B-g8, a step into the rails.** R5's VTX on a stand at 3 m (about 30 dB up, [board]
+   2026-11-15), switched on at least 10 s before, then R6's VTX switched on (battery
+   plugged in, or out of pit mode) with the drone held at 6 cm, for about 0.3 s and for
+   about 2 s, 5 times each, `K` `l` on. Expect no R5 `PASS`, R6's `held=` about one
+   reading per onset, R5's `held=` rising, and one R6 `PASS` per onset. After each 2 s
+   onset, R5 brought to 0.3 m and back (about 20 dB more) rings one `PASS … rearm=rel`
+   (the long hold restarts R5 at its settled level, relatively armed; [host] 99 % of
+   them). Then the same with R5 off: no R5 `PASS`. Held by hand at 3 m, R5 wobbles and
+   rings by itself about once every 30–80 s ([host] models, B6 (d)): that is not the
+   guard; count those apart, or use the stand.
 
 - Retune the constants (`SD_HOLD_*` in `scan_detector.h`) from these numbers, not from the
   host model. Missed rises (B-g2) or leaks (B-g6) need another guard: report them.
