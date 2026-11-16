@@ -401,8 +401,8 @@ at gains 30 to 50 in steps of 4 (`K` `G` twice a step), reading R4's level at ea
   3 m away for 10 s (`K` `l`: note its rise), then 5 hand passes at 0.3 m, back on the
   stand for 5–10 s after each; then walk it 10 m away and back to 0.3 m, 3 times. Pass:
   one `PASS` per pass, `rearm=rel` on each after the first, none while it stands at 3 m
-  (the [host] model: 40 runs of 40 so with a still VTX). Record each pass's `peak_db` and
-  the rise at 3 m: the drop between them is what the default (16 dB,
+  (the [host] model gives exactly that in 40 runs of 40 with a still VTX). Record each
+  pass's `peak_db` and the rise at 3 m: the drop between them is what the default (16 dB,
   [detector.md](detector.md#relative-re-arm)) must stay under.
   - **Not a fault**: a `PASS` as the VTX is switched on (or reaches 3 m), when it wobbles.
     The channel then waits until its 1 s average falls 16 dB under its highest level, so
