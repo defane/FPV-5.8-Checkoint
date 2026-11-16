@@ -132,6 +132,38 @@ class AnalyzeQdb(unittest.TestCase):
         self.assertEqual(len(sa.find_passes(*args, rearm=25.0)[0]), 1, "a 20 dB rise does not split at 25 dB")
         self.assertEqual(sa.split_rearm([0.0, 1.0], [5.0, 6.0], 0, 1, 0.0), [(0, 1)])
 
+    @staticmethod
+    def split(f, seconds, drop=16.0, step=0.02):
+        """split_rearm over a smoothed level f(t) sampled every step s: the pieces' (start, end) in s."""
+        ts = [k * step for k in range(int(seconds / step) + 1)]
+        lv = [f(t) for t in ts]
+        return [(round(ts[a], 2), round(ts[b], 2)) for a, b in sa.split_rearm(ts, lv, 0, len(ts) - 1, drop)]
+
+    def test_relative_rearm_keeps_the_detectors_guards(self):
+        # Traces like test_pass_detector.c's (smoothed levels, dB over the rest): the pieces are the
+        # passes the detector rings there (1.5 s refractory, 1 s average, a pass 16 dB over the trough).
+        def tri(t, tc, peak, half):
+            return peak * max(0.0, 1.0 - abs(t - tc) / half)
+
+        def bump(t):    # a lap at 3 s, the drone staying 30 dB up, laps at 13 and 23 s, a 10 dB bump at 18 s
+            lap = max(50 - 20 * abs(t - 3), 50 - 20 * abs(t - 13), 50 - 20 * abs(t - 23))
+            return 0.0 if t < 2 else lap if t < 3 else max(30 + tri(t, 18, 10, 1.0), lap)
+
+        def faded(t):   # a pass held 45 dB up, 20 dB fades of 150 ms at 6 s and 300 ms at 9 s
+            if t < 2 or t > 12:
+                return 0.0
+            if t < 3.25:
+                return 50 - 20 * abs(t - 3)
+            return 25.0 if 6 <= t < 6.15 or 9 <= t < 9.3 else 45.0
+
+        def quick(t):   # two passes 1 s apart on a 20 dB plateau: the refractory period holds the second
+            return 0.0 if t < 1 else 20 + max(tri(t, 5.0, 30, 0.3), tri(t, 6.0, 31, 0.3))
+
+        self.assertEqual(self.split(bump, 30), [(0.0, 12.0), (12.02, 22.0), (22.02, 30.0)],
+                         "a lap per piece; a 10 dB bump after the re-arm (under its 16 dB) splits nothing")
+        self.assertEqual(self.split(faded, 14), [(0.0, 14.0)], "fades shorter than the 1 s average split nothing")
+        self.assertEqual(self.split(quick, 12), [(0.0, 12.0)], "no re-arm within the refractory period")
+
     def test_no_signal_floor_clamp(self):
         # A legacy recording clamps the threshold at SIGNAL_DB (-5 dB); a -35 dBFS peak is a pass here.
         passes = analyze_qdb(qdb_recording([(1, 6.0, 25, 0.15)], 14))
