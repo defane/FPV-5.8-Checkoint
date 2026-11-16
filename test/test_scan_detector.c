@@ -306,17 +306,20 @@ static void pair_run(const pdrone_t *hi, const pdrone_t *lo, int guard, uint64_t
  * STEP_CLIP_S for clip_s, switched on and off at once (a VTX armed by the antenna) or flown in and
  * out over 0.5 s (ramp). The pilot is R5 and the clipping drone R6, or the other way round (mirror).
  * Every run has the relative re-arm at `rearm`. fm: both read with the DSP's FM spread (PAIR_FM_X)
- * instead of 1 dB (the pilot) and 0.3 dB (the clipping source); nolaps: the pilot only parks. */
+ * instead of 1 dB (the pilot) and 0.3 dB (the clipping source); nolaps: the pilot only parks. A train
+ * (train_s > 0) follows the clip: for train_s, train_off_s clean then train_on_s clipped, over and over,
+ * the clipping drone train_db over the floor on the clean captures (0: off). */
 #define STEP_CLIP_S 13.5
 typedef struct {
     double base, after, clip_s;
     int ramp, mirror, fm, nolaps;
     float rearm;
+    double train_s, train_on_s, train_off_s, train_db;
 } step_t;
 typedef struct {
     unsigned n, n_src, held, held_src;   /* the pilot's passes and held readings; the clipping drone's */
     double t[8];                         /* the pilot's pass times (peak_ms), s */
-    pd_channel_t probe;                  /* the pilot's pd state 0.5 s after the clip */
+    pd_channel_t probe;                  /* the pilot's pd state 0.5 s after the clip (and its train) */
     float probe_rest_db;
 } step_out_t;
 
@@ -329,7 +332,7 @@ static void step_run(const step_t *p, uint64_t s, step_out_t *o)
     pd_set_rearm(&sd.det, p->rearm);
     seed(s);
     const unsigned pilot = p->mirror ? PAIR_HI : PAIR_LO, src = p->mirror ? PAIR_LO : PAIR_HI;
-    const double end = STEP_CLIP_S + p->clip_s;
+    const double end = STEP_CLIP_S + p->clip_s, tend = end + p->train_s;
     bool probed = false;
     for (int64_t t = T0_US; t < T0_US + S(26.0); t += RATE_A_US) {
         for (unsigned hop = 0; hop < 4u; hop++) {
@@ -345,7 +348,9 @@ static void step_run(const step_t *p, uint64_t s, step_out_t *o)
                     v = fmax(v, (base > 0.0 ? base : 0.0) + 20.0 * exp(-0.5 * x * x));
                 }
                 const double a = PAIR_FLOOR + v + (p->fm ? fm_x() : gauss(1.0f));
-                if (ts >= STEP_CLIP_S && ts < end) {
+                const bool train = ts >= end && ts < tend;
+                if ((ts >= STEP_CLIP_S && ts < end) ||
+                    (train && fmod(ts - end, p->train_off_s + p->train_on_s) >= p->train_off_s)) {
                     fl = SD_FLAG_SATURATED;
                     rs = PAIR_CLIP_DBFS + 5.0 + gauss(0.3f);
                     if (p->fm) {
@@ -358,10 +363,11 @@ static void step_run(const step_t *p, uint64_t s, step_out_t *o)
                 } else {
                     rp = psum(rp, a);
                     const double away = ts < STEP_CLIP_S ? STEP_CLIP_S - ts : ts - end;
-                    if (p->ramp && away < 0.5) rs = psum(rs, PAIR_CLIP_DBFS - 1.0 - 60.0 * away + gauss(1.0f));
+                    if (train && p->train_db > 0.0) rs = psum(rs, PAIR_FLOOR + p->train_db + gauss(1.0f));
+                    else if (p->ramp && away < 0.5) rs = psum(rs, PAIR_CLIP_DBFS - 1.0 - 60.0 * away + gauss(1.0f));
                 }
             }
-            if (hop == PAIR_HOP && ts >= end + 0.5 && !probed) {
+            if (hop == PAIR_HOP && ts >= tend + 0.5 && !probed) {
                 probed = true;
                 o->probe = sd.det.ch[pilot];
                 o->probe_rest_db = sd.c[pilot].rest_db;
@@ -1282,6 +1288,53 @@ int main(void)
         }
         printf("     long hold, R5 35 dB up then 15: right in %u/10\n", ok);
         CHECK(ok == 10u, "a 20 dB drop across a long hold rings nothing; R5 rings every lap");
+    }
+
+    /* 34. Shorter holds while a channel settles from a long one. (a) R5 laps at the floor (5, 11, 17,
+     *     23 s); R6 switched on beside the antenna from 13.5 s for 0.7 s holds it (long), then hovers
+     *     45 dB up at the clip edge for 5.3 s: one clipped capture every 200 ms, or 80 ms clipped every
+     *     230 ms. Each clip holds R5 briefly. Counted as long, each one restarted R5's settle, so the
+     *     settle lasted the whole hover and R5's 17 s lap rang nothing (5855724: in 0 of these 40
+     *     runs). Now a shorter hold only pauses the settle, and R5 rings every lap. Re-arm 16 and 0.
+     *     (b) Check 30's still R5 12-35 dB up after its 2 s hold, R6 back for 0.3 s 60 ms later: that
+     *     hold comes while R5 has barely started to settle, so the settle waits for it and R5 still
+     *     starts again within 3 dB of its level, ringing nothing. Without the pause the settle ended
+     *     during that hold and R5 started again from a one-median average (trough -8.0..+5.3 dB off). */
+    {
+        static const double on[2] = {0.003, 0.08}, off[2] = {0.2, 0.15};
+        static const float ra[2] = {16.0f, 0.0f};
+        unsigned runs = 0, ok = 0;
+        for (unsigned t = 0; t < 2u; t++)
+            for (unsigned d = 0; d < 2u; d++)
+                for (uint64_t k = 0; k < 10u; k++) {
+                    const step_t p = {.clip_s = 0.7, .rearm = ra[d], .train_s = 5.3, .train_on_s = on[t],
+                                      .train_off_s = off[t], .train_db = 45.0};
+                    step_out_t o;
+                    step_run(&p, 3400 + 20u * t + 10u * d + k, &o);
+                    runs++;
+                    ok += step_laps(&o) == 0xFu && o.held > 340u;
+                }
+        printf("     long hold, then R6 at the clip edge for 5.3 s: R5 rings every lap and nothing else in %u/%u\n", ok, runs);
+        CHECK(ok == runs, "a shorter hold during the settle does not restart it: a lap in a clip-edge hover rings");
+        static const double lv[5] = {12.0, 18.0, 25.0, 30.0, 35.0};
+        unsigned truns = 0, phantom = 0, tr_ok = 0;
+        float lo = 1e9f, hi = -1e9f;
+        for (unsigned l = 0; l < 5u; l++)
+            for (uint64_t k = 0; k < 20u; k++) {
+                const step_t p = {.base = lv[l], .after = lv[l], .clip_s = 2.0, .fm = 1, .nolaps = 1, .rearm = 16.0f,
+                                  .train_s = 0.36, .train_on_s = 0.3, .train_off_s = 0.06};
+                step_out_t o;
+                step_run(&p, 3500 + 20u * l + k, &o);
+                truns++;
+                phantom += step_laps_from(&o, 6.0) != 0u;
+                const float dd = o.probe.trough - (float)lv[l];
+                tr_ok += o.probe.state == PD_IDLE && o.probe.rel && fabsf(dd) < 3.0f;
+                lo = fminf(lo, dd);
+                hi = fmaxf(hi, dd);
+            }
+        printf("     still R5 12-35 dB up, a 0.3 s hold 60 ms after its 2 s one: trough %+.1f..%+.1f dB off its level, "
+               "a phantom in %u/%u runs\n", (double)lo, (double)hi, phantom, truns);
+        CHECK(tr_ok == truns && phantom == 0u, "a hold just after the settle began pauses it: R5 starts within 3 dB, nothing rings");
     }
 
     printf("%d/%d scan_detector checks passed\n", g_pass, g_pass + g_fail);

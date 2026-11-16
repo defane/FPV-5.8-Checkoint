@@ -120,23 +120,29 @@ under the strong channel, a few % of captures above it ([host]).
   55 dB over the floor: the source rang in 16 of 20 runs with the partner 44 dB up, in
   none from 46 dB).
 - When a held channel is fed again, its median restarts on fresh readings. If it stood
-  `min_peak_db` up when the hold began (a real pass under way), its average catches up
-  to the fresh median less `drop_db`, upwards only, so a catch-up never rings by itself.
+  `min_peak_db` up when the hold began (a real pass under way), its average catches up to
+  the fresh median less `drop_db`, upwards only, so a catch-up never rings by itself.
   After a hold over `SD_HOLD_LONG_US` (0.5 s) what it did while blind is unknown, so once
   its fresh median is full its average starts again from that median, whatever the hold's
   length. One median of a VTX's channel can sit 9–14 dB under its level, or 5 dB over it
   (the FM swings the band power, [host]). So the state does not start from it: it follows
-  the fresh average, ringing nothing, for `SD_HOLD_SETTLE_TAUS` (5) time constants, 0.3 s at
-  the default `alpha`, then starts again from it (`pd_resume()`). Under the release the
-  channel is armed. Over it, it is relatively armed with that level as its trough (with the
-  re-arm off, in `COOLDOWN` until it falls under the release). A hold that begins meanwhile
-  counts as long. The falling tail of a pass it missed does not rise the re-arm's 16 dB over
-  that level, so it rings nothing; its next pass does ([host] check 28). Started from the
-  median itself, a still VTX 12–35 dB up rang a phantom after 3–11 % of 2 s holds ([host]
-  readings drawn from the DSP, 1000 holds per level; check 30's model: 5 of 200); from the
-  settled average, none of them. A pass that began
-  to rise while the channel was blind, or in the 0.3 s after, must still rise 16 dB over the
-  level it comes back at, or it is lost with the blind window.
+  the fresh average, ringing nothing, for `SD_HOLD_SETTLE_TAUS` (5) time constants, 0.3 s
+  at the default `alpha`, then starts again from it (`pd_resume()`). Under the release the
+  channel is armed. Over it, it is relatively armed with that level as its trough (with
+  the re-arm off, in `COOLDOWN` until it falls under the release). A shorter hold during
+  the settle pauses it: the settle counts only the time the channel is fed. A hold over
+  0.5 s starts it again. When every hold that began meanwhile counted as long, each one
+  restarted the settle. A drone hovering at the clip edge then kept its partner ringing
+  nothing for the whole hover ([host] check 34, one clipped capture every 200 ms for
+  5.3 s: the partner's lap rang in 0 of 40 runs, now in 40; race harness on the DSP readings,
+  R6 hovering 20 s 0.17 m from the antenna while R5 laps at 1 m: R5 kept 20 of 348 laps
+  during the hover, now 58, and 67 without the settle). The falling tail of a pass it
+  missed does not rise the re-arm's 16 dB over that level, so it rings nothing; its next
+  pass does ([host] check 28). Started from the median itself, a still VTX 12–35 dB up
+  rang a phantom after 3–11 % of 2 s holds ([host] readings drawn from the DSP, 1000 holds
+  per level; check 30's model: 5 of 200); from the settled average, none of them. A pass
+  that began to rise while the channel was blind, or in the 0.3 s of readings after, must
+  still rise 16 dB over the level it comes back at, or it is lost with the blind window.
 - A capture without the flag (outside a hover's tail) goes through exactly as before: the
   same passes to the bit ([host] `test_scan_detector.c` check 22).
 - A held reading counts as none: a channel held for 1 s reads *unknown* on the bridges

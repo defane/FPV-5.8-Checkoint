@@ -139,7 +139,7 @@ bool sd_feed(scan_detector_t *sd, unsigned channel, int16_t level_qdb, uint8_t f
     if (sd->settle_mask & bit) {
         /* Back from a long hold (refill): one median can sit 10 dB off the level (a VTX's FM swings
          * its band power), so pd follows the fresh average, ringing nothing, until it has settled
-         * and starts again from there. */
+         * and starts again from there. A shorter hold meanwhile moved settle_from_us on (resume). */
         pd_resume(&sd->det, channel, rise, now_ms);
         if ((float)(t_us - sd->settle_from_us[channel]) >= SD_HOLD_SETTLE_TAUS * sd->tau_us)
             sd->settle_mask &= (uint8_t)~bit;
@@ -208,9 +208,10 @@ static unsigned pair_hold(scan_detector_t *sd, unsigned hop, unsigned ca, unsign
 }
 
 /* A held channel fed again: its median restarts on fresh readings. Once it is full (sd_feed_hop),
- * a real pass under way catches up, and a channel back from a long hold starts again from it. A hold
- * that began while the channel still settled from an earlier one counts as long: it was blind
- * nearly all along. */
+ * a real pass under way catches up, and a channel back from a long hold starts again from it. A
+ * shorter hold while the channel still settles from a long one only pauses the settle: it moves
+ * the settle's start on by the hold, so the average still gets SD_HOLD_SETTLE_TAUS of readings
+ * (counted as long, one clipped capture every 200 ms restarted it for as long as they came). */
 static void resume(scan_detector_t *sd, unsigned ch, int64_t t_us)
 {
     sd_channel_t *c = &sd->c[ch];
@@ -218,7 +219,9 @@ static void resume(scan_detector_t *sd, unsigned ch, int64_t t_us)
     sd->held_mask &= (uint8_t)~bit;
     c->nhist = 0;
     c->hidx = 0;
-    if (t_us - sd->held_since_us[ch] > SD_HOLD_LONG_US || (sd->settle_mask & bit)) sd->long_mask |= bit;
+    const int64_t held_us = t_us - sd->held_since_us[ch];
+    if (held_us > SD_HOLD_LONG_US) sd->long_mask |= bit;
+    else if (sd->settle_mask & bit) sd->settle_from_us[ch] += held_us;
     else if (sd->held_rise_db[ch] >= sd->det.cfg.min_peak_db) sd->fresh_mask |= bit;
 }
 

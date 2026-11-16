@@ -35,8 +35,9 @@ menu "Checkpoint detector"
             run ends. A hover (a run of saturated captures over 150 ms) holds
             30 ms longer after each one. A channel held over 0.5 s starts
             again from the level it comes back at, once its fresh average has
-            settled (0.3 s at the default alpha, ringing nothing meanwhile):
-            armed under the release; over it, relatively armed there, or in
+            settled (0.3 s of readings at the default alpha, ringing nothing
+            meanwhile; a shorter hold pauses it): armed under the release;
+            over it, relatively armed there, or in
             COOLDOWN until it falls under the release with
             CHECKPOINT_REARM_DROP_DB at 0. Off, every reading is fed as it
             comes, the phantoms included. The rules:

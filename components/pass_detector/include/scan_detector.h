@@ -55,11 +55,12 @@
  * itself). After a hold longer than SD_HOLD_LONG_US, what it did while blind is unknown: once its
  * median is full, its average starts again from that median, whatever the hold's length. One median
  * can sit 10 dB off the level (a VTX's FM swings its band power), so pd follows that average,
- * ringing nothing, for SD_HOLD_SETTLE_TAUS time constants (0.3 s at the default alpha), then starts
- * again from it (pd_resume: armed under the release; over it relatively armed with that level as its
- * trough, or in COOLDOWN with the re-arm off). A hold that begins meanwhile counts as long. The
- * falling tail of a pass it missed does not rise the re-arm's drop over that level, so it rings
- * nothing; its next pass does. Unsaturated captures go through exactly as sd_feed. */
+ * ringing nothing, for SD_HOLD_SETTLE_TAUS time constants of fed readings (0.3 s at the default alpha),
+ * then starts again from it (pd_resume: armed under the release; over it relatively armed with that
+ * level as its trough, or in COOLDOWN with the re-arm off). A shorter hold meanwhile pauses the settle
+ * for as long as it lasts; a long one starts it again. The falling tail of a pass it missed does not
+ * rise the re-arm's drop over that level, so it rings nothing; its next pass does. Unsaturated
+ * captures go through exactly as sd_feed. */
 #pragma once
 #include "pass_detector.h"
 #include <stdbool.h>
@@ -126,7 +127,7 @@ typedef struct {
     uint8_t fresh_mask;               /* channels catching up once their median is full again */
     uint8_t long_mask;                /* channels back from a long hold, restarting once it is full */
     uint8_t settle_mask;              /* channels restarted from a fresh median whose average still settles */
-    int64_t settle_from_us[PD_CHANNELS];   /* when that median filled */
+    int64_t settle_from_us[PD_CHANNELS];   /* when that median filled, moved on by each shorter hold since */
     uint32_t held[PD_CHANNELS];       /* per channel, readings held since sd_init (diagnostics) */
 } scan_detector_t;
 
