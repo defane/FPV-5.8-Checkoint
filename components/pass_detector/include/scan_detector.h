@@ -46,8 +46,11 @@
  * source itself, frozen low for the whole run, and feed its products to the partner. So when the
  * median of a channel's last 3 readings stands more than SD_HOLD_DOM_DB over its partner's and more
  * than SD_HOLD_JUMP_DB over its own average, it is the run's source: its partner is held until the
- * saturated run ends. A drone flown in never leads its average that much (host model), so there
- * both rules hold the same channel. The rule needs the partner more than SD_HOLD_DOM_DB under the
+ * saturated run ends. A drone flown in never leads its live average that much (host model), so
+ * there both rules hold the same channel. A held channel's average is frozen, though: a drone that
+ * crosses close while another clips can be named partway through that run, and the clipping drone
+ * is then held to its end (its pass lost past SD_HOLD_LONG_US; docs/detector.md). The rule needs
+ * the partner more than SD_HOLD_DOM_DB under the
  * source's rails reading (about 40 dB over the floor at most): a partner higher than that leaves the
  * source held as by the smoothed levels alone. When a held channel is fed again, its median
  * restarts on fresh readings; if it stood min_peak_db up as its hold began (a real pass under way),

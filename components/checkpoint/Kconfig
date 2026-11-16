@@ -61,6 +61,10 @@ menu "Checkpoint detector"
               1 m from the antenna while another is armed beside it) leaves the
               source held for its whole run: its own onset rings nothing, the
               partner's laps are kept (host model).
+            - Two drones at the gate together: a drone that crosses close while
+              another one's slow pass clips can be named the source partway
+              through it. The clipping drone is then held to the end of its run
+              and loses its pass when over 0.5 s of it is left (host model).
             - It keys on the saturated flag only: a compression before the
               ADC rails (no rail hit, no flag) is not covered. Bench B11
               checks whether the board does that.

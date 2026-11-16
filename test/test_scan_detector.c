@@ -315,9 +315,12 @@ typedef struct {
     int ramp, mirror, fm, nolaps;
     float rearm;
     double train_s, train_on_s, train_off_s, train_db;
+    double cross_s, cross_db, cross_lap_s;   /* cross_s > 0: the pilot also crosses close then, cross_db up
+                                              * (sigma 60 ms), and every cross_lap_s after (0: once) */
 } step_t;
 typedef struct {
     unsigned n, n_src, held, held_src;   /* the pilot's passes and held readings; the clipping drone's */
+    double named_s;                      /* when the pilot was first named its hop's source, 0 = never */
     double t[8];                         /* the pilot's pass times (peak_ms), s */
     pd_channel_t probe;                  /* the pilot's pd state 0.5 s after the clip (and its train) */
     float probe_rest_db;
@@ -346,6 +349,10 @@ static void step_run(const step_t *p, uint64_t s, step_out_t *o)
                 for (int k = 0; k < (p->nolaps ? 0 : 4); k++) {
                     const double x = (ts - (5.0 + 6.0 * k)) / 0.15;
                     v = fmax(v, (base > 0.0 ? base : 0.0) + 20.0 * exp(-0.5 * x * x));
+                }
+                for (double tc = p->cross_s; tc > 0.0 && tc < 26.0; tc += p->cross_lap_s > 0.0 ? p->cross_lap_s : 99.0) {
+                    const double x = (ts - tc) / 0.06;
+                    v = fmax(v, p->cross_db * exp(-0.5 * x * x));
                 }
                 const double a = PAIR_FLOOR + v + (p->fm ? fm_x() : gauss(1.0f));
                 const bool train = ts >= end && ts < tend;
@@ -377,6 +384,7 @@ static void step_run(const step_t *p, uint64_t s, step_out_t *o)
             rd[src & 1u] = (sd_reading_t){th, qdb((float)rs), (uint8_t)(2u * hop + (src & 1u)), fl};
             pd_event_t ev[2];
             const unsigned got = sd_feed_hop(&sd, hop, rd, 2, ev, NULL);
+            if (hop == PAIR_HOP && !o->named_s && sd.sat_src[PAIR_HOP] == 1u + (pilot & 1u)) o->named_s = ts;
             for (unsigned i = 0; i < 2; i++) {
                 if (!(got & (1u << i))) continue;
                 if (ev[i].channel == pilot && o->n < 8u) o->t[o->n++] = ev[i].peak_ms / 1000.0 - T0_US / 1e6;
@@ -1335,6 +1343,52 @@ int main(void)
         printf("     still R5 12-35 dB up, a 0.3 s hold 60 ms after its 2 s one: trough %+.1f..%+.1f dB off its level, "
                "a phantom in %u/%u runs\n", (double)lo, (double)hi, phantom, truns);
         CHECK(tr_ok == truns && phantom == 0u, "a hold just after the settle began pauses it: R5 starts within 3 dB, nothing rings");
+    }
+
+    /* 35. A crashed drone on the gate, and a duel (the DSP's FM spread on both). R6 at 600 mW flies in
+     *     and clips from 13.5 s; R5 crosses close, 59 dB up (sigma 60 ms, 3 dB down while R6 clips). R5
+     *     is held, its average frozen, so its median leads it as it crosses: when R6's FM dips on 2 of
+     *     its last 3 readings, R5 is named the run's source partway through R6's run, and keeps the
+     *     name to the end of it. (a) R6 crashed, parked 10 s, R5 crossing every 4 s: once named, R5
+     *     stays fed and rings most of its later crossings (31 of 38; the others stand under the
+     *     re-arm's 16 dB over R6's products). (b) R6 passing slowly, clipping 1 s, R5 crossing once
+     *     0.2-0.4 s into it: R6 is then held to the end of its run, past SD_HOLD_LONG_US, and lost its
+     *     pass in 11 of the 19 runs that named R5 (none of the others). Losing the name once R5 had
+     *     gone (fd24c69, reverted) kept all of (b) and rang none of (a)'s later crossings. */
+    {
+        unsigned runs_a = 0, named_a = 0, later = 0, later_ok = 0;
+        for (uint64_t k = 0; k < 40u; k++) {
+            const step_t p = {.clip_s = 10.0, .ramp = 1, .fm = 1, .nolaps = 1, .rearm = 16.0f, .cross_s = STEP_CLIP_S + 0.5,
+                              .cross_db = 59.0, .cross_lap_s = 4.0};
+            step_out_t o5;
+            step_run(&p, 3600 + k, &o5);
+            runs_a++;
+            if (!o5.named_s) continue;
+            named_a++;
+            for (double tc = p.cross_s; tc < STEP_CLIP_S + p.clip_s; tc += p.cross_lap_s) {
+                if (tc < o5.named_s + 0.5) continue;   /* the crossings after the one that named R5 */
+                later++;
+                for (unsigned i = 0; i < o5.n; i++)
+                    if (fabs(o5.t[i] - tc) < 0.15) { later_ok++; break; }
+            }
+        }
+        static const double at[3] = {0.2, 0.3, 0.4};
+        unsigned runs_b = 0, named_b = 0, lost_b = 0, lost_other = 0;
+        for (unsigned o = 0; o < 3u; o++)
+            for (uint64_t k = 0; k < 20u; k++) {
+                const step_t p = {.clip_s = 1.0, .ramp = 1, .fm = 1, .nolaps = 1, .rearm = 16.0f,
+                                  .cross_s = STEP_CLIP_S + at[o], .cross_db = 59.0};
+                step_out_t o5;
+                step_run(&p, 3700 + 20u * o + k, &o5);
+                runs_b++;
+                if (o5.named_s) { named_b++; lost_b += o5.n_src == 0u; }
+                else lost_other += o5.n_src != 1u;
+            }
+        printf("     (a) R6 crashed 10 s, R5 crossing every 4 s: R5 named in %u/%u runs, then %u/%u later crossings rang; "
+               "(b) R6 clipping 1 s: R5 named in %u/%u, R6's pass lost in %u of them, %u otherwise\n", named_a, runs_a,
+               later_ok, later, named_b, runs_b, lost_b, lost_other);
+        CHECK(named_a > 0u && later > 0u && 2u * later_ok > later, "a drone named past a crashed one stays fed: it rings its later laps");
+        CHECK(lost_other == 0u, "unnamed, the slow clipping drone rings its pass");
     }
 
     printf("%d/%d scan_detector checks passed\n", g_pass, g_pass + g_fail);

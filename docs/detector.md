@@ -108,8 +108,8 @@ under the strong channel, a few % of captures above it ([host]).
   18 captures while a partner at the floor was fed its products (a phantom on 1–3 % of
   the onsets within 10 cm, [host] DSP readings; none with the median). A drone flown in
   leads its average by 9 dB at most at 20 m/s, 16 dB at 60 m/s ([host] reading model),
-  so it never takes this path: the host evaluation below (its scenarios and its seven
-  model variants) gives the same results to the byte. With the partner up, the source is
+  so it never takes this path as it flies in: the host evaluation below (its scenarios
+  and its seven model variants) gives the same results to the byte. With the partner up, the source is
   still held on its first clipped capture ([host] check 29; with the FM spread 1.5
   captures on average, 5 at most).
 - **The jump rule's limit.** It needs the partner more than 15 dB under the source's
@@ -119,6 +119,21 @@ under the strong channel, a few % of captures above it ([host]).
   its own onset rings nothing; every lap of the partner is still kept ([host], the rails
   55 dB over the floor: the source rang in 16 of 20 runs with the partner 44 dB up, in
   none from 46 dB).
+- **A source named partway through a run.** A held channel's average is frozen. A drone
+  that crosses close while another one clips leads it, so when the clipping drone's FM
+  dips on 2 of its last 3 readings, the crossing drone is named the source partway through
+  that run, and the clipping drone is held to its end. The crossing drone rings its pass
+  (it was blind otherwise). The clipping drone loses its own pass when more than 0.5 s of
+  its run is left: a slow pass, which clips 0.9–1.3 s at 2–3 m/s and 0.3 m for 600 mW
+  ([host]). Race harness on the DSP readings ([host]; R6 at 600 mW passing 0.3 m away at
+  2–5 m/s, R5 at 25 mW crossing 0.1–0.5 m away within 0.6 s of it; 47520 laps each): R6
+  missed 7260 laps, against 6979 when the lowest of the 3 readings named the source, which
+  seldom named one partway through a run; R5 missed 21004 against 21752. The name also
+  helps: with R6 crashed on the gate, clipping for 20 s, a drone lapping 0.2 m from the
+  antenna, once named, stays fed and rings its later laps (R5 missed 6846 of 16200, 7481
+  with the lowest of the 3). Losing the name once the source had gone gave R6 its laps
+  back (6812) but cost the crashed case (7895), so the name stays to the end of the run
+  ([host] check 35).
 - When a held channel is fed again, its median restarts on fresh readings. If it stood
   `min_peak_db` up when the hold began (a real pass under way), its average catches up to
   the fresh median less `drop_db`, upwards only, so a catch-up never rings by itself.
