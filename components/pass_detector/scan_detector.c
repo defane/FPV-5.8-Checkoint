@@ -179,7 +179,7 @@ static bool raw3(const scan_detector_t *sd, unsigned ch, int16_t *med)
 /* Which reading of a guarded capture of two channels to hold: bit i for r[i] (see scan_detector.h).
  * A jump into the rails names its source for the rest of the run: the median of its last 3
  * readings stands more than SD_HOLD_DOM_DB over its partner's and more than SD_HOLD_JUMP_DB over its
- * own average (a drone flown in leads its average by 9 dB at most at 20 m/s, 15 at 60 m/s, host
+ * own average (a drone flown in leads its average by 9 dB at most at 20 m/s, 16 at 60 m/s, host
  * model: the smoothed levels then hold the same channel). The products never pass for their source:
  * they top it by 12.8 dB at most on a capture (host DSP), so they would need two of the source's 3
  * readings over its median. Not the lowest of the 3: a clipping source's FM dips 6-22 dB on a
