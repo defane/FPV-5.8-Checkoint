@@ -131,12 +131,13 @@
         aria-expanded="false" aria-controls="rearm_note">i</button></span>
       <input id="rearm" type="number" step="1" min="0" max="40">
       <div id="rearm_note" class="note" hidden>
-        <p>After a pass, the gate re-arms once the signal's 1 s average falls this many dB under the pass's peak;
-          the next pass must then climb as far over the lowest level since.</p>
+        <p>After a pass, the gate re-arms once the signal's 1 s average falls this many dB under its highest
+          level since the pass; the next pass must then climb as far over the lowest level since.</p>
         <p>It lets laps count when a drone never goes far from the gate: a small indoor track, a strong VTX.</p>
         <p><b>Recommended: 16 dB.</b></p>
         <p>Laps missed on a small track or with a strong VTX: lower it, 12–14. Extra laps outdoors: raise it, 18–20.
-          A lap counts when the gate pass stands about this much plus 2 dB above the rest of the lap.
+          A lap counts when the gate pass stands about this much plus 2 dB above the far side of the track,
+          where the lap reads lowest.
           0 turns it off: the gate then re-arms only near the noise floor.</p>
       </div>
     </div>

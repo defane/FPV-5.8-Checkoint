@@ -23,6 +23,10 @@ for (const [name, src] of Object.entries(pages)) {
 }
 check("the CSS snippet is the same on both pages", css(pages.node) === css(pages.master));
 check("the JS snippet is the same on both pages", js(pages.node) === js(pages.master));
+// The re-arm drop's note: fleet.md promises the C6 the C3's bubble.
+const rearmNote = src => cut(src, '<div id="rearm_note" class="note" hidden>', "<p>", "</div>");
+check("the re-arm note is on both pages", rearmNote(pages.node).includes("Recommended: 16 dB"));
+check("the re-arm note says the same on both pages", rearmNote(pages.node) === rearmNote(pages.master));
 
 // A DOM just big enough for the snippet: closest/contains, attributes, hidden, focus + focusin.
 const listeners = {};

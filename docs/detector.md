@@ -362,7 +362,9 @@ Which value ([host], the tables above, mild fading): 16 dB unless the laps say o
 - Laps missed on a small track or with a strong VTX: lower it, 12–14 (indoor, the antenna
   1–3 m from the line: 9 % missed at 12, 32 % at 16).
 - Extra laps outdoors: raise it, 18–20 (600 mW: 36 % extra at 12, 4 % at 16, 2 % at 20).
-- A lap counts when its gate pass stands about D + 2 dB over the rest of the lap.
+- A lap counts when its gate pass stands about D + 2 dB over the far side of the track,
+  where the lap reads lowest: the next pass climbs from that trough, whatever the rest of
+  the lap reads.
 
 ## Parameters (console `K`, saved in NVS namespace "checkpoint", key "prefs")
 
