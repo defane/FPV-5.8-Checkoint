@@ -60,9 +60,22 @@ with no change on the gate side.
 - **Channels panel:** the C6 page shows one row per gate, the degraded C3 page one
   tile per channel, R1 to R8, with its level in dB above the channel's rest and a yellow
   mark on a pass; `—` while the C5 is away or calibrating. A VTX left on keeps showing.
+- **Re-arm drop (fleet):** the C6 keeps one relative re-arm drop for every gate (NVS,
+  16 dB until an admin sets one; what it does: [detector.md](detector.md#setting-d)). The
+  advanced view's *Detector (every gate)* card sets it (admin only), with the same info
+  bubble as the C3's: what it does, the recommended 16 dB and how to tune it.
+  `POST /api/rearm` `{"rearm_db_x10": 0..400}` → `{"ok": true}`, or `{"ok": false}` out of
+  range. The online remote gates get it at once in their `CONFIG`, and a remote gate again
+  at pairing, on its save and when it comes back online. Gate 0 keeps its other settings: the
+  C6 sends its C5 a `CONFIG_SET` of the values that C5 echoed with the fleet's drop, when
+  the C6 boots, when that C5 says `HELLO` (it rebooted) and on each *Apply*. A gate whose C5
+  echoes another drop (`NODE_STATUS` relays it) shows it next to its detector state, e.g.
+  `D 12`: it missed the last `CONFIG` (its C5 was away) or a console `K` `e`/`E` changed
+  it; *Apply* sends the fleet's again. `/api/state` carries the fleet's value
+  (`rearm_db_x10`) and each gate's echo (`local` and every node, `-1` until its C5 told it).
 - **Web roles:** two levels. A **spectator** sees timings/status read-only (no
-  login); **admin** actions (pairing, gate order, reset, volume, a
-  gate's calibration or reboot; detector tuning on a degraded
+  login); **admin** actions (pairing, gate order, reset, volume, the fleet's re-arm drop,
+  a gate's calibration or reboot; detector tuning on a degraded
   C3) need the admin password (`CONFIG_*_ADMIN_PASSWORD`, no
   username, any length): the header's admin toggle opens a password
   dialog; turning it off forgets it. An empty password disables
@@ -151,7 +164,8 @@ page for a gate with no master.
   degraded C3's `POST /api/command` `{"cmd": ..., "force": 0|1}` (its one gate)
   replies `{"ok": true}`, `{"ok": false, "vtx": true, "cn_x10": x}` or
   `{"ok": false, "msg": "no C5 linked"}`.
-- **Back online:** the C6 re-sends a node's `CONFIG` (gate, detector settings) when the
+- **Back online:** the C6 re-sends a node's `CONFIG` (gate, detector settings with the
+  fleet's re-arm drop) when the
   node comes back online, so a rebooted gate returns to its assignment. After flashing a
   gate with the sdr_rx engine, review the detector config the C6 stores for it: the C6
   re-sends it, and its thresholds were tuned on the C5VRX meter. Keep the defaults until

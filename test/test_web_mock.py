@@ -142,6 +142,20 @@ class Protocol(unittest.TestCase):
         self.assertEqual(self.signed(sid, 3, "POST", "/api/reset", b"{}")[0], 200)
         self.assertEqual(self.sim.results(60.0)["channels"], [])
 
+    def test_fleet_rearm(self):
+        sid = self.open()
+        st = self.sim.state(60.0)
+        self.assertEqual(st["rearm_db_x10"], web_mock.REARM_X10)
+        self.assertEqual([n["rearm_db_x10"] for n in st["nodes"]], [160, 120, 160], "gate 2 missed a CONFIG")
+        self.assertEqual(self.signed(sid, 1, "POST", "/api/rearm", b'{"rearm_db_x10":130}')[1], b'{"ok": true}')
+        st = self.sim.state(60.0)
+        self.assertEqual((st["rearm_db_x10"], st["local"]["rearm_db_x10"]), (130, 130))
+        self.assertEqual([n["rearm_db_x10"] for n in st["nodes"]], [130, 130, 160], "an offline gate takes it when back")
+        for seq, bad in enumerate((b'{"rearm_db_x10":401}', b'{"rearm_db_x10":-1}', b"{}"), 2):
+            self.assertEqual(self.signed(sid, seq, "POST", "/api/rearm", bad)[1], b'{"ok": false}', bad)
+        self.assertEqual(self.sim.rearm, 130)
+        self.assertEqual(self.call("POST", "/api/rearm", b'{"rearm_db_x10":0}')[0], 401, "unsigned")
+
     def test_body_over_the_firmware_buffer_is_refused(self):
         sid = self.open()
         self.assertEqual(self.signed(sid, 1, "POST", "/api/reset", b" " * 15)[0], 200)

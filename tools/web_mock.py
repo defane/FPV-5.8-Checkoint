@@ -82,6 +82,7 @@ class Gate:
         self.next_pass, self.last_pass = period, -100.0
         self.passes = self.faults = 0
         self.cal_needed, self.gain, self.heap_min = False, 42, 61000
+        self.rearm = REARM_X10                       # the re-arm drop its C5 echoes
         self.cal_until = self.down_until = self.booted = 0.0
         self.__dict__.update(health)
 
@@ -139,7 +140,7 @@ class Gate:
     def health(self, t):
         return {"passes": self.passes, "cal_needed": self.cal_needed, "calibrating": self.calibrating(t),
                 "gain": self.gain, "c5_uptime_s": max(0, int(t - self.booted)),
-                "heap_min": self.heap_min, "faults": self.faults, "fw": "5.0.0-mock"}
+                "heap_min": self.heap_min, "faults": self.faults, "fw": "5.0.0-mock", "rearm_db_x10": self.rearm}
 
 
 class Master:
@@ -148,14 +149,16 @@ class Master:
     # POST path -> (method, char buf[N] of its C handler)
     ADMIN = {"/api/pairing": ("set_pairing", 128), "/api/node": ("set_node", 128),
              "/api/node_remove": ("remove_node", 128), "/api/reset": ("reset_race", 16),
-             "/api/volume": ("set_volume", 128), "/api/command": ("command", 128)}
+             "/api/volume": ("set_volume", 128), "/api/command": ("command", 128),
+             "/api/rearm": ("set_rearm", 64)}
 
     def __init__(self, vtx=False):
         self.vtx, self.pairing, self.volume, self.join_at = vtx, False, 60, None
+        self.rearm = REARM_X10                            # the fleet's re-arm drop (c6_store)
         self.local = Gate(0, 0, 7.0, vtx)
         self.nodes = []
         self.add_node(1, 1, 8.5, rssi=-52)
-        self.add_node(2, 2, 11.0, rssi=-78, lost=9, cal_needed=True, faults=3, gain=61)
+        self.add_node(2, 2, 11.0, rssi=-78, lost=9, cal_needed=True, faults=3, gain=61, rearm=120)  # missed a CONFIG
         self.add_node(3, 3, 13.0, rssi=-88, lost=31, online=False)
         self.reset_race()
         self.laps[7] = {"laps": 4, "last_lap_ms": 9120, "best_lap_ms": 8840, "start": None,  # a pilot who left
@@ -224,7 +227,8 @@ class Master:
         return {"pairing": self.pairing, "num_gates": 1 + len(self.nodes), "has_local": lo.up(t),
                 "local": {"channel": lo.channel, "cn_x10": lo.cn_x10(t), "state": lo.state(t),
                           "levels": lo.levels(t), **lo.health(t)},
-                "total_passes": self.total, "volume": self.volume, "uptime_ms": int(t * 1000),
+                "total_passes": self.total, "volume": self.volume, "rearm_db_x10": self.rearm,
+                "uptime_ms": int(t * 1000),
                 "free_heap": 182000 + random.randint(-2000, 2000), "heap_total": 330000, "nodes": nodes,
                 "standings": [{"channel": c, "laps": s["laps"], "last_lap_ms": s["last_lap_ms"],
                                "best_lap_ms": s["best_lap_ms"], "last_gate": s["last_gate"],
@@ -254,6 +258,16 @@ class Master:
 
     def set_volume(self, b, t):
         self.volume = b.get("volume", 60)
+        return {"ok": True}
+
+    def set_rearm(self, b, t):
+        """post_rearm() / c6_hub_set_rearm(): saved, sent to gate 0 and every online node."""
+        x10 = b.get("rearm_db_x10", -1)
+        if not isinstance(x10, int) or not 0 <= x10 <= 400:
+            return {"ok": False}
+        self.rearm = x10
+        for g in [self.local] + [n for n in self.nodes if n.online]:
+            g.rearm = x10
         return {"ok": True}
 
     def command(self, b, t):

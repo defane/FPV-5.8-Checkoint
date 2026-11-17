@@ -341,6 +341,9 @@ version-3 record's.
 
 The degraded C3's page sets it in its *Detector* card (*Re-arm drop*, 0 to 40 dB): its round
 "i" button opens a bubble with what it does, the recommended 16 dB and the advice below.
+In a fleet the C6 keeps one value for every gate, set in its advanced view (admin), with
+the same bubble, and sends it to each gate ([fleet.md](fleet.md), "Re-arm drop (fleet)"):
+a gate whose C5 runs another shows it (`D 12`).
 
 A new D applies from the next reading, the channels' states kept:
 

@@ -44,8 +44,8 @@ passes. It scales to a multi-gate race-timing fleet.
 
 The web has **two roles**: **spectators** watch the live standings and status
 read-only (no login), while **admin** actions — pairing, gate order, reset,
-volume, a gate's calibration or reboot, and (on a degraded C3) detector tuning
-— require the admin password
+volume, the fleet's re-arm drop, a gate's calibration or reboot, and (on a
+degraded C3) detector tuning — require the admin password
 (`CONFIG_*_ADMIN_PASSWORD`, no username): the admin toggle in the
 header opens a password dialog. The password never crosses the Wi-Fi: the page
 signs each admin request (HMAC-SHA256, per-session counter against replays)

@@ -2,6 +2,7 @@
 #include "admin_hash.h"
 #include "c6_hub.h"
 #include "c6_store.h"
+#include "fleet_proto.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "sdkconfig.h"
@@ -37,16 +38,23 @@ static const char *safe_fw(const char *fw, char out[LP_FW_LEN]) {
     return out;
 }
 
-/* The C5 health fields shared by "local" and each node. */
+/* The C5 health fields shared by "local" and each node, and the re-arm drop its C5 echoed
+ * (rearm_x10, FP_REARM_UNKNOWN: -1, none yet), set against the fleet's on the page. */
 static int put_health(char *b, size_t cap, uint32_t passes, uint8_t flags, uint8_t gain,
-                      uint32_t uptime_s, uint32_t heap_min, uint32_t faults, const char *fw) {
+                      uint32_t uptime_s, uint32_t heap_min, uint32_t faults, const char *fw,
+                      uint16_t rearm_x10) {
     char f[LP_FW_LEN];
     return snprintf(b, cap, "\"passes\":%lu,\"cal_needed\":%s,\"calibrating\":%s,\"gain\":%u,"
-                    "\"c5_uptime_s\":%lu,\"heap_min\":%lu,\"faults\":%lu,\"fw\":\"%s\"",
+                    "\"c5_uptime_s\":%lu,\"heap_min\":%lu,\"faults\":%lu,\"fw\":\"%s\",\"rearm_db_x10\":%d",
                     (unsigned long)passes, (flags & LP_HEALTH_CAL_NEEDED) ? "true" : "false",
                     (flags & LP_HEALTH_CALIBRATING) ? "true" : "false", gain,
                     (unsigned long)uptime_s, (unsigned long)heap_min, (unsigned long)faults,
-                    safe_fw(fw, f));
+                    safe_fw(fw, f), rearm_x10 == FP_REARM_UNKNOWN ? -1 : (int)rearm_x10);
+}
+
+/* Gate 0's echoed drop as put_health takes it: FP_REARM_UNKNOWN until its C5's first CONFIG_STATE. */
+static uint16_t rearm_echo(bool known, int32_t x10) {
+    return known && x10 >= 0 && x10 < (int32_t)FP_REARM_UNKNOWN ? (uint16_t)x10 : (uint16_t)FP_REARM_UNKNOWN;
 }
 
 /* One level per Raceband channel, dB x10, LP_CN_UNKNOWN when not measured. */
@@ -65,10 +73,10 @@ static esp_err_t get_state(httpd_req_t *req) {
     const c6_snapshot_t *s = &s_snap;
     const c6_fleet_t *f = &s_fleet;
 
-    /* Worst case (every field at its widest) 9996 B: levels 59 x 16 gates, last_seen_ms
-     * 25 x 8 standings, header + local 394,
-     * 15 nodes x 392, 8 standings 838, 24 passes 1739; sized so it never truncates. */
-    static char body[10240];   /* larger than the stack; this handler is serialised by httpd */
+    /* Worst case (every field at its widest) 10351 B: levels 59 x 16 gates, last_seen_ms
+     * 25 x 8 standings, header + local 434 (the fleet's and gate 0's re-arm drop),
+     * 15 nodes x 413, 8 standings 838, 24 passes 1739; sized so it never truncates. */
+    static char body[10752];   /* larger than the stack; this handler is serialised by httpd */
     const lp_stats_t *l = &s->local;
     int o = 0;
     o += snprintf(body + o, sizeof body - o,
@@ -78,11 +86,11 @@ static esp_err_t get_state(httpd_req_t *req) {
                   l->channel, (long)l->cn_x10, l->state);
     o += put_levels(body + o, sizeof body - o, s->has_local ? l->levels : NULL);
     o += put_health(body + o, sizeof body - o, l->passes, l->flags, l->gain, l->uptime_s,
-                    l->heap_min, l->faults, l->fw);
+                    l->heap_min, l->faults, l->fw, rearm_echo(s->has_local_cfg, s->local_cfg.rearm_db_x10));
     o += snprintf(body + o, sizeof body - o,
-                  "},\"total_passes\":%lu,\"volume\":%u,"
+                  "},\"total_passes\":%lu,\"volume\":%u,\"rearm_db_x10\":%u,"
                   "\"uptime_ms\":%lu,\"free_heap\":%lu,\"heap_total\":%lu,",
-                  (unsigned long)s->total_passes, (unsigned)f->volume,
+                  (unsigned long)s->total_passes, (unsigned)f->volume, (unsigned)s->rearm_x10,
                   (unsigned long)f->uptime_ms, (unsigned long)f->free_heap,
                   (unsigned long)f->heap_total);
 
@@ -102,7 +110,7 @@ static esp_err_t get_state(httpd_req_t *req) {
                       n->mac[0], n->mac[1], n->mac[2], n->mac[3], n->mac[4], n->mac[5]);
         o += put_levels(body + o, sizeof body - o, n->online ? n->levels : NULL);
         o += put_health(body + o, sizeof body - o, n->passes, n->flags, n->gain, n->c5_uptime_s,
-                        n->heap_min, n->faults, n->fw);
+                        n->heap_min, n->faults, n->fw, n->rearm_x10);
         o += snprintf(body + o, sizeof body - o, "}");
     }
     o += snprintf(body + o, sizeof body - o, "],\"standings\":[");
@@ -244,6 +252,14 @@ static esp_err_t post_volume(httpd_req_t *req) {
     return ok_json(req, true);
 }
 
+/* The fleet's relative re-arm drop, {"rearm_db_x10": 0..400} (the page's longest body is 20 B):
+ * saved and sent to every gate, or {"ok":false} out of range or absent. */
+static esp_err_t post_rearm(httpd_req_t *req) {
+    char buf[64];
+    if (!web_auth_request(req, buf, sizeof buf)) return ESP_OK;
+    return ok_json(req, c6_hub_set_rearm(json_i(buf, "rearm_db_x10", -1)));
+}
+
 /* A JSON array of the gates set in mask. */
 static int put_gates(char *b, size_t cap, uint32_t mask) {
     int o = snprintf(b, cap, "[");
@@ -349,7 +365,7 @@ void c6_web_start(void) {
     web_auth_init(s_admin_key, ADMIN_SALT, ADMIN_ITERATIONS, ADMIN_AUTH_OPEN);
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.lru_purge_enable = true;
-    cfg.max_uri_handlers = 12;   /* 10 here + web_auth's 2 */
+    cfg.max_uri_handlers = 13;   /* 11 here + web_auth's 2 */
     cfg.stack_size = 6144;       /* the signature's PSA HMAC under post_command: ~3.5 KB of the 4 KB default */
     httpd_handle_t srv = NULL;
     if (httpd_start(&srv, &cfg) != ESP_OK) { ESP_LOGE(TAG, "httpd start failed"); return; }
@@ -363,6 +379,7 @@ void c6_web_start(void) {
         { .uri = "/api/node_remove", .method = HTTP_POST, .handler = post_node_remove },
         { .uri = "/api/reset",    .method = HTTP_POST, .handler = post_reset },
         { .uri = "/api/volume",   .method = HTTP_POST, .handler = post_volume },
+        { .uri = "/api/rearm",    .method = HTTP_POST, .handler = post_rearm },
         { .uri = "/api/command",  .method = HTTP_POST, .handler = post_command },
     };
     for (unsigned i = 0; i < sizeof uris / sizeof uris[0]; i++) httpd_register_uri_handler(srv, &uris[i]);

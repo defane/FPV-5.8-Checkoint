@@ -59,11 +59,13 @@ void c6_hub_set_volume(uint8_t pct) {
     }
 }
 
+/* What every remote gate runs; its re-arm drop is the fleet's (c6_store, 16 dB until an admin
+ * sets one: a 0 there would turn the re-arm off on every gate). */
 static lp_config_t default_config(void) {
     const lp_config_t c = {
         .alpha_milli = 250, .active_db_x10 = 80, .hysteresis_db_x10 = 30,   /* sd_config_default() */
         .drop_db_x10 = 30, .min_peak_db_x10 = 100, .refractory_ms = 1500,
-        .stale_ms = 1000, .rearm_db_x10 = LP_REARM_DEFAULT_X10,   /* 0 would turn the re-arm off on every gate */
+        .stale_ms = 1000, .rearm_db_x10 = c6_store_rearm_x10(),
         .volume_pct = 60, .muted = 0,
     };
     return c;
@@ -102,7 +104,8 @@ static void nodes_load(void) {
             for (unsigned i = 0; i < count; i++) {
                 /* Only the assignment persists: link counters and C5 health start zeroed. */
                 s_nodes[i] = (c6_node_t){ .node_id = rec[i].node_id, .gate_index = rec[i].gate_index,
-                                          .channel = rec[i].channel, .cn_x10 = LP_CN_UNKNOWN };
+                                          .channel = rec[i].channel, .cn_x10 = LP_CN_UNKNOWN,
+                                          .rearm_x10 = FP_REARM_UNKNOWN };
                 memcpy(s_nodes[i].mac, rec[i].mac, 6);
             }
         }
@@ -126,13 +129,15 @@ static uint8_t num_gates(void) {
     return g;
 }
 
-static void send_config_to(const c6_node_t *n) {
-    const fp_config_t cfg = { .gate_index = n->gate_index, .channel = n->channel,
+static void send_config(const uint8_t mac[6], uint8_t gate_index, uint8_t channel) {
+    const fp_config_t cfg = { .gate_index = gate_index, .channel = channel,
                               .enable = 1, .det = default_config() };
     uint8_t buf[FP_MAX_FRAME];
     size_t m = fp_encode_config(buf, sizeof buf, &cfg);
-    if (m) espnow_link_send(n->mac, buf, m);
+    if (m) espnow_link_send(mac, buf, m);
 }
+
+static void send_config_to(const c6_node_t *n) { send_config(n->mac, n->gate_index, n->channel); }
 
 static void send_pair_accept(const c6_node_t *n, uint32_t nonce) {
     const fp_pair_accept_t pa = { .nonce = nonce, .node_id = n->node_id,
@@ -151,7 +156,7 @@ static void handle_pair(const uint8_t mac[6], const fp_pair_request_t *req) {
         /* Link counters and C5 health start zeroed; next free gate (gate 0 is the local C5). */
         *n = (c6_node_t){ .node_id = s_num_nodes, .gate_index = num_gates(),
                           .channel = req->seen_channel, .cn_x10 = LP_CN_UNKNOWN,
-                          .online = true, .last_seen_ms = now_ms() };
+                          .rearm_x10 = FP_REARM_UNKNOWN, .online = true, .last_seen_ms = now_ms() };
         memcpy(n->mac, mac, 6);
         s_num_nodes++;
         espnow_link_add_peer(mac);
@@ -208,6 +213,7 @@ static void node_take_status(c6_node_t *n, const fp_node_status_t *s) {
     memcpy(n->levels, s->levels, sizeof n->levels);
     n->passes = s->passes; n->flags = s->flags; n->gain = s->gain;
     n->c5_uptime_s = s->uptime_s; n->heap_min = s->heap_min; n->faults = s->faults;
+    n->rearm_x10 = s->rearm_db_x10;
     memcpy(n->fw, s->fw, sizeof n->fw);
 }
 
@@ -328,6 +334,25 @@ bool c6_hub_set_node(uint8_t node_id, uint8_t gate_index, uint8_t channel) {
     const c6_node_t snap = *n;
     xSemaphoreGive(s_lock);
     send_config_to(&snap);
+    return true;
+}
+
+bool c6_hub_set_rearm(int32_t x10) {
+    if (!c6_store_set_rearm_x10(x10)) return false;   /* saved: default_config() carries it from now on */
+    struct { uint8_t mac[6], gate, channel; } to[C6_MAX_NODES];   /* small: the web task's stack */
+    unsigned n = 0;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    for (unsigned i = 0; i < s_num_nodes; i++)
+        if (s_nodes[i].online) {
+            memcpy(to[n].mac, s_nodes[i].mac, 6);
+            to[n].gate = s_nodes[i].gate_index;
+            to[n].channel = s_nodes[i].channel;
+            n++;
+        }
+    xSemaphoreGive(s_lock);
+    for (unsigned i = 0; i < n; i++) send_config(to[i].mac, to[i].gate, to[i].channel);   /* offline: when back */
+    c6_link_sync_rearm();
+    ESP_LOGI(TAG, "fleet re-arm drop %ld (x10): sent to %u online node(s) and gate 0", (long)x10, n);
     return true;
 }
 

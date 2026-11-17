@@ -14,6 +14,7 @@
 #define LINK_READ_MS  100u
 
 static const char *TAG = "c6_link";
+static volatile bool s_rearm_sync = true;   /* push the fleet's drop at the next CONFIG_STATE */
 
 static void on_pass(const lp_event_t *e) {
     c6_hub_local_pass(e->channel, e->peak_db_x10, e->at_ms);   /* gate 0, timed + sounded by the hub */
@@ -29,13 +30,32 @@ static void send_config_req(void) {
     if (r) uart_write_bytes(LINK_UART, (const char *)req, r);
 }
 
+/* The fleet's drop on gate 0, its other settings as the C5 echoed them (the hub pushes the whole
+ * default config to a remote gate; gate 0 keeps its own). Once per request: a C5 that refused it
+ * (it does not, its own settings are valid) or a console K e/E later keeps its value until the
+ * next one, and the page shows the difference. */
+static void sync_rearm(const lp_config_t *echo) {
+    s_rearm_sync = false;
+    const uint16_t want = c6_store_rearm_x10();
+    if (echo->rearm_db_x10 == want) return;
+    lp_config_t c = *echo;
+    c.rearm_db_x10 = want;
+    uint8_t buf[LP_MAX_FRAME];
+    const size_t n = lp_encode_config(buf, sizeof buf, LP_MSG_CONFIG_SET, &c);
+    if (n) uart_write_bytes(LINK_UART, (const char *)buf, n);
+    ESP_LOGI(TAG, "local C5 re-arm drop %ld -> %u (x10, the fleet's)", (long)echo->rearm_db_x10, want);
+}
+
 static void handle_msg(const lp_msg_t *m) {
     switch (m->type) {
     case LP_MSG_EVENT_PASS:   on_pass(&m->event); break;
     case LP_MSG_STATS:        c6_store_set_local_stats(&m->stats); break;
-    case LP_MSG_CONFIG_STATE: c6_store_set_local_config(&m->config); break;
+    case LP_MSG_CONFIG_STATE:
+        c6_store_set_local_config(&m->config);
+        if (s_rearm_sync) sync_rearm(&m->config);
+        break;
     case LP_MSG_HELLO:        /* the C5 (re)booted: learn its config now, not at the next poll */
-        if (m->role == LP_ROLE_C5) send_config_req();
+        if (m->role == LP_ROLE_C5) { s_rearm_sync = true; send_config_req(); }
         break;
     default: break;
     }
@@ -65,6 +85,12 @@ static void link_task(void *arg) {
             send_config_req();
         }
     }
+}
+
+/* From the web task: the link task pushes at the echo, with the C5's settings of that moment. */
+void c6_link_sync_rearm(void) {
+    s_rearm_sync = true;
+    send_config_req();
 }
 
 /* From the web task; uart_write_bytes serialises writers, so a frame never
