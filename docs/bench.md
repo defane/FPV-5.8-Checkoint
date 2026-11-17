@@ -30,17 +30,20 @@ Startup prints, in order:
 
 - `FIRMWARE id=… elf_sha256=… engine=sdr_rx chip_rev=v…`.
 - `BOOT_TIMING radio_ms=…` once Wi-Fi hosts the PHY (no traffic: `WIFI_MODE_NULL`).
-- `CHECKPOINT prefs=saved|defaults gain=40` (a C5VRX-era record reads `defaults`).
+- `CHECKPOINT prefs=saved|saved_v3|defaults gain=40 rearm_db=16.0` (a C5VRX-era record reads
+  `defaults`; `saved_v3` a record from before the re-arm drop was saved, read with the
+  build's).
 - One `SDR cal lo=5677 ms=41 irr_db=37.4 verify_gain=60 tries=1 dc=6 sat=0` per LO: each
   LO is calibrated (~41 ms), then its image rejection is verified from 64 captures at a
   temporary gain of 60, at least 25 dB (`CONFIG_SDR_RX_IRR_MIN_DB`) or up to 3
   calibrations (`tries`).
   `irr_db=skip_saturated` means too many clipped captures: a VTX too close, verify skipped;
   `irr_db=skip_faults` means the captures failed (8 failed captures end a verify try).
-- `SDR ready lo=5677,5751,5825,5899 gain=40 verify_tries=3 pair_guard=1 rearm_db=16 cal_ms=…
+- `SDR ready lo=5677,5751,5825,5899 gain=40 verify_tries=3 pair_guard=1 rearm_db=16.0 cal_ms=…
   boot_ms=… chip_rev=v…` (`verify_tries` is the build's `CONFIG_SDR_RX_VERIFY_TRIES`: 1 only in
   B0's control; `pair_guard` its `CONFIG_CHECKPOINT_PAIR_GUARD`: 0 only in B11's control;
-  `rearm_db` its `CONFIG_CHECKPOINT_REARM_DROP_DB`, the relative re-arm), expected
+  `rearm_db` the relative re-arm's drop D in effect, saved like the other detector settings,
+  `CONFIG_CHECKPOINT_REARM_DROP_DB` on a first boot), expected
   within about 2 s of the reset; `tools/flash.py --check` waits for it. Passes can ring 3 s
   later, once the rests are learnt.
 - `HB t_s=… stage=… live=… rot_hz_x10=… faults=… cal=…` every 5 s, from the USB reader,
@@ -279,8 +282,8 @@ over 15). Recordings from before it end at R8; `scan_analyze.py` reads both, and
 C5VRX-era power format too. It prints the real refresh, each channel's rest, median and
 peak, and the passes: a channel rising 8 dB (`--margin`) above its own rest, smoothed like
 the detector (`--alpha`, per 17.5 ms), timed at the centroid of the peak. A rise that stays
-up is split like the detector's relative re-arm (`--rearm`, 16 dB; `0` for one pass per
-rise, as before). A pass seen on
+up is split like the detector's relative re-arm (`--rearm`, 16 dB, or the board's
+`rearm_db=` when it runs another; `0` for one pass per rise, as before). A pass seen on
 several channels at once goes to the strongest, and the others are listed as `also on`.
 With `<sat>`, each pass ends with the saturated share of every LO over its span
 (`saturated 1+2 0% 3+4 0% 5+6 41% 7+8 0%`): a rise on R5 during a pass of R6 that comes
@@ -405,7 +408,9 @@ at gains 30 to 50 in steps of 4 (`K` `G` twice a step), reading R4's level at ea
   one `PASS` per pass, `rearm=rel` on each after the first, none while it stands at 3 m
   (the [host] model gives exactly that in 40 runs of 40 with a still VTX). Record each
   pass's `peak_db` and the rise at 3 m: the drop between them is what the default (16 dB,
-  [detector.md](detector.md#relative-re-arm)) must stay under.
+  [detector.md](detector.md#relative-re-arm)) must stay under. D is set without a rebuild,
+  from the console (`K` `e`/`E`, 1 dB a key, `rearm_db=` on the `CHECKPOINT set` line) or a
+  bridge: to try another, set it and redo (d).
   - **Not a fault**: a `PASS` as the VTX is switched on (or reaches 3 m), when it wobbles.
     The channel then waits until its 1 s average falls 16 dB under its highest level, so
     the first hand pass is lost with it ("The start pad" in detector.md): redo that pass.

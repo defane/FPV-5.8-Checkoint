@@ -4,8 +4,9 @@
 Prints the scan rate, each channel's level and the passes it finds: a channel rising
 well above its own resting level, timed at the centroid of the peak. A pass also seen on
 another channel at the same moment goes to the one with the highest level, and the
-others are listed. Like the detector's relative re-arm (--rearm, 16 dB by default as
-CONFIG_CHECKPOINT_REARM_DROP_DB, 0 = off), a drone that stays well up between passes
+others are listed. Like the detector's relative re-arm (--rearm, 16 dB by default as the
+firmware's, 0 = off; give it the board's rearm_db= when it runs another), a drone that stays
+well up between passes
 still gives one pass per lap: a rise is split where its 1 s average fell that far under
 its highest level and rose that far again.
 
@@ -38,7 +39,7 @@ MIN_S = 0.05            # shorter than this is a glitch
 PEAK_BAND_DB = 3.0      # the centroid covers what is within this of the peak
 REST_QUANTILE = 0.2     # a channel's resting level: a VTX held close for half a recording
                         # would lift the median itself
-REARM_DB = 16.0         # --rearm default: CONFIG_CHECKPOINT_REARM_DROP_DB's
+REARM_DB = 16.0         # --rearm default: CONFIG_CHECKPOINT_REARM_DROP_DB's, the boards' first-boot D
 REARM_TAU_S = 1.0       # the relative re-arm's average (PD_REARM_TAU_MS)
 REFRACTORY_S = 1.5      # sd_config_default's refractory_ms
 
@@ -241,7 +242,8 @@ def main():
     ap.add_argument("--alpha", type=float, default=0.25,
                     help="smoothing weight per 17.5 ms, as the detector's alpha (default 0.25: tau 61 ms)")
     ap.add_argument("--rearm", type=float, default=REARM_DB,
-                    help="split a rise as the detector's relative re-arm does, dB (default 16, the firmware's; 0 = off)")
+                    help="split a rise as the detector's relative re-arm does, dB (default 16, the firmware's "
+                         "default: the board's rearm_db= when it runs another; 0 = off)")
     a = ap.parse_args()
     rows, header = read_scans(a.log.read_text(errors="replace"), sat=True)
     if len(rows) < 10:

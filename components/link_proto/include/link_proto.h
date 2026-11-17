@@ -8,7 +8,7 @@
  * fixed-point integer, little endian, so the two targets agree regardless of
  * FPU or struct padding.
  *
- * Frame: [SOF=0xC5][VER=3][TYPE][LEN][payload LEN bytes][CRC16_lo][CRC16_hi]
+ * Frame: [SOF=0xC5][VER=4][TYPE][LEN][payload LEN bytes][CRC16_lo][CRC16_hi]
  * CRC16 is CCITT (poly 0x1021, init 0xFFFF) over VER,TYPE,LEN,payload. A byte
  * other than SOF where SOF is expected is dropped, so the stream resynchronises
  * after noise. */
@@ -22,7 +22,7 @@ extern "C" {
 #endif
 
 #define LP_SOF      0xC5u
-#define LP_VERSION  3u   /* 3: the C5 scans: STATS levels, EVENT_PASS age, no SET_CHANNEL */
+#define LP_VERSION  4u   /* 4: CONFIG carries the re-arm drop; 3: the C5 scans: STATS levels, EVENT_PASS age */
 #define LP_MAX_PAYLOAD 56u
 #define LP_MAX_FRAME   (6u + LP_MAX_PAYLOAD)   /* SOF+VER+TYPE+LEN + payload + CRC16(2) */
 
@@ -48,9 +48,11 @@ typedef enum {
     LP_CMD_REBOOT    = 3,    /* quiesce the engine, restart the C5 */
 } lp_cmd_t;
 
-/* Detector tunables, fixed point. Mirrors pass_detector's pd_config_t; the C5
- * glue converts to/from pd_config_t. volume_pct/muted are kept for the wire
- * layout only: the detector has no sound and ignores them (echoes 0). */
+/* Detector tunables, fixed point. Mirrors pass_detector's pd_config_t plus its
+ * relative re-arm drop (pd_set_rearm); the C5 glue converts to/from them.
+ * volume_pct/muted are kept for the wire layout only: the detector has no
+ * sound and ignores them (echoes 0). Whoever builds one sets rearm_db_x10: 0
+ * turns the relative re-arm off on the gate that takes it. */
 typedef struct {
     int32_t  alpha_milli;       /* alpha * 1000, (0, 1000]: the weight per 17.5 ms reference
                                  * sweep (time constant tau = -17.5 ms / ln(1 - alpha)) */
@@ -60,9 +62,14 @@ typedef struct {
     int32_t  min_peak_db_x10;
     uint32_t refractory_ms;
     uint32_t stale_ms;
+    int32_t  rearm_db_x10;      /* the relative re-arm's drop * 10, 0..LP_REARM_MAX_X10; 0 = off
+                                 * (the C5 refuses a CONFIG_SET outside that range) */
     uint8_t  volume_pct;        /* 0..100 */
     uint8_t  muted;             /* 0/1 */
 } lp_config_t;
+
+#define LP_REARM_MAX_X10     400   /* 40 dB, the top of CONFIG_CHECKPOINT_REARM_DROP_DB's range */
+#define LP_REARM_DEFAULT_X10 160   /* 16 dB, its default: what the bridges' default configs carry */
 
 typedef struct {
     uint8_t  channel;           /* 0..7 */

@@ -125,15 +125,18 @@ antenna) the source's partner, named by the last 3 readings (docs/detector.md "P
 guard"). The pass time on the
 wire is the smoothed peak (the console's `PASS` line adds a delay estimate). States
 `IDLE → RISING → PEAK_PASSED → COOLDOWN`; re-arm needs the refractory period
-elapsed AND either the level under `active_db - hysteresis_db` or its 1 s average
-`CONFIG_CHECKPOINT_REARM_DROP_DB` (16 dB, 0 = off) under the highest level since the pass
+elapsed AND either the level under `active_db - hysteresis_db` or its 1 s average the
+re-arm drop D (`rearm_db`, a runtime parameter: 16 dB by default from
+`CONFIG_CHECKPOINT_REARM_DROP_DB`, 0 = off) under the highest level since the pass
 (the relative re-arm, for a drone that stays up between laps; the next pass must then rise
 that much over the lowest 1 s average since: docs/detector.md "Relative re-arm"). The glue is
-`components/checkpoint`; the parameters are editable from the console (`K`+key:
-`components/checkpoint/cp_console.c` and `checkpoint.c`) and the C3 web UI (pushed over
-the link as `CONFIG_SET`, echoed as `CONFIG_STATE`), saved in NVS namespace `checkpoint`
-key `prefs` (`checkpoint_prefs_t`, `PREFS_VERSION` 3 — bump it on a layout or meaning
-change). Parameter table (defaults + console keys): **`docs/detector.md`**.
+`components/checkpoint`; the parameters (alpha, active, hysteresis, drop, min peak,
+refractory, stale, D) are editable from the console (`K`+key:
+`components/checkpoint/cp_console.c` and `checkpoint.c`; D is `e`/`E`) and over the link
+(the bridges' `CONFIG_SET`, `lp_config_t`, echoed as `CONFIG_STATE`), saved in NVS namespace
+`checkpoint` key `prefs` (`checkpoint_prefs_t`, `PREFS_VERSION` 4, a version-3 record read
+with the build's D — bump it on a layout or meaning change). Parameter table (defaults +
+console keys): **`docs/detector.md`**.
 
 ## Status LED
 
@@ -151,12 +154,13 @@ no WS2812 either. Full scheme (colours per state and role): **`docs/status-led.m
 Race timing across ordered gates (each gate = a C5). The **C6** (`firmware/master`,
 esp32c6) is UART-wired to its own C5 (gate 0) and aggregates remote gates over
 **ESP-NOW**; a remote gate is a C5 UART-wired to a **C3** (`firmware/node`).
-Protocols (both v3; reflash every board together after a change):
+Protocols (both v4; reflash every board together after a change):
 `components/link_proto` (C5↔bridge UART: config, passes, `STATS` with the 8 levels and
 the C5's health (CAL_NEEDED = an LO's DC or IQ out of range or its captures failing, no
 engine or a stalled scan; faults = capture faults), `LP_MSG_COMMAND` calibrate/reboot),
-`components/fleet_proto` over `components/espnow_link` (pairing, beacons,
-`GATE_PASS`, `NODE_STATUS` relaying the health, `FP_MSG_COMMAND`),
+`components/fleet_proto` over `components/espnow_link` (pairing, beacons, `CONFIG`
+carrying the detector settings with D, `GATE_PASS`, `NODE_STATUS` relaying the health and
+the C5's echoed D, `FP_MSG_COMMAND`),
 `components/race_timing`. The C6 admin web (and a degraded C3's page) shows each
 gate's health and runs its calibrations/reboot, VTX-guarded:
 `docs/fleet.md` "Gate health and remote commands". Sound is centralized on

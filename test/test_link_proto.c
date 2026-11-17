@@ -30,9 +30,17 @@ static lp_config_t sample_config(void) {
     lp_config_t c = {
         .alpha_milli = 300, .active_db_x10 = 150, .hysteresis_db_x10 = 30,
         .drop_db_x10 = 30, .min_peak_db_x10 = 250, .refractory_ms = 1500,
-        .stale_ms = 1000, .volume_pct = 60, .muted = 0,
+        .stale_ms = 1000, .rearm_db_x10 = 155, .volume_pct = 60, .muted = 0,
     };
     return c;
+}
+
+/* Re-sign a frame after a test edited its header or payload. */
+static void fix_crc(uint8_t *f, size_t n)
+{
+    const uint16_t crc = lp_crc16(&f[1], 3u + f[3]);
+    f[n - 2] = (uint8_t)(crc & 0xFFu);
+    f[n - 1] = (uint8_t)(crc >> 8);
 }
 
 int main(void) {
@@ -63,9 +71,47 @@ int main(void) {
                   r->drop_db_x10 == c.drop_db_x10 &&
                   r->min_peak_db_x10 == c.min_peak_db_x10 &&
                   r->refractory_ms == c.refractory_ms &&
-                  r->stale_ms == c.stale_ms &&
+                  r->stale_ms == c.stale_ms && r->rearm_db_x10 == c.rearm_db_x10 &&
                   r->volume_pct == c.volume_pct && r->muted == c.muted;
         CHECK(ok, "config_set roundtrip (all fields)");
+        CHECK(n == 6u + 34u, "config frame: 34-byte payload (v4: the re-arm drop)");
+    }
+
+    /* The re-arm drop: the codec carries any value (the C5 validates 0..LP_REARM_MAX_X10), its
+     * four bytes in place, and leaves the fields around it alone. */
+    {
+        const int32_t drops[] = { 0, LP_REARM_DEFAULT_X10, LP_REARM_MAX_X10, -1, 0x12345678 };
+        bool ok = true;
+        for (unsigned k = 0; k < sizeof drops / sizeof drops[0]; k++) {
+            lp_config_t c = sample_config();
+            c.rearm_db_x10 = drops[k];
+            size_t n = lp_encode_config(buf, sizeof buf, LP_MSG_CONFIG_STATE, &c);
+            int g = run(buf, n, got, 4);
+            ok = ok && g == 1 && got[0].config.rearm_db_x10 == drops[k] &&
+                 got[0].config.stale_ms == c.stale_ms && got[0].config.volume_pct == c.volume_pct &&
+                 got[0].config.muted == c.muted;
+        }
+        lp_config_t c = sample_config();
+        c.rearm_db_x10 = 0x12345678;
+        size_t n = lp_encode_config(buf, sizeof buf, LP_MSG_CONFIG_SET, &c);
+        ok = ok && n && buf[4 + 28] == 0x78 && buf[4 + 31] == 0x12 && buf[4 + 32] == 60;   /* little endian, then volume */
+        CHECK(ok, "config: the re-arm drop round-trips (0, 160, 400, -1, any), in place");
+        CHECK(LP_REARM_DEFAULT_X10 == 160 && LP_REARM_MAX_X10 == 400, "re-arm drop: 16 dB default, 40 dB ceiling");
+    }
+
+    /* A version-3 CONFIG_SET (30-byte payload, no re-arm drop) is not misread: its version is
+     * refused, and the same short payload under version 4 is too. */
+    {
+        lp_config_t c = sample_config();
+        size_t n = lp_encode_config(buf, sizeof buf, LP_MSG_CONFIG_SET, &c);
+        buf[1] = 3;
+        fix_crc(buf, n);
+        CHECK(run(buf, n, got, 4) == 0, "version-3 config frame rejected");
+        (void)lp_encode_config(buf, sizeof buf, LP_MSG_CONFIG_SET, &c);
+        buf[3] = 30;                                              /* a v3 payload length */
+        n = 6u + 30u;
+        fix_crc(buf, n);                                          /* the CRC where a v3 frame has it */
+        CHECK(run(buf, n, got, 4) == 0, "a 30-byte config payload rejected at version 4");
     }
 
     /* CONFIG_STATE uses the same payload; CONFIG_REQ carries none. */
@@ -122,9 +168,7 @@ int main(void) {
         /* A peer that sends 24 non-NUL bytes cannot unterminate it either. */
         n = lp_encode_stats(buf, sizeof buf, &s);
         buf[4 + 32 + LP_FW_LEN - 1u] = 'y';                       /* last fw byte */
-        const uint16_t crc = lp_crc16(&buf[1], 3u + buf[3]);
-        buf[n - 2] = (uint8_t)(crc & 0xFFu);
-        buf[n - 1] = (uint8_t)(crc >> 8);
+        fix_crc(buf, n);
         g = run(buf, n, got, 4);
         ok = g == 1 && got[0].stats.fw[LP_FW_LEN - 1u] == '\0';
         CHECK(ok, "stats fw id never unterminated (decoder)");
@@ -147,9 +191,7 @@ int main(void) {
 
         size_t n = lp_encode_command(buf, sizeof buf, LP_CMD_REBOOT);
         buf[4] = 9;                                                /* forge an unknown op */
-        const uint16_t crc = lp_crc16(&buf[1], 3u + buf[3]);
-        buf[n - 2] = (uint8_t)(crc & 0xFFu);
-        buf[n - 1] = (uint8_t)(crc >> 8);
+        fix_crc(buf, n);
         CHECK(run(buf, n, got, 4) == 0, "unknown command dropped by the decoder");
     }
 
@@ -158,9 +200,7 @@ int main(void) {
         lp_stats_t s = { .cn_x10 = 100 };
         size_t n = lp_encode_stats(buf, sizeof buf, &s);
         buf[1] = 1;
-        const uint16_t crc = lp_crc16(&buf[1], 3u + buf[3]);
-        buf[n - 2] = (uint8_t)(crc & 0xFFu);
-        buf[n - 1] = (uint8_t)(crc >> 8);
+        fix_crc(buf, n);
         CHECK(run(buf, n, got, 4) == 0, "version-1 frame rejected");
     }
 

@@ -4,7 +4,7 @@
  * integer-only little-endian payloads, guarded by a version byte and a CRC16 so
  * a mismatched firmware or a stray frame is rejected.
  *
- * Frame: [VER=1][TYPE][payload...][CRC16_lo][CRC16_hi], CRC16-CCITT over
+ * Frame: [VER=4][TYPE][payload...][CRC16_lo][CRC16_hi], CRC16-CCITT over
  * VER,TYPE,payload (reuses link_proto's lp_crc16). Detector/audio tunables ride
  * as link_proto's lp_config_t so the C6 forwards them to a C5 over UART
  * unchanged.
@@ -22,7 +22,8 @@
 extern "C" {
 #endif
 
-#define FP_VERSION      3u   /* 3: NODE_STATUS levels, the C5 scans; 2: seq + health, COMMAND */
+#define FP_VERSION      4u   /* 4: CONFIG's lp_config_t and NODE_STATUS carry the re-arm drop;
+                              * 3: NODE_STATUS levels, the C5 scans; 2: seq + health, COMMAND */
 #define FP_MAX_PAYLOAD  64u
 #define FP_MAX_FRAME    (4u + FP_MAX_PAYLOAD)   /* VER+TYPE + payload + CRC16(2) */
 
@@ -87,8 +88,12 @@ typedef struct {
     uint32_t heap_min;        /* C5 lowest free internal heap since boot, bytes */
     uint32_t faults;          /* C5 transport fault counters */
     int8_t   levels[LP_LEVELS];   /* C5 dB above each channel's rest, LP_LEVEL_UNKNOWN when none */
+    uint16_t rearm_db_x10;    /* the C5's re-arm drop *10 from its last CONFIG_STATE echo,
+                               * FP_REARM_UNKNOWN before the first one */
     char     fw[LP_FW_LEN];   /* C5 firmware id; always NUL-terminated after a decode */
 } fp_node_status_t;
+
+#define FP_REARM_UNKNOWN 0xFFFFu
 
 typedef struct {
     uint8_t  gate_index;      /* the gate it is meant for (a node ignores another's) */

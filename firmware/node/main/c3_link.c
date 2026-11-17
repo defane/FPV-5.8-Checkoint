@@ -24,10 +24,13 @@ static void (*s_on_stats)(const lp_stats_t *);
 static volatile uint32_t s_last_c5_rx;   /* last valid frame from the C5 (ms), 0 = never;
                                           * written by the link task, read by the web */
 static uint32_t s_link_start;            /* a C5 that never spoke is silent since then */
+static int32_t s_c5_rearm_x10 = -1;      /* its last CONFIG_STATE's re-arm drop; link task only */
 
 typedef struct { uint8_t buf[LP_MAX_FRAME]; uint8_t len; } frame_t;
 
 static uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
+
+int32_t c3_link_c5_rearm_x10(void) { return s_c5_rearm_x10; }
 
 bool c3_link_c5_alive(void) {
     const uint32_t last = s_last_c5_rx;
@@ -66,7 +69,10 @@ static void handle_msg(const lp_msg_t *m) {
     /* The C5's real config (answer to CONFIG_REQ / our HELLO, echo of a
      * CONFIG_SET): the degraded web's form and VTX guard follow it. RAM only
      * (the C5 keeps its own prefs) and never pushed back to the C5. */
-    case LP_MSG_CONFIG_STATE: c3_store_set_config(&m->config, false); break;
+    case LP_MSG_CONFIG_STATE:
+        c3_store_set_config(&m->config, false);
+        s_c5_rearm_x10 = m->config.rearm_db_x10;   /* relayed to the C6 (NODE_STATUS) */
+        break;
     /* The C5 (re)booted after our HELLO went out: ask it for its config. */
     case LP_MSG_HELLO:        enqueue(b, lp_encode_config_req(b, sizeof b)); break;
     default: break;

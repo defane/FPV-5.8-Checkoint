@@ -14,3 +14,6 @@ void c3_link_send_command(lp_cmd_t cmd);          /* COMMAND (console B/F, reboo
 /* A valid frame from the C5 within the last 3 s (it STATS every second);
  * false when it never spoke, or went silent (unplugged, rebooting, hung, v1). */
 bool c3_link_c5_alive(void);
+/* The re-arm drop *10 of the C5's last CONFIG_STATE (what it runs), -1 before its first one.
+ * Link task only (the fleet relay's NODE_STATUS). */
+int32_t c3_link_c5_rearm_x10(void);

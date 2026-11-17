@@ -16,6 +16,7 @@
 #include "checkpoint.h"
 #include <inttypes.h>
 #include <math.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include "checkpoint_link.h"
@@ -25,16 +26,26 @@
 #include "esp_heap_caps.h"
 #include "sdkconfig.h"
 
-/* NVS "checkpoint" key "prefs"; a new layout or meaning gets a new version (old blobs ignored).
+/* NVS "checkpoint" key "prefs"; a new layout or meaning gets a new version (old blobs ignored,
+ * but for the one migration below).
  * 2: dB of rise above a channel's rest, no longer of C/N (C5VRX, namespace c5vrx5).
  * 3: the sdr_rx meter (+-5 MHz band power, 10-bit, clipping instead of folding): a threshold
- *    tuned on the old meter is not trusted; the gain takes the first reserved byte. */
-#define PREFS_VERSION 3u
+ *    tuned on the old meter is not trusted; the gain takes the first reserved byte.
+ * 4: the relative re-arm's drop, in the two bytes version 3 kept reserved (zero there). Same size
+ *    and offsets, so a version-3 record is read as it is, the drop taken from the build. */
+#define PREFS_VERSION 4u
+#define PREFS_V3 3u
 #define PREFS_KEY "prefs"
 typedef struct {
-    uint8_t version, gain, reserved[2];
+    uint8_t version, gain;
+    uint16_t rearm_db_x10;   /* 4: the relative re-arm's drop * 10, 0..LP_REARM_MAX_X10 */
     pd_config_t det;
 } checkpoint_prefs_t;
+_Static_assert(offsetof(checkpoint_prefs_t, rearm_db_x10) == 2 && offsetof(checkpoint_prefs_t, det) == 4,
+               "version 3's layout: version, gain, 2 reserved bytes, then det (the migration reads it in place)");
+_Static_assert(CONFIG_CHECKPOINT_REARM_DROP_DB >= 0 && CONFIG_CHECKPOINT_REARM_DROP_DB * 10 <= LP_REARM_MAX_X10,
+               "the build's re-arm drop fits the link's range");
+#define CP_REARM_DEFAULT_DB ((float)CONFIG_CHECKPOINT_REARM_DROP_DB)   /* first boot, a v3 record, K 0 */
 
 portMUX_TYPE cp_mux = portMUX_INITIALIZER_UNLOCKED;
 static cp_t *s_cp;
@@ -69,13 +80,20 @@ void cp_mark_read(cp_t *cp, uint32_t now_ms)
     cp->last_rotation_ms = now_ms;
 }
 
-static void prefs_load(pd_config_t *det, uint8_t *gain)
+static int32_t to_x10(float v) { return (int32_t)(v * 10.0f + (v >= 0 ? 0.5f : -0.5f)); }
+
+/* A version-3 record keeps every value the operator tuned, with the build's drop: the next save
+ * writes version 4. */
+static void prefs_load(pd_config_t *det, uint8_t *gain, float *rearm_db)
 {
     checkpoint_prefs_t p;
-    const bool saved = cp_blob_load(PREFS_KEY, &p, sizeof(p)) && p.version == PREFS_VERSION;
+    const bool read = cp_blob_load(PREFS_KEY, &p, sizeof(p));
+    const bool v4 = read && p.version == PREFS_VERSION, saved = v4 || (read && p.version == PREFS_V3);
     *gain = saved && p.gain >= CP_GAIN_MIN && p.gain <= 83u ? p.gain : (uint8_t)CONFIG_SDR_RX_GAIN_DEFAULT;
     *det = saved && pd_config_valid(&p.det) ? p.det : sd_config_default();
-    printf("CHECKPOINT prefs=%s gain=%u\n", saved ? "saved" : "defaults", *gain);
+    *rearm_db = v4 && p.rearm_db_x10 <= LP_REARM_MAX_X10 ? (float)p.rearm_db_x10 / 10.0f : CP_REARM_DEFAULT_DB;
+    printf("CHECKPOINT prefs=%s gain=%u rearm_db=%.1f\n", v4 ? "saved" : saved ? "saved_v3" : "defaults", *gain,
+           (double)*rearm_db);
 }
 
 static void prefs_save(const cp_t *cp)
@@ -84,7 +102,9 @@ static void prefs_save(const cp_t *cp)
     portENTER_CRITICAL(&cp_mux);
     p.gain = cp->gain;
     p.det = cp->wanted;
+    const float rearm = cp->wanted_rearm_db;
     portEXIT_CRITICAL(&cp_mux);
+    p.rearm_db_x10 = (uint16_t)to_x10(rearm);   /* 0..LP_REARM_MAX_X10: checked by every poster */
     if (!cp_blob_store(PREFS_KEY, &p, sizeof(p))) printf("CHECKPOINT warning: settings not saved (NVS)\n");
 }
 
@@ -95,9 +115,9 @@ void checkpoint_start(int64_t boot_t0_us)
     cp_t *cp = calloc(1, sizeof(*cp));
     if (!cp) { printf("CHECKPOINT disabled: no memory\n"); return; }
     cp->recal_req = -1;
-    prefs_load(&cp->wanted, &cp->gain);
+    prefs_load(&cp->wanted, &cp->gain, &cp->wanted_rearm_db);
     sd_init(&cp->sd, &cp->wanted);
-    pd_set_rearm(&cp->sd.det, (float)CONFIG_CHECKPOINT_REARM_DROP_DB);   /* the build's, not saved */
+    pd_set_rearm(&cp->sd.det, cp->wanted_rearm_db);   /* the scan task starts it again from the mailbox */
     if (!cp_scan_start(cp, boot_t0_us)) {
         free(cp);
         printf("CHECKPOINT disabled: no memory for the scan task\n");
@@ -118,7 +138,7 @@ void checkpoint_print(void)
     printf("CHECKPOINT source=sdr live=%u learning=%u bench=%u engine_failed=%u stalled=%u stalls=%" PRIu32
            " gain=%u top=R%u rise_db=%.1f state=%s rotations=%" PRIu32 " readings=%" PRIu32 " passes=%" PRIu32
            " alpha=%.2f tau_ms=%.1f active_db=%.1f hyst_db=%.1f drop_db=%.1f min_peak_db=%.1f refractory_ms=%" PRIu32
-           " stale_ms=%" PRIu32 " rearm_db=%.0f\n",
+           " stale_ms=%" PRIu32 " rearm_db=%.1f\n",
            live, cp->learning, cp->bench_running, cp->engine_failed, stalled, s_stalls, (unsigned)cp->gain, top + 1u,
            (double)sd_rise_db(&cp->sd, top), pd_state_name(cp->sd.det.ch[top].state), cp->rotations, cp->readings,
            cp->passes, (double)c->alpha, (double)sd_tau_ms(&cp->sd), (double)c->active_db, (double)c->hysteresis_db,
@@ -130,10 +150,12 @@ void checkpoint_print(void)
 
 /* ---- requests to the scan task (cp_internal.h mailbox) ---- */
 
-static void post_config(cp_t *cp, const pd_config_t *c)
+/* c valid (pd_config_valid) and rearm_db in [0, LP_REARM_MAX_X10 / 10]: the posters check. */
+static void post_config(cp_t *cp, const pd_config_t *c, float rearm_db)
 {
     portENTER_CRITICAL(&cp_mux);
     cp->wanted = *c;
+    cp->wanted_rearm_db = rearm_db;
     cp->wanted_dirty = true;                  /* accepted during a bench too: applied after it */
     portEXIT_CRITICAL(&cp_mux);
     prefs_save(cp);
@@ -209,9 +231,7 @@ static void post_gain(cp_t *cp, bool up)
 
 /* ---- C5<->C3 link accessors (checkpoint_link.h), called from the link task ---- */
 
-static int32_t to_x10(float v) { return (int32_t)(v * 10.0f + (v >= 0 ? 0.5f : -0.5f)); }
-
-static void config_to_lp(const pd_config_t *c, lp_config_t *o)
+static void config_to_lp(const pd_config_t *c, float rearm_db, lp_config_t *o)
 {
     o->alpha_milli       = (int32_t)(c->alpha * 1000.0f + 0.5f);
     o->active_db_x10     = to_x10(c->active_db);
@@ -220,6 +240,7 @@ static void config_to_lp(const pd_config_t *c, lp_config_t *o)
     o->min_peak_db_x10   = to_x10(c->min_peak_db);
     o->refractory_ms     = c->refractory_ms;
     o->stale_ms          = c->stale_ms;
+    o->rearm_db_x10      = to_x10(rearm_db);
 }
 
 /* alpha_milli: the weight per 17.5 ms reference sweep (time constant -17.5 ms / ln(1 - alpha)),
@@ -236,15 +257,17 @@ static void lp_to_config(const lp_config_t *o, pd_config_t *c)
 }
 
 /* volume_pct/muted belong to the bridge-side speaker (link_proto keeps them);
- * this detector has none, so it ignores them and reports no sound. */
+ * this detector has none, so it ignores them and reports no sound. A value out of range
+ * refuses the whole CONFIG_SET, the re-arm drop's (0..LP_REARM_MAX_X10) as the others: the
+ * echo then shows the settings kept. */
 bool checkpoint_link_apply_config(const lp_config_t *o)
 {
     cp_t *cp = s_cp;
     if (!cp) return false;
     pd_config_t c;
     lp_to_config(o, &c);
-    if (!pd_config_valid(&c)) return false;
-    post_config(cp, &c);
+    if (!pd_config_valid(&c) || o->rearm_db_x10 < 0 || o->rearm_db_x10 > LP_REARM_MAX_X10) return false;
+    post_config(cp, &c, (float)o->rearm_db_x10 / 10.0f);
     return true;
 }
 
@@ -252,12 +275,14 @@ void checkpoint_link_get_config(lp_config_t *out)
 {
     const cp_t *cp = s_cp;
     pd_config_t c = sd_config_default();
+    float rearm = CP_REARM_DEFAULT_DB;
     if (cp) {
         portENTER_CRITICAL(&cp_mux);
         c = cp->wanted;
+        rearm = cp->wanted_rearm_db;
         portEXIT_CRITICAL(&cp_mux);
     }
-    config_to_lp(&c, out);
+    config_to_lp(&c, rearm, out);
     out->volume_pct = 0;
     out->muted = 0;
 }
@@ -350,7 +375,7 @@ void checkpoint_help(void)
     printf("CHECKPOINT K + key (lower = down, upper = up; K stays open 5 s after each key, q closes):\n"
            "  a/A smoothing alpha -/+0.05 (per 17.5 ms)   t/T activity threshold -/+1 dB   h/H hysteresis -/+0.5 dB\n"
            "  d/D pass drop -/+0.5 dB        m/M minimum peak -/+1 dB         r/R refractory -/+250 ms\n"
-           "  l live rise of R1-R8 on/off (5 lines/s)   0 defaults   k show\n"
+           "  e/E re-arm drop -/+1 dB (0 = off)   l live rise of R1-R8 on/off (5 lines/s)   0 defaults   k show\n"
            "  g/G RX gain -/+2 (saved; the rests are learnt again)\n"
            "  i antenna onboard/IPEX, C5-Zero only: drives GPIO 26 (not saved), then recalibrates\n"
            "  engine benches, no detection meanwhile (docs/bench.md):\n"
@@ -368,6 +393,7 @@ bool checkpoint_key(char key)
     pd_config_t c;
     portENTER_CRITICAL(&cp_mux);
     c = cp->wanted;
+    float rearm = cp->wanted_rearm_db;
     portEXIT_CRITICAL(&cp_mux);
     switch (key) {
     case 'a': case 'A': c.alpha = clampf(c.alpha + (key == 'A' ? 0.05f : -0.05f), 0.05f, 1.0f); break;
@@ -375,6 +401,7 @@ bool checkpoint_key(char key)
     case 'h': case 'H': c.hysteresis_db = clampf(c.hysteresis_db + (key == 'H' ? 0.5f : -0.5f), 0.5f, 20.0f); break;
     case 'd': case 'D': c.drop_db = clampf(c.drop_db + (key == 'D' ? 0.5f : -0.5f), 0.5f, 20.0f); break;
     case 'm': case 'M': c.min_peak_db += key == 'M' ? 1.0f : -1.0f; break;
+    case 'e': case 'E': rearm = clampf(rearm + (key == 'E' ? 1.0f : -1.0f), 0.0f, (float)LP_REARM_MAX_X10 / 10.0f); break;
     case 'r': case 'R': {
         const int32_t ms = (int32_t)c.refractory_ms + (key == 'R' ? 250 : -250);
         c.refractory_ms = (uint32_t)(ms < 0 ? 0 : ms > 30000 ? 30000 : ms);
@@ -384,7 +411,7 @@ bool checkpoint_key(char key)
         cp->trace = !cp->trace;
         printf("CHECKPOINT trace %s\n", cp->trace ? "ON" : "OFF");
         return true;
-    case '0': c = sd_config_default(); break;
+    case '0': c = sd_config_default(); rearm = CP_REARM_DEFAULT_DB; break;
     case 'k': case '?': checkpoint_print(); return true;
     case 'g': case 'G': post_gain(cp, key == 'G'); return true;
     case 'i': antenna_toggle(cp); return true;
@@ -395,9 +422,9 @@ bool checkpoint_key(char key)
                (double)c.min_peak_db, (double)c.active_db);
         return true;
     }
-    post_config(cp, &c);
+    post_config(cp, &c, rearm);
     printf("CHECKPOINT set alpha=%.2f active_db=%.1f hyst_db=%.1f drop_db=%.1f min_peak_db=%.1f refractory_ms=%" PRIu32
-           " (saved)\n", (double)c.alpha, (double)c.active_db, (double)c.hysteresis_db, (double)c.drop_db,
-           (double)c.min_peak_db, c.refractory_ms);
+           " rearm_db=%.1f (saved)\n", (double)c.alpha, (double)c.active_db, (double)c.hysteresis_db, (double)c.drop_db,
+           (double)c.min_peak_db, c.refractory_ms, (double)rearm);
     return true;
 }

@@ -63,7 +63,8 @@ static lp_config_t default_config(void) {
     const lp_config_t c = {
         .alpha_milli = 250, .active_db_x10 = 80, .hysteresis_db_x10 = 30,   /* sd_config_default() */
         .drop_db_x10 = 30, .min_peak_db_x10 = 100, .refractory_ms = 1500,
-        .stale_ms = 1000, .volume_pct = 60, .muted = 0,
+        .stale_ms = 1000, .rearm_db_x10 = LP_REARM_DEFAULT_X10,   /* 0 would turn the re-arm off on every gate */
+        .volume_pct = 60, .muted = 0,
     };
     return c;
 }

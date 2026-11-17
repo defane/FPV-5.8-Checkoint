@@ -20,14 +20,16 @@ flash FW=master-wave-c5` (or `idf.py -DIDF_TARGET=esp32c5 -DSDKCONFIG=sdkconfig.
 `firmware/master`, → `build-c5/master-c5.bin`). Later swap that C5 for a real C6
 with no change on the gate side.
 
-- **Protocols:** `components/link_proto` v3 (C5↔bridge UART: `CONFIG_*`,
-  `EVENT_PASS` with the pass's age, `STATS` with the 8 channels' levels and the C5's
-  health, `COMMAND`); `components/fleet_proto` v3
-  (C6↔C3 ESP-NOW: pairing, time beacons, `CONFIG`, `GATE_PASS`, `NODE_STATUS`
-  relaying that, `COMMAND`); `components/espnow_link` (transport);
+- **Protocols:** `components/link_proto` v4 (C5↔bridge UART: `CONFIG_*` with the
+  detector settings, the relative re-arm drop included, `EVENT_PASS` with the pass's age,
+  `STATS` with the 8 channels' levels and the C5's health, `COMMAND`);
+  `components/fleet_proto` v4 (C6↔C3 ESP-NOW: pairing, time beacons, `CONFIG` (the gate
+  and its detector settings, link_proto's `lp_config_t` as it goes to the C5, re-arm drop
+  included), `GATE_PASS`, `NODE_STATUS` relaying the C5's `STATS` and the re-arm drop its
+  last `CONFIG_STATE` echoed, `COMMAND`); `components/espnow_link` (transport);
   `components/race_timing` (laps/sectors per channel). A board left on an older
-  firmware is not misread, it simply does not talk: **reflash every C5, C3 and the
-  C6 together** after a protocol change.
+  firmware is not misread, it simply does not talk (v4 added the re-arm drop): **reflash
+  every C5, C3 and the C6 together** after a protocol change.
 - **C6** (`c6_hub`): node table in NVS, periodic time beacons, the `race_timing`
   engine, **centralized sound**, and an **admin web** (AP) to pair, order the
   gates and see the timings. Every C5 sweeps R1 to R8, so a gate has no channel: a pass

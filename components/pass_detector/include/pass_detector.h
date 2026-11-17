@@ -80,8 +80,11 @@ bool pd_config_valid(const pd_config_t *cfg);
 /* Relative re-arm off; every channel reset. */
 void pd_init(pass_detector_t *d, const pd_config_t *cfg);
 /* The relative re-arm's drop in dB (0, negative or NaN: off, the re-arm is the release
- * alone). Channel states are kept. Not part of pd_config_t: the build sets it
- * (CONFIG_CHECKPOINT_REARM_DROP_DB), the saved settings and the link do not carry it. */
+ * alone). It may change at any time: channel states are kept, a new drop applies from the
+ * next sample, and turning it off sends a relatively armed channel (rel) back to COOLDOWN,
+ * waiting for the release as without it (one mid-pass in RISING goes on as an ordinary pass).
+ * Not part of pd_config_t: the C5 glue keeps it beside the config, saved with it and carried
+ * by the link (lp_config_t.rearm_db_x10; CONFIG_CHECKPOINT_REARM_DROP_DB on a first boot). */
 void pd_set_rearm(pass_detector_t *d, float drop_db);
 /* New thresholds; channel states are kept. False (nothing changed) when invalid. */
 bool pd_set_config(pass_detector_t *d, const pd_config_t *cfg);

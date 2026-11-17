@@ -31,7 +31,6 @@ _Static_assert(SD_HOPS_MAX >= SDR_RX_MAX_HOPS, "one saturated-run record per pla
 #else
 #define CP_PAIR_GUARD 0u
 #endif
-#define CP_REARM_DB ((float)CONFIG_CHECKPOINT_REARM_DROP_DB)   /* the relative re-arm, 0 = off */
 
 bool cp_wdt_subscribed;
 
@@ -138,9 +137,11 @@ static void cp_apply_requests(cp_t *cp, cp_yield_t *y)
     if (cp->wanted_dirty) {
         portENTER_CRITICAL(&cp_mux);
         const pd_config_t c = cp->wanted;
+        const float rearm = cp->wanted_rearm_db;
         cp->wanted_dirty = false;
         portEXIT_CRITICAL(&cp_mux);
         (void)sd_set_config(&cp->sd, &c);        /* validated by the poster */
+        pd_set_rearm(&cp->sd.det, rearm);        /* from the next reading; 0 sends a relatively armed channel to COOLDOWN */
     }
     if (cp->gain_dirty) {
         portENTER_CRITICAL(&cp_mux);
@@ -179,7 +180,7 @@ static void cp_apply_requests(cp_t *cp, cp_yield_t *y)
     }
 }
 
-static void print_ready(uint32_t cal_ms)
+static void print_ready(const cp_t *cp, uint32_t cal_ms)
 {
     sdr_rx_health_t h;
     sdr_rx_get_health(&h);
@@ -189,14 +190,16 @@ static void print_ready(uint32_t cal_ms)
         len += (size_t)snprintf(lo + len, sizeof(lo) - len, "%s%u", j ? "," : "", (unsigned)h.lo_mhz[j]);
     esp_chip_info_t chip;
     esp_chip_info(&chip);
-    /* tools/flash.py waits for this line (BOOT_DONE). verify_tries, pair_guard and rearm_db show the
-     * build's settings: an sdkconfig kept from a bench control (verify_tries=1: the verify only logs;
-     * pair_guard=0: CONFIG_CHECKPOINT_PAIR_GUARD=n; rearm_db=0: no relative re-arm) is visible in
-     * every log. */
-    printf("SDR ready lo=%s gain=%u verify_tries=%u pair_guard=%u rearm_db=%u cal_ms=%" PRIu32
+    portENTER_CRITICAL(&cp_mux);
+    const float rearm = cp->wanted_rearm_db;
+    portEXIT_CRITICAL(&cp_mux);
+    /* tools/flash.py waits for this line (BOOT_DONE). verify_tries and pair_guard show the build's
+     * settings: an sdkconfig kept from a bench control (verify_tries=1: the verify only logs;
+     * pair_guard=0: CONFIG_CHECKPOINT_PAIR_GUARD=n) is visible in every log. rearm_db is the relative
+     * re-arm's drop the detector starts with (saved; the build's on a first boot; 0: none). */
+    printf("SDR ready lo=%s gain=%u verify_tries=%u pair_guard=%u rearm_db=%.1f cal_ms=%" PRIu32
            " boot_ms=%lld chip_rev=v%u.%u\n",
-           lo, (unsigned)sdr_rx_gain(), (unsigned)CONFIG_SDR_RX_VERIFY_TRIES, CP_PAIR_GUARD,
-           (unsigned)CONFIG_CHECKPOINT_REARM_DROP_DB, cal_ms,
+           lo, (unsigned)sdr_rx_gain(), (unsigned)CONFIG_SDR_RX_VERIFY_TRIES, CP_PAIR_GUARD, (double)rearm, cal_ms,
            (esp_timer_get_time() - s_boot_t0_us) / 1000, (unsigned)(chip.revision / 100u),
            (unsigned)(chip.revision % 100u));
 }
@@ -218,16 +221,17 @@ static void scan_task(void *arg)
         printf("SDR init failed: no detection; console stays up\n");
         for (;;) vTaskSuspend(NULL);
     }
-    print_ready((uint32_t)((esp_timer_get_time() - t0) / 1000));
+    print_ready(cp, (uint32_t)((esp_timer_get_time() - t0) / 1000));
     checkpoint_boot_stage("ready");
     if (esp_task_wdt_add(NULL) == ESP_OK) cp_wdt_subscribed = true;   /* a hung scan task reboots the gate */
     else printf("CHECKPOINT warning: the scan task is not watched by the task watchdog\n");
     portENTER_CRITICAL(&cp_mux);
     const pd_config_t cfg = cp->wanted;
+    const float rearm = cp->wanted_rearm_db;
     cp->wanted_dirty = false;
     portEXIT_CRITICAL(&cp_mux);
     sd_init(&cp->sd, &cfg);
-    pd_set_rearm(&cp->sd.det, CP_REARM_DB);      /* sd_init turns it off */
+    pd_set_rearm(&cp->sd.det, rearm);            /* sd_init turns it off */
     cp_mark_read(cp, cp_now_ms());
     cp->live = true;
     cp_yield_t y = {.last_us = esp_timer_get_time()};

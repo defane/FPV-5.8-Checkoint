@@ -38,7 +38,7 @@ uint16_t lp_crc16(const uint8_t *data, size_t len) {
 
 #define LP_LEN_HELLO   1u
 #define LP_LEN_REQ     0u
-#define LP_LEN_CONFIG  30u
+#define LP_LEN_CONFIG  34u
 #define LP_LEN_EVENT   11u
 #define LP_LEN_STATS   (32u + LP_FW_LEN)   /* = LP_MAX_PAYLOAD */
 #define LP_LEN_CMD     1u
@@ -55,8 +55,9 @@ static void put_config(uint8_t *p, const lp_config_t *c) {
     put_i32(p + 16, c->min_peak_db_x10);
     put_u32(p + 20, c->refractory_ms);
     put_u32(p + 24, c->stale_ms);
-    p[28] = c->volume_pct;
-    p[29] = c->muted;
+    put_i32(p + 28, c->rearm_db_x10);
+    p[32] = c->volume_pct;
+    p[33] = c->muted;
 }
 
 static void get_config(const uint8_t *p, lp_config_t *c) {
@@ -67,8 +68,9 @@ static void get_config(const uint8_t *p, lp_config_t *c) {
     c->min_peak_db_x10   = get_i32(p + 16);
     c->refractory_ms     = get_u32(p + 20);
     c->stale_ms          = get_u32(p + 24);
-    c->volume_pct        = p[28];
-    c->muted             = p[29];
+    c->rearm_db_x10      = get_i32(p + 28);
+    c->volume_pct        = p[32];
+    c->muted             = p[33];
 }
 
 /* ---- encoders ---- */
