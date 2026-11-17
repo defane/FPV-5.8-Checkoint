@@ -34,7 +34,7 @@ typedef enum {
     FP_MSG_CONFIG       = 4,  /* master -> node:  gate/channel/enable + detector cfg */
     FP_MSG_GATE_PASS    = 5,  /* node  -> master: a pass at this gate (fleet-timed) */
     FP_MSG_NODE_STATUS  = 6,  /* node  -> master: periodic C/N, state, counters, C5 health */
-    FP_MSG_HEARTBEAT    = 7,  /* either:          keepalive */
+    FP_MSG_HEARTBEAT    = 7,  /* node  -> master: boot probe, until it hears us; answered with CONFIG */
     FP_MSG_COMMAND      = 8,  /* master -> node:  forward an lp_cmd_t to the node's C5 */
 } fp_type_t;
 

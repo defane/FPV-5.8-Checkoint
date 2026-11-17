@@ -150,8 +150,8 @@
       </div>
     </div>
     <p class="muted" style="margin:10px 0 0">One value for every gate, kept by the master: sent now, then to a gate at
-      pairing, on its save and when it comes back online. A gate whose C5 runs another shows it next to its detector
-      state (<span class="pill busy">D 12</span>).</p>
+      pairing, on its save, when it comes back online and when it reboots. A gate whose C5 runs another shows it next
+      to its detector state (<span class="pill busy">D 12</span>).</p>
   </div>
 
   <h2 class="adv">Master &amp; local gate (0)</h2>
@@ -199,7 +199,7 @@ let admin = false, editing = false, rearmDirty = false;
 // A gate whose C5 echoes another re-arm drop than the fleet's (it missed the last CONFIG, or a
 // console K e/E changed it); nothing while its C5 has not told it yet (-1).
 const rearmPill = (x10, fleet) => x10 >= 0 && fleet != null && x10 !== fleet
-  ? ` <span class="pill busy" title="Its C5 runs a re-arm drop of ${x10/10} dB, not the fleet's ${fleet/10} dB. The master sends the fleet's again when the gate comes back online; an admin's Apply sends it now.">D ${x10/10}</span>` : "";
+  ? ` <span class="pill busy" title="Its C5 runs a re-arm drop of ${x10/10} dB, not the fleet's ${fleet/10} dB. The master sends the fleet's again when the gate comes back online or reboots; an admin's Apply sends it now.">D ${x10/10}</span>` : "";
 
 // Info bubbles (the same snippet on the C3 and C6 pages): a button.info shows the .note its
 // aria-controls names. A click opens it: a mouse, a finger, or Enter/Space on the focused button.

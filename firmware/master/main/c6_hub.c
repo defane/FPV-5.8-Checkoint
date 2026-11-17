@@ -242,10 +242,13 @@ static void on_msg(const uint8_t mac[6], const fp_msg_t *msg, int8_t rssi) {
         xSemaphoreGive(s_lock);
         break;
     }
+    /* A node heartbeats only while it boots (c3_fleet_try_online, until it hears us): answer each
+     * with its CONFIG, even if it is still online here. Back within NODE_LIVE_MS, it would
+     * otherwise keep the settings of before an Apply it missed while it rebooted. */
     case FP_MSG_HEARTBEAT: {
         xSemaphoreTake(s_lock, portMAX_DELAY);
         c6_node_t *n = find_by_mac(mac);
-        if (n && node_touch(n, rssi)) { back = *n; resync = true; }
+        if (n) { (void)node_touch(n, rssi); back = *n; resync = true; }
         xSemaphoreGive(s_lock);
         break;
     }
@@ -253,7 +256,7 @@ static void on_msg(const uint8_t mac[6], const fp_msg_t *msg, int8_t rssi) {
         break;
     }
     if (resync) {
-        ESP_LOGI(TAG, "node id=%u back online: re-sending gate=%u ch=%u", back.node_id,
+        ESP_LOGI(TAG, "node id=%u back online or booting: re-sending gate=%u ch=%u", back.node_id,
                  back.gate_index, back.channel);
         send_config_to(&back);
     }
