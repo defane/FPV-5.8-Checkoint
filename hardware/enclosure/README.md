@@ -46,7 +46,8 @@ the lid (103.3 mm deep for a node), without the arm.
 - **Plates:** three of them slide down rails, front to back:
   1. the cut-off, its display and buttons facing the front window;
   2. the DC-DC converter;
-  3. the carrier, its USB-C at the top, reachable with the lid off.
+  3. the carrier, its USB-C at the top, reachable with the lid off. In the model its USB-C
+     stand 6.5 mm under the lid (`lid_clear`): at 1.5 mm the real C5 touched it.
 
   Wires pass from one plate to the next through the notches at their top.
 - **Walls:**
@@ -124,3 +125,4 @@ Measure these on the real parts and change the parameter if it differs:
 | `disp_t`, `btn_t` | 8, 5 mm | assumed: height of the cut-off's display and buttons above its board |
 | `disp_x0`, `disp_z0`, `disp_w`, `disp_h`, `btn1_x`, `btn2_x`, `btn_z` | from a photo | cut-off display and buttons, about 1 mm |
 | `relay_z0` | 25.9 mm | from a photo: the relay slides past the recess, `relay_clear` must stay above 0 |
+| `lid_clear` | 6.5 mm | the C5 stands higher than the 1.6 mm of USB-C the model gives it (`usb_out`). The plugs now go 6 mm down between plates 2 and 3: one up to about 9 mm thick fits, most are 6.5 to 7.5 mm |
