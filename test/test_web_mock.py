@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import http.client
 import importlib.util
+import inspect
 import json
 import re
 import threading
@@ -33,6 +34,50 @@ def json_keys(value):
     return set()
 
 
+def top_level_keys(c):
+    """The keys of the outer object a C handler writes: its format strings in source order (one
+    pass of each loop), depth from their braces and brackets. json_keys() flattens, so a field
+    moved into, out of or copied into a nested object (put_health's rearm_db_x10) still passes it."""
+    c = re.sub(r"/\*.*?\*/|//[^\n]*", "", c, flags=re.S)
+    text = "".join(re.findall(r'"((?:[^"\\]|\\.)*)"', c))
+    keys, depth = set(), 0
+    for m in re.finditer(r'\\"([a-z0-9_]+)\\":|[{}\[\]]', text):
+        if m.group(1):
+            if depth == 1:
+                keys.add(m.group(1))
+        else:
+            depth += 1 if m.group(0) in "{[" else -1
+    return keys
+
+
+def page_posts(page):
+    """Each post("/api/x", ...) of a page: its path and the keys of the object literals it sends."""
+    out = {}
+    for m in re.finditer(r'\bpost\("(/api/\w+)",', page):
+        i, depth = m.end(), 1
+        while depth:                              # to the call's closing parenthesis
+            depth += {"(": 1, ")": -1}.get(page[i], 0)
+            i += 1
+        keys = set()
+        for obj in re.findall(r"\{([^{}]*)\}", page[m.end():i - 1]):
+            keys |= set(re.findall(r"(?:^|,)\s*(\w+)\s*(?=[:,]|$)", obj.strip()))
+        out.setdefault(m.group(1), set()).update(keys)
+    return out
+
+
+def c_reads(fn):
+    return set(re.findall(r'json_[is]\(buf, "(\w+)"', fn))
+
+
+def mock_reads(cls, method):
+    """The body keys a mock handler reads (b.get, b[...]), with the helpers it hands the body to."""
+    src = inspect.getsource(getattr(cls, method))
+    keys = set(re.findall(r'\bb(?:\.get\(|\[)"(\w+)"', src))
+    for helper in set(re.findall(r"self\.(\w+)\(b\b", src)):
+        keys |= mock_reads(cls, helper)
+    return keys
+
+
 class Firmware(unittest.TestCase):
     def test_state_fields_match_the_c_code(self):
         for cls, path in SOURCES.items():
@@ -43,6 +88,12 @@ class Firmware(unittest.TestCase):
             sim.state(60.0)                       # past a few passes: every list is filled
             self.assertTrue(want)
             self.assertEqual(json_keys(sim.state(61.0)), want, path)
+
+    def test_top_level_state_fields_match_the_c_code(self):
+        for cls, path in SOURCES.items():
+            want = top_level_keys(c_function((ROOT / path).read_text(), "get_state"))
+            self.assertIn("rearm_db_x10" if cls is web_mock.Master else "config", want)
+            self.assertEqual(set(cls().state(61.0)), want, path)
 
     def test_results_fields_match_the_c_code(self):
         src = (ROOT / SOURCES[web_mock.Master]).read_text()
@@ -67,6 +118,24 @@ class Firmware(unittest.TestCase):
         widest = "-1.7976931348623157e+308"          # the longest number JSON.stringify writes
         longest = "{" + ",".join(f'"{k}":{widest}' for k in keys) + "}"
         self.assertLess(len(longest), web_mock.Node.ADMIN["/api/config"][1], "web_auth_request needs len < buf")
+
+    def test_master_page_posts_what_the_firmware_reads(self):
+        """Every admin POST of the C6 page: a route of c6_web.c and of the mock, each key it sends
+        parsed by the C handler (json_i/json_s) and read by the mock; the re-arm body within its
+        buffer."""
+        page = (ROOT / "firmware/master/main/www/index.html").read_text()
+        src = (ROOT / SOURCES[web_mock.Master]).read_text()
+        routes = dict(re.findall(r'\.uri = "(/api/\w+)",\s*\.method = HTTP_POST,\s*\.handler = (\w+)', src))
+        posts = page_posts(page)
+        self.assertEqual(posts.get("/api/rearm"), {"rearm_db_x10"})
+        for uri, keys in posts.items():
+            self.assertIn(uri, routes, "a POST the firmware does not route")
+            self.assertIn(uri, web_mock.Master.ADMIN, "a POST the mock does not serve")
+            self.assertLessEqual(keys, c_reads(c_function(src, routes[uri])), f"{uri}: a field the firmware would not read")
+            self.assertLessEqual(keys, mock_reads(web_mock.Master, web_mock.Master.ADMIN[uri][0]),
+                                 f"{uri}: a field the mock would not read")
+        widest = '{"rearm_db_x10":-1.7976931348623157e+308}'
+        self.assertLess(len(widest), web_mock.Master.ADMIN["/api/rearm"][1], "web_auth_request needs len < buf")
 
     def test_rearm_default_matches_link_proto(self):
         header = (ROOT / "components/link_proto/include/link_proto.h").read_text()
