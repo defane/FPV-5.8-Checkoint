@@ -142,6 +142,7 @@ cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/web_auth/include \
 cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/checkpoint \
    test_hop_stats.c -lm -o /tmp/t && /tmp/t
 node test_web_auth.mjs   # the page side (auth.js), Node 18+
+node test_web_bubble.mjs # the pages' info bubbles: one snippet, mouse, touch and keyboard
 python3 test_web_mock.py # tools/web_mock.py against the firmware's /api/state and buffers
 python3 test_pcb.py      # hardware/ boards against the firmware's Kconfig pin defaults
 python3 test_scan_analyze.py   # tools/scan_analyze.py on synthetic recordings

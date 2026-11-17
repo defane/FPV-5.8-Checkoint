@@ -203,7 +203,7 @@ const rearmPill = (x10, fleet) => x10 >= 0 && fleet != null && x10 !== fleet
 
 // Info bubbles (the same snippet on the C3 and C6 pages): a button.info shows the .note its
 // aria-controls names. A click opens it: a mouse, a finger, or Enter/Space on the focused button.
-// A second click, a tap or click elsewhere, or Escape closes it.
+// A second click, a tap or click elsewhere, the focus leaving it (Tab) or Escape closes it.
 let infoOpen = null;
 const infoNote = b => document.getElementById(b.getAttribute("aria-controls"));
 function infoClose() {
@@ -229,8 +229,17 @@ document.addEventListener("click", e => {
 document.addEventListener("pointerdown", e => {
   if (infoOpen && !e.target.closest("button.info") && !infoNote(infoOpen).contains(e.target)) infoClose();
 });
+// The focus on another control (Tab): the note would cover the ones under it.
+document.addEventListener("focusin", e => {
+  if (infoOpen && e.target !== infoOpen && !infoNote(infoOpen).contains(e.target)) infoClose();
+});
+// Escape gives the focus back to the button, unless it is on another control (Safari does not
+// focus a clicked button): the user keeps their place.
 document.addEventListener("keydown", e => {
-  if (e.key === "Escape" && infoOpen) { const b = infoOpen; infoClose(); b.focus(); }
+  if (e.key !== "Escape" || !infoOpen) return;
+  const b = infoOpen, a = document.activeElement;
+  infoClose();
+  if (!a || a === document.body || a === b || infoNote(b).contains(a)) b.focus();
 });
 
 async function post(url, obj) {     // signed (auth.js): the password never goes out
