@@ -16,6 +16,7 @@
 #define LINK_READ_MS  100u
 #define OUTQ_DEPTH    4u
 #define C5_SILENT_MS  3000u   /* 3 STATS periods without a frame: the C5 is absent */
+#define CONFIG_POLL_MS 1000u  /* CONFIG_REQ period: a console K edit on the C5 echoes nothing */
 
 static const char *TAG = "c3_link";
 static QueueHandle_t s_outq;        /* pre-encoded frames to send to the C5 */
@@ -112,6 +113,11 @@ static void link_task(void *arg) {
     size_t hn = lp_encode_hello(hello, sizeof hello, LP_ROLE_C3);
     if (hn) uart_write_bytes(LINK_UART, (const char *)hello, hn);
     bool silent = false;
+    /* Re-polled every second, as the C6 polls its own C5: the drop relayed in NODE_STATUS
+     * and the degraded page's form follow a console K edit within about that. */
+    uint8_t req[LP_MAX_FRAME];
+    const size_t rn = lp_encode_config_req(req, sizeof req);
+    uint32_t last_req = now_ms();
 
     for (;;) {
         uint8_t rx[64];
@@ -128,9 +134,14 @@ static void link_task(void *arg) {
         while (xQueueReceive(s_outq, &f, 0) == pdTRUE)
             uart_write_bytes(LINK_UART, (const char *)f.buf, f.len);
 
+        const uint32_t t = now_ms();
+        if (rn && t - last_req >= CONFIG_POLL_MS) {
+            last_req = t;
+            uart_write_bytes(LINK_UART, (const char *)req, rn);
+        }
+
         /* Status LED: red if the C5 link is silent (its STATS stopped, or never came),
          * else the fleet state. The C5 has no LED, so no keepalive is sent. */
-        const uint32_t t = now_ms();
         const uint32_t heard = s_last_c5_rx ? s_last_c5_rx : s_link_start;
         const bool now_silent = (uint32_t)(t - heard) > C5_SILENT_MS;
         if (now_silent && !silent)

@@ -71,11 +71,11 @@ with no change on the gate side.
   while the C5 booted is lost (its UART comes up after its radio), and a swapped C5 gets it
   too. Gate 0 keeps its other settings: the C6 sends its C5 a `CONFIG_SET` of the values
   that C5 echoed with the fleet's drop, when the C6 boots, when that C5 says `HELLO` (it
-  rebooted) and on each *Apply*. A gate whose C5 echoes another drop (`NODE_STATUS` relays
-  it) shows it next to its detector state, e.g. `D 12`: it missed the last `CONFIG` (lost on
-  the air) or a console `K` `e`/`E` changed it; *Apply* sends the fleet's again.
-  `/api/state` carries the fleet's value (`rearm_db_x10`) and each gate's echo (`local` and
-  every node, `-1` until its C5 told it).
+  rebooted) and on each *Apply*. A gate whose C5 echoes another drop (its bridge asks every
+  second, and `NODE_STATUS` relays a remote gate's) shows it next to its detector state,
+  e.g. `D 12`: it missed the last `CONFIG` (lost on the air) or a console `K` `e`/`E`
+  changed it; *Apply* sends the fleet's again. `/api/state` carries the fleet's value
+  (`rearm_db_x10`) and each gate's echo (`local` and every node, `-1` until its C5 told it).
 - **Web roles:** two levels. A **spectator** sees timings/status read-only (no
   login); **admin** actions (pairing, gate order, reset, volume, the fleet's re-arm drop,
   a gate's calibration or reboot; detector tuning on a degraded

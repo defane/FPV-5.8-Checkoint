@@ -184,7 +184,8 @@ void c3_fleet_report_stats(const lp_stats_t *s) {
                             .passes = s->passes, .flags = s->flags, .seq = s_status_seq++,
                             .gain = s->gain, .uptime_s = s->uptime_s,
                             .heap_min = s->heap_min, .faults = s->faults };
-    /* What the C5 echoed it runs, so the C6 sees a gate that missed a CONFIG (its C5 was away). */
+    /* What the C5 echoed it runs (polled every second), so the C6 sees a gate that missed a CONFIG
+     * or whose console K e/E changed it. */
     const int32_t rearm = c3_link_c5_rearm_x10();
     ns.rearm_db_x10 = rearm >= 0 && rearm < (int32_t)FP_REARM_UNKNOWN ? (uint16_t)rearm : (uint16_t)FP_REARM_UNKNOWN;
     memcpy(ns.levels, s->levels, sizeof ns.levels);
