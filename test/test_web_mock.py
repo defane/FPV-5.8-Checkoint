@@ -53,6 +53,25 @@ class Firmware(unittest.TestCase):
         header = (ROOT / "components/race_timing/include/race_timing.h").read_text()
         self.assertEqual(web_mock.RESULTS_KEPT, int(re.search(r"RT_HISTORY\s+(\d+)u", header).group(1)))
 
+    def test_node_page_posts_what_the_firmware_reads(self):
+        """The C3 page's detector body: every key parsed by post_config (json_i) and echoed in
+        /api/state's config, and its widest form within the firmware's buffer."""
+        page = (ROOT / "firmware/node/main/www/index.html").read_text()
+        body = re.search(r'\$\("save"\).*?const body = \{(.*?)\};', page, re.S).group(1)
+        keys = re.findall(r"^\s*(\w+):", body, re.M)
+        src = (ROOT / SOURCES[web_mock.Node]).read_text()
+        parsed = set(re.findall(r'json_i\(buf, "(\w+)"', c_function(src, "post_config")))
+        self.assertIn("rearm_db_x10", keys)
+        self.assertLessEqual(set(keys), parsed, "a field the firmware would not read")
+        self.assertLessEqual(set(keys), set(web_mock.Node().config), "a field /api/state does not echo")
+        widest = "-1.7976931348623157e+308"          # the longest number JSON.stringify writes
+        longest = "{" + ",".join(f'"{k}":{widest}' for k in keys) + "}"
+        self.assertLess(len(longest), web_mock.Node.ADMIN["/api/config"][1], "web_auth_request needs len < buf")
+
+    def test_rearm_default_matches_link_proto(self):
+        header = (ROOT / "components/link_proto/include/link_proto.h").read_text()
+        self.assertEqual(web_mock.REARM_X10, int(re.search(r"LP_REARM_DEFAULT_X10\s+(\d+)", header).group(1)))
+
     def test_admin_routes_and_buffers_match_the_c_code(self):
         for cls, path in SOURCES.items():
             src = (ROOT / path).read_text()

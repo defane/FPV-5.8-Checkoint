@@ -133,7 +133,8 @@ that much over the lowest 1 s average since: docs/detector.md "Relative re-arm")
 `components/checkpoint`; the parameters (alpha, active, hysteresis, drop, min peak,
 refractory, stale, D) are editable from the console (`K`+key:
 `components/checkpoint/cp_console.c` and `checkpoint.c`; D is `e`/`E`) and over the link
-(the bridges' `CONFIG_SET`, `lp_config_t`, echoed as `CONFIG_STATE`), saved in NVS namespace
+(the bridges' `CONFIG_SET`, `lp_config_t`, echoed as `CONFIG_STATE`; the degraded C3's page
+sets them all, D with an info bubble), saved in NVS namespace
 `checkpoint` key `prefs` (`checkpoint_prefs_t`, `PREFS_VERSION` 4, a version-3 record read
 with the build's D — bump it on a layout or meaning change). Parameter table (defaults +
 console keys): **`docs/detector.md`**.

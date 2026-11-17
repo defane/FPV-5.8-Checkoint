@@ -33,6 +33,7 @@ CAL_S = {"cal_full": 3.7, "cal_quick": 3.2}   # blind: the recalibration + the 3
 REBOOT_S = 4.0
 PASSES_KEPT = {"master": 24, "node": 16}   # C6_EVENTS, C3_EVENTS
 RESULTS_KEPT = 10   # RT_HISTORY in race_timing.h
+REARM_X10 = 160     # LP_REARM_DEFAULT_X10: the relative re-arm's 16 dB
 
 
 class Auth:
@@ -308,7 +309,7 @@ class Node:
         self.events, self.total = [], 0
         self.config = {"alpha_milli": 300, "active_db_x10": 150, "hysteresis_db_x10": 30, "drop_db_x10": 30,
                        "min_peak_db_x10": 250, "refractory_ms": 1500, "stale_ms": 1000,
-                       "volume_pct": 60, "muted": 0}
+                       "rearm_db_x10": REARM_X10, "volume_pct": 60, "muted": 0}
 
     def state(self, t):
         g = self.gate

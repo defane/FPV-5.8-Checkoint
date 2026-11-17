@@ -53,6 +53,21 @@
   input[type=text], input[type=password] { background: #0f1216; color: #e7ebf0; border: 1px solid #2a313a; border-radius: 6px; padding: 6px; }
   .admin-only { display: none; }
   body.is-admin .admin-only { display: revert; }
+  .field { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 8px 0; font-size: .92rem; }
+  .field label { display: inline; margin: 0; }   /* the row is the flex box, its label only text */
+  /* Info bubbles (the same snippet on the C3 and C6 pages): a round "i" button opens the note under its row. */
+  .infobox { position: relative; }
+  button.info { margin: 0 0 0 6px; padding: 0; width: 24px; height: 24px; flex: none; border-radius: 50%;
+                border: 1px solid #8b97a7; background: transparent; color: #8b97a7; cursor: pointer;
+                font: italic 700 .85rem/22px Georgia, serif; text-align: center; vertical-align: middle; }
+  button.info:active, button.info[aria-expanded=true] { background: #2f6feb; border-color: #2f6feb; color: #fff; }
+  button.info:focus-visible { outline: 2px solid #93c5fd; outline-offset: 2px; }
+  .note { position: absolute; z-index: 2; top: calc(100% + 8px); left: 0; right: 0; max-width: 22rem; box-sizing: border-box;
+          padding: 10px 12px; border: 1px solid #3a4350; border-radius: 8px; background: #0e1014; color: #e7ebf0;
+          font-size: .82rem; font-weight: 400; line-height: 1.4; text-align: left; box-shadow: 0 6px 18px rgba(0, 0, 0, .5); }
+  .note::before { content: ""; position: absolute; top: -6px; left: var(--arrow, 16px); width: 10px; height: 10px; margin-left: -6px;
+                  background: #0e1014; border: solid #3a4350; border-width: 1px 0 0 1px; transform: rotate(45deg); }
+  .note p { margin: 0 0 6px; } .note p:last-child { margin: 0; }
 </style>
 </head>
 <body>
@@ -111,6 +126,20 @@
     <label>Hysteresis (dB) <input id="hyst" type="number" step="0.5"></label>
     <label>Pass drop (dB) <input id="drop" type="number" step="0.5"></label>
     <label>Minimum peak (dB) <input id="minpeak" type="number" step="0.5"></label>
+    <div class="field infobox">
+      <span><label for="rearm">Re-arm drop (dB)</label><button type="button" class="info" aria-label="About the re-arm drop"
+        aria-expanded="false" aria-controls="rearm_note">i</button></span>
+      <input id="rearm" type="number" step="1" min="0" max="40">
+      <div id="rearm_note" class="note" hidden>
+        <p>After a pass, the gate re-arms once the signal's 1 s average falls this many dB under the pass's peak;
+          the next pass must then climb as far over the lowest level since.</p>
+        <p>It lets laps count when a drone never goes far from the gate: a small indoor track, a strong VTX.</p>
+        <p><b>Recommended: 16 dB.</b></p>
+        <p>Laps missed on a small track or with a strong VTX: lower it, 12–14. Extra laps outdoors: raise it, 18–20.
+          A lap counts when the gate pass stands about this much plus 2 dB above the rest of the lap.
+          0 turns it off: the gate then re-arms only near the noise floor.</p>
+      </div>
+    </div>
     <label>Refractory (ms) <input id="refr" type="number" step="250" min="0"></label>
     <label>Stale (ms) <input id="stale" type="number" step="250" min="1"></label>
     <button id="save">Apply &amp; save</button>
@@ -128,12 +157,44 @@ const $ = id => document.getElementById(id);
 const CH = n => "R" + (n + 1);
 const STATES = ["IDLE", "RISING", "PEAK_PASSED", "COOLDOWN"];
 let dirty = false, admin = false;
-["alpha","active","hyst","drop","minpeak","refr","stale"].forEach(
+["alpha","active","hyst","drop","minpeak","rearm","refr","stale"].forEach(
   id => $(id).addEventListener("input", () => { dirty = true; }));
+
+// Info bubbles (the same snippet on the C3 and C6 pages): a button.info shows the .note its
+// aria-controls names. A click opens it: a mouse, a finger, or Enter/Space on the focused button.
+// A second click, a tap or click elsewhere, or Escape closes it.
+let infoOpen = null;
+const infoNote = b => document.getElementById(b.getAttribute("aria-controls"));
+function infoClose() {
+  if (!infoOpen) return;
+  infoNote(infoOpen).hidden = true;
+  infoOpen.setAttribute("aria-expanded", "false");
+  infoOpen = null;
+}
+document.addEventListener("click", e => {
+  const b = e.target.closest("button.info");
+  if (!b) return;
+  const again = b === infoOpen;
+  infoClose();
+  if (again) return;
+  const n = infoNote(b);
+  n.hidden = false;
+  b.setAttribute("aria-expanded", "true");
+  infoOpen = b;
+  const r = b.getBoundingClientRect(), nr = n.getBoundingClientRect();   // the arrow under the button
+  n.style.setProperty("--arrow", Math.round(Math.min(Math.max(r.left + r.width / 2 - nr.left, 14), nr.width - 14)) + "px");
+});
+// pointerdown, not click: a tap on plain text fires no click on iOS.
+document.addEventListener("pointerdown", e => {
+  if (infoOpen && !e.target.closest("button.info") && !infoNote(infoOpen).contains(e.target)) infoClose();
+});
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && infoOpen) { const b = infoOpen; infoClose(); b.focus(); }
+});
 
 function setAdmin(on) {             // back to spectator forgets the key and unsaved detector edits
   admin = on;
-  if (!on) { AdminAuth.logout(); dirty = false; }
+  if (!on) { AdminAuth.logout(); dirty = false; infoClose(); }
   document.body.classList.toggle("is-admin", on);
   $("role").setAttribute("aria-checked", on);
 }
@@ -172,6 +233,7 @@ function fillConfig(c) {
   $("hyst").value   = (c.hysteresis_db_x10 / 10).toFixed(1);
   $("drop").value   = (c.drop_db_x10 / 10).toFixed(1);
   $("minpeak").value= (c.min_peak_db_x10 / 10).toFixed(1);
+  $("rearm").value  = c.rearm_db_x10 / 10;
   $("refr").value   = c.refractory_ms;
   $("stale").value  = c.stale_ms;
 }
@@ -234,12 +296,15 @@ async function poll() {
 }
 
 $("save").addEventListener("click", async () => {
+  const rearm = parseFloat($("rearm").value);
+  if (!(rearm >= 0 && rearm <= 40)) { $("msg").textContent = "re-arm drop: 0 to 40 dB"; return; }   // the C5 refuses the rest too
   const body = {
     alpha_milli: Math.round(parseFloat($("alpha").value) * 1000),
     active_db_x10: Math.round(parseFloat($("active").value) * 10),
     hysteresis_db_x10: Math.round(parseFloat($("hyst").value) * 10),
     drop_db_x10: Math.round(parseFloat($("drop").value) * 10),
     min_peak_db_x10: Math.round(parseFloat($("minpeak").value) * 10),
+    rearm_db_x10: Math.round(rearm * 10),
     refractory_ms: parseInt($("refr").value, 10),
     stale_ms: parseInt($("stale").value, 10),
   };

@@ -339,6 +339,9 @@ a value out of range refuses the whole set), saved in the C5's prefs with the re
 `CONFIG_CHECKPOINT_REARM_DROP_DB` (16) is the first boot's value, and `K` `0`'s and a
 version-3 record's.
 
+The degraded C3's page sets it in its *Detector* card (*Re-arm drop*, 0 to 40 dB): its round
+"i" button opens a bubble with what it does, the recommended 16 dB and the advice below.
+
 A new D applies from the next reading, the channels' states kept:
 
 - a channel in COOLDOWN re-arms once its 1 s average stands the new D under its highest

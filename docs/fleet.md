@@ -40,7 +40,10 @@ with no change on the gate side.
   while it boots, so with pairing closed it ends up degraded: open pairing, then reboot it.
 - **Degraded C3:** if the C6 is unreachable for `CONFIG_C3_FLEET_TIMEOUT_MS` at
   boot, the C3 serves its own local AP + web (pass display, the channels' levels,
-  detector settings).
+  detector settings). Its *Detector* card has the relative re-arm drop too, with an info
+  bubble (the round "i": a click, a tap or Enter opens it, a second one, a tap elsewhere
+  or Escape closes it) on what it does and its recommended value, 16 dB
+  ([detector.md](detector.md#setting-d)).
 - **Simple and advanced:** the C6 page opens on what spectators came for, the standings
   and the last results. Each channel in the standings has its status: online while a pass is under 30 s old, else offline; hover or tap the badge
   for when it was last seen, on the master's clock. The advanced toggle adds the channels, the gates
