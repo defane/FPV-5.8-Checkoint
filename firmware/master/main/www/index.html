@@ -196,8 +196,8 @@ const cmdBtns = busy => { const d = busy ? " disabled" : "";
   <button class="ghost sm cmd" data-cmd="cal_quick"${d} title="Quick calibration of the current filter (console F)">Cal F</button>
   <button class="ghost sm cmd" data-cmd="reboot">Reboot</button>`; };
 let admin = false, editing = false, rearmDirty = false;
-// A gate whose C5 echoes another re-arm drop than the fleet's (it missed the last CONFIG: offline,
-// or its C5 was away); nothing while its C5 has not told it yet (-1).
+// A gate whose C5 echoes another re-arm drop than the fleet's (it missed the last CONFIG, or a
+// console K e/E changed it); nothing while its C5 has not told it yet (-1).
 const rearmPill = (x10, fleet) => x10 >= 0 && fleet != null && x10 !== fleet
   ? ` <span class="pill busy" title="Its C5 runs a re-arm drop of ${x10/10} dB, not the fleet's ${fleet/10} dB. The master sends the fleet's again when the gate comes back online; an admin's Apply sends it now.">D ${x10/10}</span>` : "";
 

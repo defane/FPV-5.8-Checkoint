@@ -60,7 +60,10 @@ void c3_fleet_init(void) {
 static void apply_config(const fp_config_t *c) {
     s_gate = c->gate_index;
     s_channel = c->channel;
-    c3_link_push_config(&c->det);       /* detector/audio tunables to the C5 */
+    /* Detector/audio tunables to the C5. A relay keeps them for its C5's next HELLO; a degraded
+     * C3's page owns its C5's settings, so it only passes this one on. */
+    if (s_degraded) c3_link_push_config(&c->det);
+    else c3_link_set_master_config(&c->det);
 }
 
 static void on_msg(const uint8_t mac[6], const fp_msg_t *msg, int8_t rssi) {

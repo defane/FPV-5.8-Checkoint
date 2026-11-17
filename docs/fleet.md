@@ -66,13 +66,16 @@ with no change on the gate side.
   bubble as the C3's: what it does, the recommended 16 dB and how to tune it.
   `POST /api/rearm` `{"rearm_db_x10": 0..400}` → `{"ok": true}`, or `{"ok": false}` out of
   range. The online remote gates get it at once in their `CONFIG`, and a remote gate again
-  at pairing, on its save and when it comes back online. Gate 0 keeps its other settings: the
-  C6 sends its C5 a `CONFIG_SET` of the values that C5 echoed with the fleet's drop, when
-  the C6 boots, when that C5 says `HELLO` (it rebooted) and on each *Apply*. A gate whose C5
-  echoes another drop (`NODE_STATUS` relays it) shows it next to its detector state, e.g.
-  `D 12`: it missed the last `CONFIG` (its C5 was away) or a console `K` `e`/`E` changed
-  it; *Apply* sends the fleet's again. `/api/state` carries the fleet's value
-  (`rearm_db_x10`) and each gate's echo (`local` and every node, `-1` until its C5 told it).
+  at pairing, on its save and when it comes back online. Its C3 keeps the last `CONFIG` (RAM)
+  and gives it to its C5 again when that C5 says `HELLO`: one sent while the C5 booted is
+  lost (its UART comes up after its radio), and a swapped C5 gets it too. Gate 0 keeps its
+  other settings: the C6 sends its C5 a `CONFIG_SET` of the values that C5 echoed with the
+  fleet's drop, when the C6 boots, when that C5 says `HELLO` (it rebooted) and on each
+  *Apply*. A gate whose C5 echoes another drop (`NODE_STATUS` relays it) shows it next to its
+  detector state, e.g. `D 12`: it missed the last `CONFIG` (lost, or sent while its C3
+  rebooted) or a console `K` `e`/`E` changed it; *Apply* sends the fleet's again.
+  `/api/state` carries the fleet's value (`rearm_db_x10`) and each gate's echo (`local` and
+  every node, `-1` until its C5 told it).
 - **Web roles:** two levels. A **spectator** sees timings/status read-only (no
   login); **admin** actions (pairing, gate order, reset, volume, the fleet's re-arm drop,
   a gate's calibration or reboot; detector tuning on a degraded

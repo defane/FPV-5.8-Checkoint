@@ -25,6 +25,11 @@ static volatile uint32_t s_last_c5_rx;   /* last valid frame from the C5 (ms), 0
                                           * written by the link task, read by the web */
 static uint32_t s_link_start;            /* a C5 that never spoke is silent since then */
 static int32_t s_c5_rearm_x10 = -1;      /* its last CONFIG_STATE's re-arm drop; link task only */
+/* Relay mode: the master's last CONFIG for this gate (written by the ESP-NOW task, read by the
+ * link task), pushed again when the C5 says HELLO. */
+static portMUX_TYPE s_master_mux = portMUX_INITIALIZER_UNLOCKED;
+static lp_config_t s_master_cfg;
+static bool s_has_master_cfg;
 
 typedef struct { uint8_t buf[LP_MAX_FRAME]; uint8_t len; } frame_t;
 
@@ -56,6 +61,14 @@ void c3_link_push_config(const lp_config_t *c) {
     enqueue(b, lp_encode_config(b, sizeof b, LP_MSG_CONFIG_SET, c));
 }
 
+void c3_link_set_master_config(const lp_config_t *c) {
+    portENTER_CRITICAL(&s_master_mux);
+    s_master_cfg = *c;
+    s_has_master_cfg = true;
+    portEXIT_CRITICAL(&s_master_mux);
+    c3_link_push_config(c);
+}
+
 void c3_link_send_command(lp_cmd_t cmd) {
     uint8_t b[LP_MAX_FRAME];
     enqueue(b, lp_encode_command(b, sizeof b, cmd));   /* 0 (nothing sent) for an unknown cmd */
@@ -73,8 +86,20 @@ static void handle_msg(const lp_msg_t *m) {
         c3_store_set_config(&m->config, false);
         s_c5_rearm_x10 = m->config.rearm_db_x10;   /* relayed to the C6 (NODE_STATUS) */
         break;
-    /* The C5 (re)booted after our HELLO went out: ask it for its config. */
-    case LP_MSG_HELLO:        enqueue(b, lp_encode_config_req(b, sizeof b)); break;
+    /* The C5 (re)booted after our HELLO went out, or was swapped. A relay gives it the master's
+     * last CONFIG again: one sent while it booted was lost, as its UART comes up after its radio.
+     * A degraded C3 asks for its config (its page follows the C5's). Either answer is a
+     * CONFIG_STATE. */
+    case LP_MSG_HELLO: {
+        lp_config_t c = {0};
+        portENTER_CRITICAL(&s_master_mux);
+        const bool master = s_has_master_cfg;
+        if (master) c = s_master_cfg;
+        portEXIT_CRITICAL(&s_master_mux);
+        enqueue(b, master ? lp_encode_config(b, sizeof b, LP_MSG_CONFIG_SET, &c)
+                          : lp_encode_config_req(b, sizeof b));
+        break;
+    }
     default: break;
     }
 }
