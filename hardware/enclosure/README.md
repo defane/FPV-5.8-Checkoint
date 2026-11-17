@@ -14,7 +14,7 @@ and no support needed, but several dimensions come from a photo or are assumed (
 | File | What |
 | --- | --- |
 | [`enclosure.sc`](enclosure.sc) | the source: a [SolidCraft](https://github.com/tangency-labs/solidcraft) 0.41 design where every dimension is a named parameter with a comment |
-| [`print/common/`](print/common/) | the parts both sets share: plates 1 and 2, button pushers, dial post, arm, clamp jaws |
+| [`print/common/`](print/common/) | the parts both sets share: plates 1 and 2, button pushers, dial post, arm, roll clamp, front jaws |
 | [`print/master/`](print/master/), [`print/node/`](print/node/) | the box, the lid and plate 3 of each set |
 
 Every 3MF is already laid on its print face.
@@ -32,8 +32,10 @@ The standoffs of plates 1 and 2 are dimensioned in their `standoffs` sketch from
 the module (construction lines driven by its size and position). The insert holes are centred on
 those standoffs, projected into the `inserts` sketch, so they follow them.
 
-After a change, activate each configuration and export its printed bodies again, with "lay on
-print faces": their print faces are set in the design. The envelopes of the modules and of the
+After a change, activate each configuration and export its printed bodies again, in fine quality
+with "lay on print faces". Set each body's print face first (`body.print_face`): the saved design
+does not keep them. The arm lies on its back, the roll clamp on its plate, the front jaws on the
+face against the antenna. The envelopes of the modules and of the
 XT60E-M (from its STEP model), the antenna and its SMA jack are references, not parts.
 
 ## Layout
@@ -61,14 +63,31 @@ the lid (103.3 mm deep for a node), without the arm.
 
 ## Antenna arm
 
+![the roll joint: the roll clamp on the arm's seat](enclosure-roll.png)
+
 - **Positions:** the arm turns about an axis square to the right wall and locks in 8
   positions 45° apart (up, down, front, back and the diagonals). Loosen its M3 screw, turn it
   a notch, tighten it.
-- **Clamps:** two jaws hold the antenna by its ground band, 5.5 to 15 mm from the SMA edge,
-  and stay clear of the line, the PI and the balun.
-- **Pointing down:** the antenna then reaches 36 mm below the bottom of the box, so raise the box.
-- **Coax:** up to 150 mm from the bulkhead to the antenna. Its plug on the wall must stand
-  under 20 mm, or the antenna hits it when pointing back. A right-angle plug clears it.
+- **Length:** 75 mm from the dial's axis to the roll joint (`arm_l`), so the antenna stands
+  clear of the box. Its bar runs on the side of the axis away from the wall's SMA bulkhead.
+- **Roll:** the antenna also turns about its own axis, in 8 steps of 45°: its dipole along the
+  wall, square to it or at 45°. Its beam is 64° wide in the board's plane and 84° square to it
+  ([`../antenna/README.md`](../antenna/README.md#simulation)), so the roll chooses which way it
+  is narrow. The roll clamp sits on a seat at the end of the arm, centred by a lip, and two
+  M3 × 8 screws hold it in two opposite inserts of the seat's eight. Take them out, turn the
+  clamp, and screw them into the two inserts now under its holes.
+- **Clamps:** the roll clamp's rear jaw and two front jaws hold the antenna by its ground band,
+  5.5 to 15 mm from the SMA edge, and stay clear of the line, the PI and the balun. A pocket in
+  the rear jaw takes the SMA's legs.
+- **Clearance:** pointing back, the roll joint is partly beside the wall. Rolled 90°, the jaws
+  come within 4 mm of the wall's plane and never closer: the arm's rise (`riser`, 12 mm) is set
+  for that.
+- **Pointing down:** the antenna then reaches 91 mm below the bottom of the box, so raise the
+  box or point it another way.
+- **Coax:** 200 mm from the bulkhead to the antenna (`coax_l`): 125 mm in a straight line at
+  the worst arm angle, plus the way round the hub. At the antenna it needs a straight plug: the
+  cable runs down the roll axis, through the 12 mm bore of the clamp and the seat, then along
+  the arm. No arm angle or roll reaches the plug on the wall, whatever its height.
 - **Firmware:** flash the C5 with `make flash FW=detector-ipex` (`CONFIG_CHECKPOINT_ANTENNA_IPEX=y`),
   then calibrate again with every VTX off. Without it, the C5 listens on its onboard antenna,
   inside the box.
@@ -81,15 +100,17 @@ in its 4.2 mm holes (`insert_d`).
 
 ## Assembly
 
-1. Set the heat-set inserts (16 M3x5x5, 1 M3x6x5 in the dial post, and on a master 2 M2x4x3.2
-   for the speaker).
+1. Set the heat-set inserts (24 M3x5x5, 8 of them in the arm's roll seat, 1 M3x6x5 in the dial
+   post, and on a master 2 M2x4x3.2 for the speaker).
 2. Screw the dial post on from inside the box (2 M3 x 8), before plate 1 goes in.
 3. Fit the XT60E-M from inside (2 M2.5 x 10 screws and nuts), the SMA bulkhead and, on a
    master, the speaker (2 M2 x 6).
 4. Screw each module on its plate. Put the two pushers in their holes, then slide plate 1 in,
    then plates 2 and 3.
 5. Wire through the plate notches, then screw the lid on (4 M3 x 8).
-6. Clamp the antenna (2 M3 x 18, nuts in the arm), fit the arm (M3 x 10 and a washer).
+6. Fit the arm (M3 x 10 and a washer). Pass the coax's antenna end up through the seat and the
+   roll clamp's bore, screw it on the antenna, and clamp the antenna to the roll clamp
+   (2 M3 x 12, nuts in the roll clamp). Then set the roll clamp on the seat (2 M3 x 8).
 
 The parts and screws are listed in [`../BOM.csv`](../BOM.csv), rows `enclosure` and `power`
 (one set of each per box).

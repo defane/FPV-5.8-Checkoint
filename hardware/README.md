@@ -98,14 +98,15 @@ they change nothing.
 ## Antenna
 
 [`antenna/`](antenna/README.md) holds a directive 5.8 GHz quasi-Yagi on FR-4, a separate board
-that reaches a C5-Zero through its IPEX connector. It has not been simulated or built.
+that reaches a C5-Zero through its IPEX connector. Its openEMS model gives about 4.5 dBi along its
+axis across the Raceband, in a beam 64° by 84° wide. It has not been built.
 
 ## Enclosure
 
 [`enclosure/`](enclosure/README.md) holds a 3D-printed box for a node or a master set, with its
 LiPo cut-off and DC-DC converter (and the master's speaker), and an arm that points the antenna
-in 8 directions. Its source is a SolidCraft design with one configuration per set. It has not
-been printed yet.
+in 8 directions and rolls it about its own axis in 8 steps. Its source is a SolidCraft design
+with one configuration per set. It has not been printed yet.
 
 ## Regenerating
 
