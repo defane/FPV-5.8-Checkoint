@@ -45,7 +45,8 @@ page and its calibration guard follow the C5's real values, and asks for it
 `HELLO`, e.g. after a C5 reboot. On that `HELLO` a relay node pushes the master's
 last `CONFIG` instead, so a C5 that booted after it, or was swapped, runs the
 fleet's settings. The C5 emits one `EVENT_PASS` per pass and periodic `STATS`
-carrying its health; the bridge can
+carrying each channel's level and detector state (the pages frame a channel that waits
+to re-arm: [fleet.md](fleet.md)) and its health; the bridge can
 send it `COMMAND`s (calibrate, reboot): see [fleet.md](fleet.md#gate-health-and-remote-commands-no-console-in-production).
 
 Wiring diagram: [`wiring-node.svg`](wiring-node.svg) (C3 + C5). Consolidated

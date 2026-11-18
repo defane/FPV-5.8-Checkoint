@@ -45,6 +45,9 @@ _Static_assert(offsetof(checkpoint_prefs_t, rearm_db_x10) == 2 && offsetof(check
                "version 3's layout: version, gain, 2 reserved bytes, then det (the migration reads it in place)");
 _Static_assert(CONFIG_CHECKPOINT_REARM_DROP_DB >= 0 && CONFIG_CHECKPOINT_REARM_DROP_DB * 10 <= LP_REARM_MAX_X10,
                "the build's re-arm drop fits the link's range");
+_Static_assert(PD_IDLE == LP_STATE_IDLE && PD_RISING == LP_STATE_RISING && PD_PEAK_PASSED == LP_STATE_PEAK_PASSED &&
+               PD_COOLDOWN == LP_STATE_COOLDOWN && SDR_RX_CHANNELS <= LP_LEVELS,
+               "STATS carries each channel's pd_state_t as it is, in 2 bits");
 #define CP_REARM_DEFAULT_DB ((float)CONFIG_CHECKPOINT_REARM_DROP_DB)   /* first boot, a v3 record, K 0 */
 
 portMUX_TYPE cp_mux = portMUX_INITIALIZER_UNLOCKED;
@@ -306,10 +309,12 @@ void checkpoint_link_get_stats(lp_stats_t *out)
     const bool engine_failed = cp && cp->engine_failed;
     const bool blind = sdr_rx_calibrating() || (cp && (cp->learning || cp->bench_running));
     const unsigned top = live ? sd_strongest(&cp->sd) : 0u;
+    uint16_t states = 0;   /* all IDLE unless the gate scans */
+    for (unsigned ch = 0; live && ch < SDR_RX_CHANNELS; ch++)
+        states = lp_state_set(states, ch, (unsigned)cp->sd.det.ch[ch].state);
     *out = (lp_stats_t){
         .cn_x10   = live ? to_x10(sd_rise_db(&cp->sd, top)) : LP_CN_UNKNOWN,
-        .channel  = (uint8_t)top,
-        .state    = live ? (uint8_t)cp->sd.det.ch[top].state : 0u,
+        .states   = states,
         .flags    = (uint8_t)((h.cal_needed || engine_failed || stalled ? LP_HEALTH_CAL_NEEDED : 0u) |
                               (blind ? LP_HEALTH_CALIBRATING : 0u)),
         .gain     = sdr_rx_gain(),

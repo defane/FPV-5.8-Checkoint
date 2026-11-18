@@ -22,7 +22,8 @@ extern "C" {
 #endif
 
 #define LP_SOF      0xC5u
-#define LP_VERSION  4u   /* 4: CONFIG carries the re-arm drop; 3: the C5 scans: STATS levels, EVENT_PASS age */
+#define LP_VERSION  4u   /* 4: CONFIG carries the re-arm drop, STATS each channel's detector state;
+                          * 3: the C5 scans: STATS levels, EVENT_PASS age */
 #define LP_MAX_PAYLOAD 56u
 #define LP_MAX_FRAME   (6u + LP_MAX_PAYLOAD)   /* SOF+VER+TYPE+LEN + payload + CRC16(2) */
 
@@ -32,7 +33,7 @@ typedef enum {
     LP_MSG_CONFIG_REQ = 3,   /* bridge -> C5: send me the current configuration */
     LP_MSG_CONFIG_STATE = 4, /* C5 -> bridge: current configuration (answer/echo) */
     LP_MSG_EVENT_PASS = 5,   /* C5 -> bridge: a drone passed on a channel */
-    LP_MSG_STATS = 6,        /* C5 -> bridge: periodic levels, detector state, health */
+    LP_MSG_STATS = 6,        /* C5 -> bridge: periodic levels, detector states, health */
     LP_MSG_COMMAND = 8,      /* bridge -> C5: run an lp_cmd_t */
 } lp_type_t;
 
@@ -90,12 +91,33 @@ typedef struct {
 
 #define LP_FW_LEN 24u                /* firmware id incl. NUL, e.g. "5.0.0-dev+3201b7196ece" */
 
+/* lp_stats_t.states: each channel's pass_detector pd_state_t (0 IDLE, 1 RISING, 2 PEAK_PASSED,
+ * 3 COOLDOWN), 2 bits per channel, R1 (channel 0) in bits 1..0, R8 in bits 15..14. PEAK_PASSED
+ * lasts one reading, then COOLDOWN until the channel re-arms: both mean it waits to re-arm. */
+#define LP_STATE_IDLE        0u
+#define LP_STATE_RISING      1u
+#define LP_STATE_PEAK_PASSED 2u
+#define LP_STATE_COOLDOWN    3u
+
+/* Channel ch's state in states; LP_STATE_IDLE for a channel past R8. */
+static inline unsigned lp_state_of(uint16_t states, unsigned ch) {
+    return ch < LP_LEVELS ? (states >> (2u * ch)) & 3u : LP_STATE_IDLE;
+}
+
+/* states with channel ch's state set to state (its low 2 bits); unchanged for a channel past R8. */
+static inline uint16_t lp_state_set(uint16_t states, unsigned ch, unsigned state) {
+    if (ch >= LP_LEVELS) return states;
+    const unsigned at = 2u * ch;
+    return (uint16_t)((states & ~(3u << at)) | ((state & 3u) << at));
+}
+
 /* The C5's live state and health, every CONFIG_CHECKPOINT_LINK_STATS_MS: what
  * the console's T would show an operator, reduced to what a web page needs. */
 typedef struct {
-    int32_t  cn_x10;            /* the strongest channel's rise *10; LP_CN_UNKNOWN when none */
-    uint8_t  channel;           /* that channel, 0..7 */
-    uint8_t  state;             /* its pd_state_t */
+    int32_t  cn_x10;            /* the strongest channel's rise *10; LP_CN_UNKNOWN when none
+                                 * (the bridges' VTX guard for a calibration) */
+    uint16_t states;            /* each channel's detector state, lp_state_of(); 0 (all IDLE)
+                                 * when the gate does not scan */
     uint8_t  flags;             /* LP_HEALTH_* */
     uint8_t  gain;              /* forced RX gain index */
     uint32_t passes;            /* passes detected since boot */

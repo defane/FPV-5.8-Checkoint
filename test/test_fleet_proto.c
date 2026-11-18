@@ -83,21 +83,38 @@ int main(void) {
         CHECK(ok, "gate_pass roundtrip");
     }
     {
-        fp_node_status_t s = { .gate_index = 0, .channel = 36, .cn_x10 = LP_CN_UNKNOWN,
-                               .state = 2, .passes = 9, .flags = LP_HEALTH_CAL_NEEDED,
+        /* R1..R8: every state twice, R1 and R8 COOLDOWN so both ends of the 16 bits are set. */
+        const unsigned want[LP_LEVELS] = { LP_STATE_COOLDOWN, LP_STATE_IDLE, LP_STATE_RISING,
+                                           LP_STATE_PEAK_PASSED, LP_STATE_PEAK_PASSED, LP_STATE_RISING,
+                                           LP_STATE_IDLE, LP_STATE_COOLDOWN };
+        uint16_t states = 0;
+        for (unsigned ch = 0; ch < LP_LEVELS; ch++) states = lp_state_set(states, ch, want[ch]);
+        fp_node_status_t s = { .gate_index = 2, .channel = 36, .cn_x10 = LP_CN_UNKNOWN,
+                               .states = states, .passes = 9, .flags = LP_HEALTH_CAL_NEEDED,
                                .seq = 0xDEADBEEF, .gain = 76, .uptime_s = 3600,
                                .heap_min = 131072, .faults = 3, .levels = {1, -2, 3, LP_LEVEL_UNKNOWN, 5, 6, 127, -127},
                                .rearm_db_x10 = 140, .fw = "5.0.12+abcdef123456" };
         size_t n = fp_encode_node_status(buf, sizeof buf, &s);
         const fp_node_status_t *r = &m.node_status;
         bool ok = n && n <= FP_MAX_FRAME && fp_decode(buf, n, &m) && m.type == FP_MSG_NODE_STATUS &&
-                  r->cn_x10 == LP_CN_UNKNOWN && r->passes == 9 && r->state == 2 &&
+                  r->gate_index == 2 && r->channel == 36 &&
+                  r->cn_x10 == LP_CN_UNKNOWN && r->passes == 9 && r->states == states &&
                   r->flags == LP_HEALTH_CAL_NEEDED && r->seq == 0xDEADBEEF && r->gain == 76 &&
                   r->uptime_s == 3600 && r->heap_min == 131072 && r->faults == 3 &&
                   memcmp(r->levels, s.levels, LP_LEVELS) == 0 && r->rearm_db_x10 == 140 &&
                   strcmp(r->fw, "5.0.12+abcdef123456") == 0;
-        CHECK(ok, "node_status roundtrip (negative cn, seq, C5 health, re-arm drop, fw id)");
-        CHECK(n == 4u + 63u && n <= FP_MAX_FRAME, "node_status: 63-byte payload, within FP_MAX_PAYLOAD");
+        for (unsigned ch = 0; ch < LP_LEVELS; ch++) ok = ok && lp_state_of(r->states, ch) == want[ch];
+        CHECK(ok, "node_status roundtrip (each channel's state, negative cn, seq, C5 health, re-arm drop, fw id)");
+        CHECK(n == 4u + 64u && n == FP_MAX_FRAME, "node_status: 64-byte payload, a full FP_MAX_FRAME");
+        CHECK(states == 0xC693u && buf[2 + 6] == 0x93u && buf[2 + 7] == 0xC6u,
+              "node_status states: as STATS packs them, little-endian at payload 6..7");
+
+        /* The 63-byte payload of a NODE_STATUS with one state byte is the wrong length now. */
+        n = fp_encode_node_status(buf, sizeof buf, &s) - 1u;   /* drop the last payload byte */
+        const uint16_t crc = lp_crc16(buf, n - 2u);
+        buf[n - 2] = (uint8_t)(crc & 0xFFu);
+        buf[n - 1] = (uint8_t)(crc >> 8);
+        CHECK(!fp_decode(buf, n, &m), "a 63-byte node_status payload rejected");
         s.rearm_db_x10 = FP_REARM_UNKNOWN;
         n = fp_encode_node_status(buf, sizeof buf, &s);
         ok = n && fp_decode(buf, n, &m) && r->rearm_db_x10 == FP_REARM_UNKNOWN &&

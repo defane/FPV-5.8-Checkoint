@@ -132,6 +132,22 @@ int main(void) {
     CHECK(lp_encode_config(buf, sizeof buf, LP_MSG_STATS, &(lp_config_t){0}) == 0,
           "encode_config refuses a non-config type");
 
+    /* The states helpers: every value on every channel, the others untouched; past R8 is IDLE. */
+    {
+        bool ok = true;
+        for (unsigned ch = 0; ch < LP_LEVELS; ch++)
+            for (unsigned v = 0; v < 4u; v++) {
+                const uint16_t st = lp_state_set(0xFFFFu, ch, v);
+                ok = ok && lp_state_of(st, ch) == v && lp_state_of(lp_state_set(0, ch, v), ch) == v;
+                for (unsigned o = 0; o < LP_LEVELS; o++)
+                    ok = ok && (o == ch || lp_state_of(st, o) == LP_STATE_COOLDOWN);
+            }
+        ok = ok && lp_state_of(0x0003u, 0) == LP_STATE_COOLDOWN && lp_state_of(0xC000u, 7) == LP_STATE_COOLDOWN &&
+             lp_state_of(0xFFFFu, LP_LEVELS) == LP_STATE_IDLE && lp_state_set(0x1234u, LP_LEVELS, 3) == 0x1234u &&
+             lp_state_set(0, 2, 7) == lp_state_set(0, 2, 3);
+        CHECK(ok, "lp_state_set / lp_state_of: each channel's 2 bits, R1 low, R8 high");
+    }
+
     /* EVENT_PASS and STATS roundtrip. */
     {
         lp_event_t e = { .channel = 5, .peak_db_x10 = 352, .at_ms = 123456, .age_ms = 60123 };
@@ -142,7 +158,13 @@ int main(void) {
                   got[0].event.at_ms == 123456u && got[0].event.age_ms == 60123u;
         CHECK(ok, "event_pass roundtrip");
 
-        lp_stats_t s = { .cn_x10 = LP_CN_UNKNOWN, .channel = 3, .state = 2,
+        /* R1..R8: every state twice, R1 and R8 COOLDOWN so both ends of the 16 bits are set. */
+        const unsigned want[LP_LEVELS] = { LP_STATE_COOLDOWN, LP_STATE_IDLE, LP_STATE_RISING,
+                                           LP_STATE_PEAK_PASSED, LP_STATE_PEAK_PASSED, LP_STATE_RISING,
+                                           LP_STATE_IDLE, LP_STATE_COOLDOWN };
+        uint16_t states = 0;
+        for (unsigned ch = 0; ch < LP_LEVELS; ch++) states = lp_state_set(states, ch, want[ch]);
+        lp_stats_t s = { .cn_x10 = LP_CN_UNKNOWN, .states = states,
                          .flags = LP_HEALTH_CAL_NEEDED | LP_HEALTH_CALIBRATING, .gain = 83,
                          .passes = 41, .uptime_s = 86400, .heap_min = 123456,
                          .faults = 0xFFFFFFFEu, .levels = {0, 1, -2, 127, -127, LP_LEVEL_UNKNOWN, 7, 8},
@@ -150,13 +172,16 @@ int main(void) {
         n = lp_encode_stats(buf, sizeof buf, &s);
         g = run(buf, n, got, 4);
         const lp_stats_t *r = &got[0].stats;
-        ok = g == 1 && got[0].type == LP_MSG_STATS && n == LP_MAX_FRAME &&
-             r->cn_x10 == LP_CN_UNKNOWN && r->channel == 3 && r->state == 2 &&
+        ok = g == 1 && got[0].type == LP_MSG_STATS && n == LP_MAX_FRAME && buf[3] == 56u &&
+             r->cn_x10 == LP_CN_UNKNOWN && r->states == states &&
              r->flags == (LP_HEALTH_CAL_NEEDED | LP_HEALTH_CALIBRATING) && r->gain == 83 &&
              r->passes == 41 && r->uptime_s == 86400 && r->heap_min == 123456 &&
              r->faults == 0xFFFFFFFEu && memcmp(r->levels, s.levels, LP_LEVELS) == 0 &&
              strcmp(r->fw, "5.0.0-dev+3201b7196ece") == 0;
-        CHECK(ok, "stats roundtrip (health, negative cn, fw id, full payload)");
+        for (unsigned ch = 0; ch < LP_LEVELS; ch++) ok = ok && lp_state_of(r->states, ch) == want[ch];
+        CHECK(ok, "stats roundtrip (each channel's state, health, negative cn, fw id, 56-byte payload)");
+        CHECK(states == 0xC693u && buf[4 + 4] == 0x93u && buf[4 + 5] == 0xC6u,
+              "stats states: 2 bits per channel, R1 in bits 1..0, little-endian at payload 4..5");
 
         /* A fw id filling the whole field is truncated to stay NUL-terminated. */
         memset(s.fw, 'x', sizeof s.fw);
