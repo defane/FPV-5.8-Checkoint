@@ -44,15 +44,26 @@ static void put_levels(char *b, size_t cap, const int8_t *levels)
     }
 }
 
+/* Each channel's detector state (pd_state_t, 0..3), R1 first: "0,3,..." (15 B). */
+static void put_states(char *b, size_t cap, uint16_t states)
+{
+    int o = 0;
+    for (unsigned ch = 0; ch < LP_LEVELS; ch++)
+        o += snprintf(b + o, cap - o, "%s%u", ch ? "," : "", lp_state_of(states, ch));
+}
+
 static esp_err_t get_state(httpd_req_t *req)
 {
     c3_snapshot_t s;
     c3_store_snapshot(&s);
-    char fw[LP_FW_LEN], levels[48];
+    char fw[LP_FW_LEN], levels[48], states[16];   /* levels 8 x "-1270" + 7 commas = 47 B */
     json_safe(fw, s.stats.fw, sizeof fw);
-    put_levels(levels, sizeof levels, s.has_stats ? s.stats.levels : NULL);
+    /* A silent C5's last levels and states are stale: unknown and IDLE, as the C6 shows one. */
+    const bool alive = c3_link_c5_alive(), live = s.has_stats && alive;
+    put_levels(levels, sizeof levels, live ? s.stats.levels : NULL);
+    put_states(states, sizeof states, live ? s.stats.states : 0u);
 
-    char body[2048];   /* worst case (16 events, every field at its widest): 1613 B */
+    char body[2048];   /* worst case (16 events, every field at its widest): 1620 B */
     int o = 0;
     o += snprintf(body + o, sizeof body - o,
                   "{\"has_config\":%s,\"config\":{\"alpha_milli\":%ld,\"active_db_x10\":%ld,"
@@ -66,13 +77,12 @@ static esp_err_t get_state(httpd_req_t *req)
                   s.config.muted);
     o += snprintf(body + o, sizeof body - o,
                   "\"c5_alive\":%s,"
-                  "\"has_stats\":%s,\"stats\":{\"cn_x10\":%ld,\"channel\":%u,\"state\":%u,"
+                  "\"has_stats\":%s,\"stats\":{\"cn_x10\":%ld,\"states\":[%s],"
                   "\"flags\":%u,\"cal_needed\":%s,\"calibrating\":%s,\"gain\":%u,\"passes\":%lu,"
                   "\"uptime_s\":%lu,\"heap_min\":%lu,\"faults\":%lu,\"fw\":\"%s\",\"levels\":[%s]},"
                   "\"total_events\":%lu,\"events\":[",
-                  c3_link_c5_alive() ? "true" : "false",
-                  s.has_stats ? "true" : "false", (long)s.stats.cn_x10, s.stats.channel,
-                  s.stats.state, s.stats.flags,
+                  alive ? "true" : "false",
+                  s.has_stats ? "true" : "false", (long)s.stats.cn_x10, states, s.stats.flags,
                   (s.stats.flags & LP_HEALTH_CAL_NEEDED) ? "true" : "false",
                   (s.stats.flags & LP_HEALTH_CALIBRATING) ? "true" : "false", s.stats.gain,
                   (unsigned long)s.stats.passes, (unsigned long)s.stats.uptime_s,

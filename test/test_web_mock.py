@@ -26,6 +26,12 @@ def c_function(src, name):
     return m.group(0) if m else ""
 
 
+def state_source(src):
+    """get_state and the put_* helpers it calls (the health, the levels...)."""
+    fn = c_function(src, "get_state")
+    return fn + "".join(c_function(src, h) for h in sorted(set(re.findall(r"\b(put_\w+)\(", fn))))
+
+
 def json_keys(value):
     if isinstance(value, dict):
         return set(value) | {k for v in value.values() for k in json_keys(v)}
@@ -81,9 +87,7 @@ def mock_reads(cls, method):
 class Firmware(unittest.TestCase):
     def test_state_fields_match_the_c_code(self):
         for cls, path in SOURCES.items():
-            src = (ROOT / path).read_text()
-            c = c_function(src, "get_state") + c_function(src, "put_health") + c_function(src, "put_levels")
-            want = set(re.findall(r'\\"([a-z0-9_]+)\\":', c))
+            want = set(re.findall(r'\\"([a-z0-9_]+)\\":', state_source((ROOT / path).read_text())))
             sim = cls()
             sim.state(60.0)                       # past a few passes: every list is filled
             self.assertTrue(want)
@@ -147,6 +151,53 @@ class Firmware(unittest.TestCase):
             routes = re.findall(r'\.uri = "(/api/\w+)",\s*\.method = HTTP_POST,\s*\.handler = (\w+)', src)
             buffers = {uri: int(re.search(r"char buf\[(\d+)\]", c_function(src, h)).group(1)) for uri, h in routes}
             self.assertEqual({uri: cap for uri, (_, cap) in cls.ADMIN.items()}, buffers, path)
+
+
+class Simulation(unittest.TestCase):
+    PD = range(4)                                 # pd_state_t: IDLE, RISING, PEAK_PASSED, COOLDOWN
+
+    def runs(self, seq, value):
+        """The lengths of the runs of `value` in seq."""
+        out, n = [], 0
+        for v in seq + [None]:
+            if v == value:
+                n += 1
+            elif n:
+                out, n = out + [n], 0
+        return out
+
+    def test_channel_states(self):
+        """The 8 states of every gate: the pages draw a cooldown frame from them, so the gate's
+        own channel rises on an approach and cools for seconds after each pass, longer when the
+        drone lingers; a far pilot rises and never cools; an offline gate reports none."""
+        web_mock.random.seed(5)
+        sim, step = web_mock.Master(), 0.1
+        own, pilot = [], []
+        for i in range(1200):                         # 2 minutes of race
+            st = sim.state(60 + i * step)
+            for g in [st["local"]] + st["nodes"]:
+                self.assertEqual(len(g["states"]), 8)
+                self.assertTrue(set(g["states"]) <= set(self.PD))
+            self.assertEqual(st["nodes"][2]["states"], [0] * 8, "gate 3 is offline")
+            own.append(st["local"]["states"][0])
+            pilot.append(st["local"]["states"][3])
+        idle = [i for i, v in enumerate(own) if v == 0]
+        cool = self.runs(own[idle[0]:idle[-1]], 3)      # whole cooldowns only
+        self.assertGreaterEqual(len(cool), 10, "a cooldown after each pass")
+        self.assertGreaterEqual(min(cool) * step, web_mock.REFRACTORY_S - 0.2)
+        self.assertGreaterEqual(max(cool) * step, 3.0, "a drone that lingers")
+        self.assertTrue(self.runs(own, 1), "rising on an approach")
+        self.assertTrue(self.runs(pilot, 1) and not self.runs(pilot, 3), "the far pilot never passes")
+
+    def test_states_replace_the_strongest_channel(self):
+        """v4's "states" took the place of the strongest channel and its state: in the C3's
+        stats and the C6's local; a C6 node keeps its assigned channel."""
+        for gate in (web_mock.Node().state(61.0)["stats"], web_mock.Master().state(61.0)["local"]):
+            self.assertEqual(len(gate["states"]), 8)
+            self.assertFalse({"state", "channel"} & set(gate))
+        node = web_mock.Master().state(61.0)["nodes"][0]
+        self.assertIn("channel", node)
+        self.assertNotIn("state", node)
 
 
 class Protocol(unittest.TestCase):

@@ -15,5 +15,5 @@ TaskHandle_t checkpoint_link_task(void);        /* NULL when the link is off (T'
  * the running detector state, so they are no-ops before checkpoint_start. */
 bool checkpoint_link_apply_config(const lp_config_t *c); /* validate, post to the scan task, persist */
 void checkpoint_link_get_config(lp_config_t *out);
-void checkpoint_link_get_stats(lp_stats_t *out);         /* live rises, detector state, health */
+void checkpoint_link_get_stats(lp_stats_t *out);         /* live rises, detector states, health */
 void checkpoint_link_command(uint8_t cmd);               /* lp_cmd_t: recalibrate (B/F) or reboot */

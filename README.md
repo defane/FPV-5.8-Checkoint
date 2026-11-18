@@ -96,9 +96,11 @@ last so it overrides the committed defaults.
 To work on the web pages without a board, `make web-master` (<http://127.0.0.1:8080/>)
 or `make web-node` (port 8081) runs `tools/web_mock.py`: it serves the real pages from
 disk, so a browser reload shows an edit, no build and no flash. `/api/*` answers like
-the firmware on a simulated race, admin actions take effect (password `checkpoint`) and
+the firmware on a simulated race (now and then a drone lingers at a gate, its channel
+framed in cooldown), admin actions take effect (password `checkpoint`) and
 signed requests are checked as on the ESP. `WEB_ARGS` passes its options: `--vtx` (a
-strong carrier on every gate, for the calibration guard), `--latency 300`, `--host
+strong carrier on every gate, for the calibration guard; each gate's channel then stays
+in cooldown after its first pass), `--latency 300`, `--host
 0.0.0.0` (to open it from a phone), `--password ""`. Stopping and restarting it is an
 ESP reboot.
 

@@ -40,8 +40,10 @@ uint16_t lp_crc16(const uint8_t *data, size_t len) {
 #define LP_LEN_REQ     0u
 #define LP_LEN_CONFIG  34u
 #define LP_LEN_EVENT   11u
-#define LP_LEN_STATS   (32u + LP_FW_LEN)   /* = LP_MAX_PAYLOAD */
+#define LP_LEN_STATS   (32u + LP_FW_LEN)   /* 56 = LP_MAX_PAYLOAD: full */
 #define LP_LEN_CMD     1u
+
+_Static_assert(LP_LEN_STATS <= LP_MAX_PAYLOAD && LP_LEN_CONFIG <= LP_MAX_PAYLOAD, "a payload fits a frame");
 
 static bool cmd_known(uint8_t c) {
     return c == LP_CMD_CAL_FULL || c == LP_CMD_CAL_QUICK || c == LP_CMD_REBOOT;
@@ -120,8 +122,8 @@ size_t lp_encode_event(uint8_t *buf, size_t cap, const lp_event_t *e) {
 size_t lp_encode_stats(uint8_t *buf, size_t cap, const lp_stats_t *s) {
     uint8_t pl[LP_LEN_STATS];
     put_i32(pl + 0,  s->cn_x10);
-    pl[4] = s->channel;
-    pl[5] = s->state;
+    pl[4] = (uint8_t)(s->states & 0xFFu);     /* R1..R4 */
+    pl[5] = (uint8_t)(s->states >> 8);        /* R5..R8 */
     pl[6] = s->flags;
     pl[7] = s->gain;
     put_u32(pl + 8,  s->passes);
@@ -187,8 +189,7 @@ static bool decode_payload(uint8_t type, uint8_t len, const uint8_t *p,
         if (len != LP_LEN_STATS) return false;
         out->type = LP_MSG_STATS;
         out->stats.cn_x10   = get_i32(p + 0);
-        out->stats.channel  = p[4];
-        out->stats.state    = p[5];
+        out->stats.states   = (uint16_t)(p[4] | ((uint16_t)p[5] << 8));
         out->stats.flags    = p[6];
         out->stats.gain     = p[7];
         out->stats.passes   = get_u32(p + 8);

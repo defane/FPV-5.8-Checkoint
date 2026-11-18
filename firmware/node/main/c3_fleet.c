@@ -180,7 +180,7 @@ void c3_fleet_report_pass(const lp_event_t *e) {
 void c3_fleet_report_stats(const lp_stats_t *s) {
     if (!s_paired) return;
     fp_node_status_t ns = { .gate_index = s_gate, .channel = s_channel,
-                            .cn_x10 = s->cn_x10, .state = s->state,
+                            .cn_x10 = s->cn_x10, .states = s->states,
                             .passes = s->passes, .flags = s->flags, .seq = s_status_seq++,
                             .gain = s->gain, .uptime_s = s->uptime_s,
                             .heap_min = s->heap_min, .faults = s->faults };

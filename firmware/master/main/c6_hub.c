@@ -209,7 +209,7 @@ static void status_track_loss(c6_node_t *n, uint32_t seq) {
 
 /* The node's relayed C5 state and health (the decoder NUL-terminates fw). */
 static void node_take_status(c6_node_t *n, const fp_node_status_t *s) {
-    n->cn_x10 = s->cn_x10; n->state = s->state;
+    n->cn_x10 = s->cn_x10; n->states = s->states;
     memcpy(n->levels, s->levels, sizeof n->levels);
     n->passes = s->passes; n->flags = s->flags; n->gain = s->gain;
     n->c5_uptime_s = s->uptime_s; n->heap_min = s->heap_min; n->faults = s->faults;

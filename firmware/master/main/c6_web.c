@@ -67,23 +67,35 @@ static int put_levels(char *b, size_t cap, const int8_t *levels) {
     return o + snprintf(b + o, cap - o, "],");
 }
 
+#define STATES_LEN 16u   /* "3,3,3,3,3,3,3,3" + NUL */
+
+/* Each channel's detector state (pd_state_t, 0..3), R1 first, for a "states":[...]. */
+static const char *put_states(char out[STATES_LEN], uint16_t states) {
+    int o = 0;
+    for (unsigned ch = 0; ch < LP_LEVELS; ch++)
+        o += snprintf(out + o, STATES_LEN - o, "%s%u", ch ? "," : "", lp_state_of(states, ch));
+    return out;
+}
+
 static esp_err_t get_state(httpd_req_t *req) {
     c6_store_snapshot(&s_snap);
     c6_hub_snapshot(&s_fleet);
     const c6_snapshot_t *s = &s_snap;
     const c6_fleet_t *f = &s_fleet;
 
-    /* Worst case (every field at its widest) 10351 B: levels 59 x 16 gates, last_seen_ms
-     * 25 x 8 standings, header + local 434 (the fleet's and gate 0's re-arm drop),
-     * 15 nodes x 413, 8 standings 838, 24 passes 1739; sized so it never truncates. */
+    /* Worst case (every field at its widest, every list full) 10587 B: header + local 487 (its
+     * states 27 and levels 59, the fleet's and gate 0's re-arm drop), 15 nodes 7304 (487 with
+     * its comma, states and levels included), 8 standings 1031, 24 passes 1727, the lists'
+     * brackets 38; sized so it never truncates. */
     static char body[10752];   /* larger than the stack; this handler is serialised by httpd */
     const lp_stats_t *l = &s->local;
+    char states[STATES_LEN];
     int o = 0;
     o += snprintf(body + o, sizeof body - o,
                   "{\"pairing\":%s,\"num_gates\":%u,\"has_local\":%s,"
-                  "\"local\":{\"channel\":%u,\"cn_x10\":%ld,\"state\":%u,",
+                  "\"local\":{\"cn_x10\":%ld,\"states\":[%s],",
                   f->pairing ? "true" : "false", f->num_gates, s->has_local ? "true" : "false",
-                  l->channel, (long)l->cn_x10, l->state);
+                  (long)l->cn_x10, put_states(states, s->has_local ? l->states : 0u));
     o += put_levels(body + o, sizeof body - o, s->has_local ? l->levels : NULL);
     o += put_health(body + o, sizeof body - o, l->passes, l->flags, l->gain, l->uptime_s,
                     l->heap_min, l->faults, l->fw, rearm_echo(s->has_local_cfg, s->local_cfg.rearm_db_x10));
@@ -99,12 +111,12 @@ static esp_err_t get_state(httpd_req_t *req) {
         const c6_node_t *n = &f->nodes[i];
         o += snprintf(body + o, sizeof body - o,
                       "%s{\"node_id\":%u,\"gate\":%u,\"channel\":%u,\"online\":%s,\"cn_x10\":%ld,"
-                      "\"state\":%u,\"last_seen_ms\":%lu,\"rssi\":%d,\"rx_frames\":%lu,"
+                      "\"states\":[%s],\"last_seen_ms\":%lu,\"rssi\":%d,\"rx_frames\":%lu,"
                       "\"status_rx\":%lu,\"status_lost\":%lu,"
                       "\"mac\":\"%02x:%02x:%02x:%02x:%02x:%02x\",",
                       i ? "," : "", n->node_id, n->gate_index, n->channel,
                       n->online ? "true" : "false", (long)n->cn_x10,
-                      n->state, (unsigned long)n->last_seen_ms,
+                      put_states(states, n->online ? n->states : 0u), (unsigned long)n->last_seen_ms,
                       (int)n->rssi, (unsigned long)n->rx_frames,
                       (unsigned long)n->status_rx, (unsigned long)n->status_lost,
                       n->mac[0], n->mac[1], n->mac[2], n->mac[3], n->mac[4], n->mac[5]);
