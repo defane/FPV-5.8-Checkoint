@@ -22,14 +22,28 @@ with no change on the gate side.
 
 - **Protocols:** `components/link_proto` v4 (C5↔bridge UART: `CONFIG_*` with the
   detector settings, the relative re-arm drop included, `EVENT_PASS` with the pass's age,
-  `STATS` with the 8 channels' levels and the C5's health, `COMMAND`);
+  `STATS` with the 8 channels' levels, each channel's detector state, the strongest rise
+  (the calibration guard's) and the C5's health, `COMMAND`);
   `components/fleet_proto` v4 (C6↔C3 ESP-NOW: pairing, time beacons, `CONFIG` (the gate
   and its detector settings, link_proto's `lp_config_t` as it goes to the C5, re-arm drop
   included), `GATE_PASS`, `NODE_STATUS` relaying the C5's `STATS` and the re-arm drop its
   last `CONFIG_STATE` echoed, `COMMAND`); `components/espnow_link` (transport);
   `components/race_timing` (laps/sectors per channel). A board left on an older
-  firmware is not misread, it simply does not talk (v4 added the re-arm drop): **reflash
-  every C5, C3 and the C6 together** after a protocol change.
+  firmware is not misread, it simply does not talk (v4 added the re-arm drop and the
+  channels' states): **reflash every C5, C3 and the C6 together** after a protocol change.
+- **Detector states:** the C5 reports each channel's detector state in `STATS`, 2 bits per
+  channel (`states`, R1 in bits 1..0, R8 in bits 15..14: 0 idle, 1 rising, 2 peak passed,
+  3 cooldown; `lp_state_of()` in `link_proto.h`), and `NODE_STATUS` relays them as they are.
+  Peak passed lasts one reading, then cooldown until the channel re-arms (the refractory
+  period over, then the level under the release or the relative re-arm:
+  [detector.md](detector.md)): both mean the channel waits to re-arm, and it rings no pass
+  meanwhile. `/api/state` gives them as `"states"`, 8 integers 0..3 with R1 first, in the
+  C3's `stats`, the C6's `local` and each of its `nodes`; all 0 while the C5 does not scan (a
+  calibration, a bench, a stalled scan, no engine), for an absent C5 (on the C3 and for gate
+  0: none yet, or silent for 3 s; its levels then read unknown too) and for an offline node
+  (a remote gate whose C5 goes silent sends no more `NODE_STATUS`, so its node reads offline
+  after 8 s). The pages draw a dashed blue frame on a channel while it waits to re-arm
+  ("Channels panel" below).
 - **C6** (`c6_hub`): node table in NVS, periodic time beacons, the `race_timing`
   engine, **centralized sound**, and an **admin web** (AP) to pair, order the
   gates and see the timings. Every C5 sweeps R1 to R8, so a gate has no channel: a pass
@@ -39,8 +53,8 @@ with no change on the gate side.
   persisted on both sides. The channel those frames still carry is ignored. A node only asks
   while it boots, so with pairing closed it ends up degraded: open pairing, then reboot it.
 - **Degraded C3:** if the C6 is unreachable for `CONFIG_C3_FLEET_TIMEOUT_MS` at
-  boot, the C3 serves its own local AP + web (pass display, the channels' levels,
-  detector settings). Its *Detector* card has the relative re-arm drop too, with an info
+  boot, the C3 serves its own local AP + web (pass display, the channels' levels and
+  states, detector settings). Its *Detector* card has the relative re-arm drop too, with an info
   bubble (the round "i": a click, a tap or Enter opens it, a second one, a tap elsewhere
   or Escape closes it) on what it does and its recommended value, 16 dB
   ([detector.md](detector.md#setting-d)).
@@ -57,9 +71,16 @@ with no change on the gate side.
   until it is released. An admin can reset one channel (`POST /api/reset` `{"channel": N}`):
   its times and its lap in progress go, it stays listed with when it was last seen.
   *Reset all* (`{}`) clears the whole race, standings included.
-- **Channels panel:** the C6 page shows one row per gate, the degraded C3 page one
-  tile per channel, R1 to R8, with its level in dB above the channel's rest and a yellow
-  mark on a pass; `—` while the C5 is away or calibrating. A VTX left on keeps showing.
+- **Channels panel:** the C6 page shows one row per gate (advanced view), the degraded C3
+  page one tile per channel, R1 to R8, with its level in dB above the channel's rest: no
+  green under 3 dB, full green from 20 dB; `—` while the C5 is away or calibrating. A VTX
+  left on keeps showing. A pass frames its channel in solid yellow for 3 s, and a dashed
+  blue frame marks a channel that waits to re-arm (cooldown, "Detector states" above): it
+  explains a lap not counted, e.g. a VTX left near the gate. The yellow covers the blue
+  while it lasts, and the dashes tell the two apart without their colours. Rising gets no
+  frame: it is too short for a page that polls every second, and the green already shows
+  it. Peak passed lasts one reading and is framed and named as cooldown. A tile's or cell's
+  tooltip names the channel and its state (`Gate 2 · R5 · cooldown`).
 - **Re-arm drop (fleet):** the C6 keeps one relative re-arm drop for every gate (NVS, 16 dB
   until an admin sets one; what it does: [detector.md](detector.md#setting-d)). The advanced
   view's *Detector (every gate)* card sets it (admin only), with the same info bubble as the
@@ -72,10 +93,11 @@ with no change on the gate side.
   too. Gate 0 keeps its other settings: the C6 sends its C5 a `CONFIG_SET` of the values
   that C5 echoed with the fleet's drop, when the C6 boots, when that C5 says `HELLO` (it
   rebooted) and on each *Apply*. A gate whose C5 echoes another drop (its bridge asks every
-  second, and `NODE_STATUS` relays a remote gate's) shows it next to its detector state,
-  e.g. `D 12`: it missed the last `CONFIG` (lost on the air) or a console `K` `e`/`E`
-  changed it; *Apply* sends the fleet's again. `/api/state` carries the fleet's value
-  (`rearm_db_x10`) and each gate's echo (`local` and every node, `-1` until its C5 told it).
+  second, and `NODE_STATUS` relays a remote gate's) shows it in its health, after the
+  calibration badge, e.g. `D 12`: it missed the last `CONFIG` (lost on the air) or a
+  console `K` `e`/`E` changed it; *Apply* sends the fleet's again. `/api/state` carries the
+  fleet's value (`rearm_db_x10`) and each gate's echo (`local` and every node, `-1` until its
+  C5 told it).
 - **Web roles:** two levels. A **spectator** sees timings/status read-only (no
   login); **admin** actions (pairing, gate order, reset, volume, the fleet's re-arm drop,
   a gate's calibration or reboot; detector tuning on a degraded
@@ -148,6 +170,12 @@ page for a gate with no master.
   the rests' learning (3 s) or a console bench: the gate is blind. The faults count
   capture timeouts, short or overrun dumps, DSP errors and scan stalls, since boot. A C5
   silent for **3 s** is shown as absent: no stale health, and commands to it fail.
+  The C6 page shows the health in the *Health* column of *Gates / nodes* (hover for the
+  details) and in gate 0's *C5 health*, its details on the line below, each followed by
+  the gate's re-arm drop when its C5 runs another than the fleet's (`D 12`, "Re-arm drop
+  (fleet)" above). The degraded C3's page has its *C5 health* card, and its *Live* card
+  sums it up in a *detector* badge: `no C5 yet`, `C5 silent`, `calibrating`, `calibration
+  needed` or `OK`.
 - **Commands** (admin): *Cal B* = the console's `B` (recalibrate every LO, then verify
   its image rejection, up to 3 tries per LO), *Cal F* = `F` (recalibrate every LO),
   *Reboot*; on the C6 also *Calibrate all gates (B)*. They post the same `sdr_rx`

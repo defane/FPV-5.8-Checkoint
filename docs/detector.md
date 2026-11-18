@@ -45,7 +45,9 @@ channel (`components/checkpoint/cp_scan.c`, `checkpoint.c`; pure C:
   `active_db − hysteresis_db`, or its 1 s average must stand the re-arm drop D (16 dB by
   default) under the highest level since the pass (the [relative re-arm](#relative-re-arm),
   for a drone that stays up between laps). After a relative re-arm, the next pass must also
-  rise D over the lowest 1 s average since.
+  rise D over the lowest 1 s average since. The C5 reports each channel's state in `STATS`,
+  and the web pages draw a dashed blue frame on a channel while it waits to re-arm
+  (`PEAK_PASSED` or `COOLDOWN`: [fleet.md](fleet.md), "Detector states").
 - **One line per pass:**
   `PASS channel=R3 freq=5732 peak_db=15.4 peak_ms=… at_ms=… delay_ms=… comp_ms=63 est_peak_ms=… tau_ms=61 held=0 rearm=abs`,
   and sent over the UART link as an `EVENT_PASS` (the C6 master plays the sound), timed
