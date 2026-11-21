@@ -60,7 +60,10 @@ void c3_fleet_init(void) {
 static void apply_config(const fp_config_t *c) {
     s_gate = c->gate_index;
     s_channel = c->channel;
-    c3_link_push_config(&c->det);       /* detector/audio tunables to the C5 */
+    /* Detector/audio tunables to the C5. A relay keeps them for its C5's next HELLO; a degraded
+     * C3's page owns its C5's settings, so it only passes this one on. */
+    if (s_degraded) c3_link_push_config(&c->det);
+    else c3_link_set_master_config(&c->det);
 }
 
 static void on_msg(const uint8_t mac[6], const fp_msg_t *msg, int8_t rssi) {
@@ -177,10 +180,14 @@ void c3_fleet_report_pass(const lp_event_t *e) {
 void c3_fleet_report_stats(const lp_stats_t *s) {
     if (!s_paired) return;
     fp_node_status_t ns = { .gate_index = s_gate, .channel = s_channel,
-                            .cn_x10 = s->cn_x10, .state = s->state,
+                            .cn_x10 = s->cn_x10, .states = s->states,
                             .passes = s->passes, .flags = s->flags, .seq = s_status_seq++,
                             .gain = s->gain, .uptime_s = s->uptime_s,
                             .heap_min = s->heap_min, .faults = s->faults };
+    /* What the C5 echoed it runs (polled every second), so the C6 sees a gate that missed a CONFIG
+     * or whose console K e/E changed it. */
+    const int32_t rearm = c3_link_c5_rearm_x10();
+    ns.rearm_db_x10 = rearm >= 0 && rearm < (int32_t)FP_REARM_UNKNOWN ? (uint16_t)rearm : (uint16_t)FP_REARM_UNKNOWN;
     memcpy(ns.levels, s->levels, sizeof ns.levels);
     strlcpy(ns.fw, s->fw, sizeof ns.fw);
     uint8_t buf[FP_MAX_FRAME];

@@ -5,7 +5,9 @@ Serves the real pages from disk, read at every request: edit
 firmware/<role>/main/www/index.html or components/web_auth/www/auth.js and reload
 the browser, no build, no flash. /api/* answers like the firmware on a simulated
 race (a healthy gate, one needing a calibration, one offline), every Raceband
-channel of every gate measured as the scanning C5 does, and admin actions take effect. Signed requests are checked as on the ESP (components/web_auth), and
+channel of every gate measured as the scanning C5 does, with its detector state (a drone
+now and then lingers at its gate, keeping its channel in COOLDOWN), and admin actions
+take effect. Signed requests are checked as on the ESP (components/web_auth), and
 a body over the firmware's buffer is refused, so a page cannot outgrow it unnoticed.
 Restarting the mock is an ESP reboot: sessions are lost, the page's key stays valid.
 
@@ -29,10 +31,14 @@ ROOT = Path(__file__).resolve().parents[1]
 ITERATIONS = 200000       # components/web_auth/project_include.cmake
 CN_UNKNOWN = -990         # LP_CN_UNKNOWN
 ACTIVE_X10 = 150          # pass detector active_db: the VTX guard's threshold
+NOISE_X10 = 60            # a gate's rise with no drone, about
+REFRACTORY_S = 1.5        # refractory_ms: no re-arm before it
+LEAVE_S = 0.9             # a drone gone this long: its level is under the release (active - hysteresis)
 CAL_S = {"cal_full": 3.7, "cal_quick": 3.2}   # blind: the recalibration + the 3 s relearn
 REBOOT_S = 4.0
 PASSES_KEPT = {"master": 24, "node": 16}   # C6_EVENTS, C3_EVENTS
 RESULTS_KEPT = 10   # RT_HISTORY in race_timing.h
+REARM_X10 = 160     # LP_REARM_DEFAULT_X10: the relative re-arm's 16 dB
 
 
 class Auth:
@@ -79,8 +85,10 @@ class Gate:
     def __init__(self, gate, channel, period, vtx=False, **health):
         self.gate, self.channel, self.period, self.vtx = gate, channel, period, vtx
         self.next_pass, self.last_pass = period, -100.0
+        self.hold = 0.0                              # how long the last pass's drone lingers
         self.passes = self.faults = 0
         self.cal_needed, self.gain, self.heap_min = False, 42, 61000
+        self.rearm = REARM_X10                       # the re-arm drop its C5 echoes
         self.cal_until = self.down_until = self.booted = 0.0
         self.__dict__.update(health)
 
@@ -90,12 +98,21 @@ class Gate:
     def calibrating(self, t):
         return self.up(t) and t < self.cal_until
 
+    def rise_x10(self, t):
+        """The gate's drone over the noise: up to its pass, held while it lingers, then down."""
+        if self.vtx:
+            return 220
+        near = min(abs(t - self.next_pass), max(0.0, t - self.last_pass - self.hold))
+        return int(max(0.0, 220 * (1 - near / 1.2)))
+
+    def pilot_x10(self, t):
+        """A far pilot every ~19 s: over the activity threshold, under min_peak_db (no pass)."""
+        return int(190 * math.sin((t + self.gate) / 6.0) ** 40)
+
     def cn_x10(self, t):
         if not self.up(t) or self.calibrating(t):
             return CN_UNKNOWN
-        noise = 60 + int(15 * math.sin(t / 3 + self.gate)) + random.randint(-5, 5)
-        near = min(abs(t - self.next_pass), abs(t - self.last_pass))
-        return noise + (220 if self.vtx else int(max(0.0, 220 * (1 - near / 1.2))))
+        return NOISE_X10 + int(15 * math.sin(t / 3 + self.gate)) + random.randint(-5, 5) + self.rise_x10(t)
 
     def levels(self, t):
         """One level per Raceband channel: the gate's own, a second pilot, the noise."""
@@ -105,24 +122,45 @@ class Gate:
         if self.channel < 8:
             out[self.channel] = self.cn_x10(t)
         other = (self.channel + 3) % 8
-        out[other] = max(out[other], int(190 * math.sin((t + self.gate) / 6.0) ** 40))
+        out[other] = max(out[other], self.pilot_x10(t))
         return out
 
-    def state(self, t):                              # pd_state_t
-        if self.next_pass - t < 1.2:
-            return 1
-        since = t - self.last_pass
-        return 2 if since < 0.4 else 3 if since < 1.2 else 0
+    def cooling(self, t):
+        """The gate's own channel waits to re-arm: the refractory period, the drone still there
+        (seconds more when it lingers), for good once --vtx's carrier has rung a pass."""
+        return t - self.last_pass < max(REFRACTORY_S, self.hold + LEAVE_S) or (self.vtx and self.passes > 0)
+
+    def states(self, t):
+        """Each channel's pd_state_t, as the C5 reports it. The gate's drone: RISING over the
+        activity threshold, PEAK_PASSED, then COOLDOWN while cooling(); the far pilot: RISING,
+        then IDLE again (no pass); IDLE otherwise, and while blind."""
+        out = [0] * 8
+        if not self.up(t) or self.calibrating(t):
+            return out
+        other = (self.channel + 3) % 8
+        out[other] = 1 if self.pilot_x10(t) > ACTIVE_X10 else 0
+        if self.channel < 8:
+            if t - self.last_pass < 0.05:
+                out[self.channel] = 2
+            elif self.cooling(t):
+                out[self.channel] = 3
+            elif NOISE_X10 + self.rise_x10(t) > ACTIVE_X10:
+                out[self.channel] = 1
+        return out
 
     def advance(self, t):
-        """Passes due by t, as (time, peak) pairs."""
+        """Passes due by t, as (time, peak) pairs: none while blind or cooling (a C5 rings no
+        pass before its channel re-arms)."""
         due = []
         while t >= self.next_pass:
             at = self.next_pass
             self.next_pass += self.period + random.uniform(-0.5, 0.5)
-            if self.up(at) and not self.calibrating(at):
+            if self.up(at) and not self.calibrating(at) and not self.cooling(at):
                 self.last_pass = at
                 self.passes += 1
+                # now and then the drone lingers at the gate (a crash, a pilot waiting): its
+                # level stays up and its channel in COOLDOWN, the lap after it not yet counted
+                self.hold = random.uniform(2.5, 4.0) if random.random() < 0.3 else 0.0
                 due.append((at, 250 + random.randint(0, 60)))
         if self.cal_until and t >= self.cal_until:
             self.cal_until, self.cal_needed = 0.0, False
@@ -138,7 +176,7 @@ class Gate:
     def health(self, t):
         return {"passes": self.passes, "cal_needed": self.cal_needed, "calibrating": self.calibrating(t),
                 "gain": self.gain, "c5_uptime_s": max(0, int(t - self.booted)),
-                "heap_min": self.heap_min, "faults": self.faults, "fw": "5.0.0-mock"}
+                "heap_min": self.heap_min, "faults": self.faults, "fw": "5.0.0-mock", "rearm_db_x10": self.rearm}
 
 
 class Master:
@@ -147,14 +185,16 @@ class Master:
     # POST path -> (method, char buf[N] of its C handler)
     ADMIN = {"/api/pairing": ("set_pairing", 128), "/api/node": ("set_node", 128),
              "/api/node_remove": ("remove_node", 128), "/api/reset": ("reset_race", 16),
-             "/api/volume": ("set_volume", 128), "/api/command": ("command", 128)}
+             "/api/volume": ("set_volume", 128), "/api/command": ("command", 128),
+             "/api/rearm": ("set_rearm", 64)}
 
     def __init__(self, vtx=False):
         self.vtx, self.pairing, self.volume, self.join_at = vtx, False, 60, None
+        self.rearm = REARM_X10                            # the fleet's re-arm drop (c6_store)
         self.local = Gate(0, 0, 7.0, vtx)
         self.nodes = []
         self.add_node(1, 1, 8.5, rssi=-52)
-        self.add_node(2, 2, 11.0, rssi=-78, lost=9, cal_needed=True, faults=3, gain=61)
+        self.add_node(2, 2, 11.0, rssi=-78, lost=9, cal_needed=True, faults=3, gain=61, rearm=120)  # missed a CONFIG
         self.add_node(3, 3, 13.0, rssi=-88, lost=31, online=False)
         self.reset_race()
         self.laps[7] = {"laps": 4, "last_lap_ms": 9120, "best_lap_ms": 8840, "start": None,  # a pilot who left
@@ -215,15 +255,16 @@ class Master:
         self.advance(t)
         lo = self.local
         nodes = [{"node_id": n.node_id, "gate": n.gate, "channel": n.channel, "online": n.online,
-                  "cn_x10": n.cn_x10(t) if n.online else CN_UNKNOWN, "state": n.state(t) if n.online else 0,
+                  "cn_x10": n.cn_x10(t) if n.online else CN_UNKNOWN, "states": n.states(t) if n.online else [0] * 8,
                   "last_seen_ms": int(t * 1000) - 300 if n.online else 12000, "rssi": n.rssi,
                   "rx_frames": int(t * 6), "status_rx": int(t * 2), "status_lost": n.status_lost,
                   "mac": n.mac, "levels": n.levels(t) if n.online else [CN_UNKNOWN] * 8,
                   **n.health(t)} for n in self.nodes]
         return {"pairing": self.pairing, "num_gates": 1 + len(self.nodes), "has_local": lo.up(t),
-                "local": {"channel": lo.channel, "cn_x10": lo.cn_x10(t), "state": lo.state(t),
-                          "levels": lo.levels(t), **lo.health(t)},
-                "total_passes": self.total, "volume": self.volume, "uptime_ms": int(t * 1000),
+                "local": {"cn_x10": lo.cn_x10(t), "states": lo.states(t), "levels": lo.levels(t),
+                          **lo.health(t)},
+                "total_passes": self.total, "volume": self.volume, "rearm_db_x10": self.rearm,
+                "uptime_ms": int(t * 1000),
                 "free_heap": 182000 + random.randint(-2000, 2000), "heap_total": 330000, "nodes": nodes,
                 "standings": [{"channel": c, "laps": s["laps"], "last_lap_ms": s["last_lap_ms"],
                                "best_lap_ms": s["best_lap_ms"], "last_gate": s["last_gate"],
@@ -253,6 +294,16 @@ class Master:
 
     def set_volume(self, b, t):
         self.volume = b.get("volume", 60)
+        return {"ok": True}
+
+    def set_rearm(self, b, t):
+        """post_rearm() / c6_hub_set_rearm(): saved, sent to gate 0 and every online node."""
+        x10 = b.get("rearm_db_x10", -1)
+        if not isinstance(x10, int) or not 0 <= x10 <= 400:
+            return {"ok": False}
+        self.rearm = x10
+        for g in [self.local] + [n for n in self.nodes if n.online]:
+            g.rearm = x10
         return {"ok": True}
 
     def command(self, b, t):
@@ -308,7 +359,7 @@ class Node:
         self.events, self.total = [], 0
         self.config = {"alpha_milli": 300, "active_db_x10": 150, "hysteresis_db_x10": 30, "drop_db_x10": 30,
                        "min_peak_db_x10": 250, "refractory_ms": 1500, "stale_ms": 1000,
-                       "volume_pct": 60, "muted": 0}
+                       "rearm_db_x10": REARM_X10, "volume_pct": 60, "muted": 0}
 
     def state(self, t):
         g = self.gate
@@ -318,7 +369,7 @@ class Node:
                             "at_ms": int(at * 1000)}] + self.events[:PASSES_KEPT["node"] - 1]
         h = g.health(t)
         return {"has_config": True, "config": self.config, "c5_alive": g.up(t), "has_stats": True,
-                "stats": {"cn_x10": g.cn_x10(t), "channel": g.channel, "state": g.state(t),
+                "stats": {"cn_x10": g.cn_x10(t), "states": g.states(t),
                           "flags": h["cal_needed"] | h["calibrating"] << 1, "cal_needed": h["cal_needed"],
                           "calibrating": h["calibrating"], "gain": h["gain"], "passes": h["passes"],
                           "uptime_s": h["c5_uptime_s"], "heap_min": h["heap_min"], "faults": h["faults"],
@@ -424,7 +475,8 @@ def main():
     p.add_argument("--host", default="127.0.0.1", help="0.0.0.0 to open it from a phone on the LAN")
     p.add_argument("--password", default="checkpoint", help='admin password; "" disables admin auth, as on the firmware')
     p.add_argument("--latency", type=int, default=0, metavar="MS", help="delay every request, as over Wi-Fi")
-    p.add_argument("--vtx", action="store_true", help="a strong carrier on every gate: calibrations ask to force")
+    p.add_argument("--vtx", action="store_true", help="a strong carrier on every gate: calibrations ask to force, "
+                   "its channel stays in cooldown after one pass (no lap counted)")
     a = p.parse_args()
 
     sim = (Master if a.role == "master" else Node)(a.vtx)

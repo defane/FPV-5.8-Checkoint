@@ -14,8 +14,8 @@ static uint32_t get_u32(const uint8_t *p) {
 static void put_i32(uint8_t *p, int32_t v) { put_u32(p, (uint32_t)v); }
 static int32_t get_i32(const uint8_t *p) { return (int32_t)get_u32(p); }
 
-/* lp_config_t wire layout (30 bytes), identical to link_proto's. */
-#define CFG_LEN 30u
+/* lp_config_t wire layout (34 bytes), identical to link_proto's. */
+#define CFG_LEN 34u
 static void put_config(uint8_t *p, const lp_config_t *c) {
     put_i32(p + 0,  c->alpha_milli);
     put_i32(p + 4,  c->active_db_x10);
@@ -24,8 +24,9 @@ static void put_config(uint8_t *p, const lp_config_t *c) {
     put_i32(p + 16, c->min_peak_db_x10);
     put_u32(p + 20, c->refractory_ms);
     put_u32(p + 24, c->stale_ms);
-    p[28] = c->volume_pct;
-    p[29] = c->muted;
+    put_i32(p + 28, c->rearm_db_x10);
+    p[32] = c->volume_pct;
+    p[33] = c->muted;
 }
 static void get_config(const uint8_t *p, lp_config_t *c) {
     c->alpha_milli       = get_i32(p + 0);
@@ -35,8 +36,9 @@ static void get_config(const uint8_t *p, lp_config_t *c) {
     c->min_peak_db_x10   = get_i32(p + 16);
     c->refractory_ms     = get_u32(p + 20);
     c->stale_ms          = get_u32(p + 24);
-    c->volume_pct        = p[28];
-    c->muted             = p[29];
+    c->rearm_db_x10      = get_i32(p + 28);
+    c->volume_pct        = p[32];
+    c->muted             = p[33];
 }
 
 /* ---- framing ---- */
@@ -92,26 +94,30 @@ size_t fp_encode_gate_pass(uint8_t *buf, size_t cap, const fp_gate_pass_t *m) {
     put_u32(pl + 10, m->seq);
     return frame(buf, cap, FP_MSG_GATE_PASS, pl, sizeof pl);
 }
-#define NODE_STATUS_LEN (37u + LP_FW_LEN)   /* 61 <= FP_MAX_PAYLOAD */
+#define NODE_STATUS_LEN (40u + LP_FW_LEN)   /* 64 = FP_MAX_PAYLOAD: full */
+_Static_assert(NODE_STATUS_LEN <= FP_MAX_PAYLOAD, "NODE_STATUS fits a fleet frame");
 
 size_t fp_encode_node_status(uint8_t *buf, size_t cap, const fp_node_status_t *m) {
     uint8_t pl[NODE_STATUS_LEN];
     pl[0] = m->gate_index;
     pl[1] = m->channel;
     put_i32(pl + 2, m->cn_x10);
-    pl[6] = m->state;
-    put_u32(pl + 7, m->passes);
-    pl[11] = m->flags;
-    put_u32(pl + 12, m->seq);
-    pl[16] = m->gain;
-    put_u32(pl + 17, m->uptime_s);
-    put_u32(pl + 21, m->heap_min);
-    put_u32(pl + 25, m->faults);
-    for (unsigned k = 0; k < LP_LEVELS; k++) pl[29 + k] = (uint8_t)m->levels[k];
+    pl[6] = (uint8_t)(m->states & 0xFFu);     /* R1..R4 */
+    pl[7] = (uint8_t)(m->states >> 8);        /* R5..R8 */
+    put_u32(pl + 8, m->passes);
+    pl[12] = m->flags;
+    put_u32(pl + 13, m->seq);
+    pl[17] = m->gain;
+    put_u32(pl + 18, m->uptime_s);
+    put_u32(pl + 22, m->heap_min);
+    put_u32(pl + 26, m->faults);
+    for (unsigned k = 0; k < LP_LEVELS; k++) pl[30 + k] = (uint8_t)m->levels[k];
+    pl[38] = (uint8_t)(m->rearm_db_x10 & 0xFFu);
+    pl[39] = (uint8_t)(m->rearm_db_x10 >> 8);
     /* NUL-padded, never unterminated: the last byte is always 0. */
     unsigned i = 0;
-    for (; i + 1u < LP_FW_LEN && m->fw[i]; i++) pl[37 + i] = (uint8_t)m->fw[i];
-    for (; i < LP_FW_LEN; i++) pl[37 + i] = 0;
+    for (; i + 1u < LP_FW_LEN && m->fw[i]; i++) pl[40 + i] = (uint8_t)m->fw[i];
+    for (; i < LP_FW_LEN; i++) pl[40 + i] = 0;
     return frame(buf, cap, FP_MSG_NODE_STATUS, pl, sizeof pl);
 }
 
@@ -184,16 +190,17 @@ bool fp_decode(const uint8_t *buf, size_t n, fp_msg_t *out) {
         out->node_status.gate_index = p[0];
         out->node_status.channel = p[1];
         out->node_status.cn_x10 = get_i32(p + 2);
-        out->node_status.state = p[6];
-        out->node_status.passes = get_u32(p + 7);
-        out->node_status.flags = p[11];
-        out->node_status.seq = get_u32(p + 12);
-        out->node_status.gain = p[16];
-        out->node_status.uptime_s = get_u32(p + 17);
-        out->node_status.heap_min = get_u32(p + 21);
-        out->node_status.faults = get_u32(p + 25);
-        for (unsigned k = 0; k < LP_LEVELS; k++) out->node_status.levels[k] = (int8_t)p[29 + k];
-        for (unsigned i = 0; i < LP_FW_LEN; i++) out->node_status.fw[i] = (char)p[37 + i];
+        out->node_status.states = (uint16_t)(p[6] | ((uint16_t)p[7] << 8));
+        out->node_status.passes = get_u32(p + 8);
+        out->node_status.flags = p[12];
+        out->node_status.seq = get_u32(p + 13);
+        out->node_status.gain = p[17];
+        out->node_status.uptime_s = get_u32(p + 18);
+        out->node_status.heap_min = get_u32(p + 22);
+        out->node_status.faults = get_u32(p + 26);
+        for (unsigned k = 0; k < LP_LEVELS; k++) out->node_status.levels[k] = (int8_t)p[30 + k];
+        out->node_status.rearm_db_x10 = (uint16_t)(p[38] | ((uint16_t)p[39] << 8));
+        for (unsigned i = 0; i < LP_FW_LEN; i++) out->node_status.fw[i] = (char)p[40 + i];
         out->node_status.fw[LP_FW_LEN - 1u] = '\0';   /* a peer may not have terminated it */
         return true;
     case FP_MSG_COMMAND:

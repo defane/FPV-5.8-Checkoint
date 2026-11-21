@@ -1,6 +1,6 @@
 /* Shared state the C6 shows on its web: the local C5's latest status and a
  * short log of recent passes (local gate for now; the fleet hub adds remote
- * gates later). Mutex-guarded. */
+ * gates later), and the fleet's relative re-arm drop (NVS). Mutex-guarded. */
 #pragma once
 #include "link_proto.h"
 #include <stdbool.h>
@@ -21,14 +21,20 @@ typedef struct {
     bool        has_local;   /* in a snapshot: a local STATS within C6_LOCAL_LIVE_MS */
     lp_config_t local_cfg;   /* the local C5's detector config (its CONFIG_STATE echo) */
     bool        has_local_cfg;
+    uint16_t    rearm_x10;   /* the fleet's re-arm drop *10, 0..LP_REARM_MAX_X10: every gate's */
     uint32_t    total_passes;
     uint8_t     n_passes;    /* valid entries, newest first */
     c6_pass_t   passes[C6_EVENTS];
 } c6_snapshot_t;
 
-void c6_store_init(void);
+void c6_store_init(void);         /* after nvs_flash_init: loads the fleet's re-arm drop */
 void c6_store_set_local_stats(const lp_stats_t *s);
 void c6_store_set_local_config(const lp_config_t *c);
 bool c6_store_has_local(void);    /* the local C5 reported within C6_LOCAL_LIVE_MS */
 void c6_store_add_pass(const c6_pass_t *p);
 void c6_store_snapshot(c6_snapshot_t *out);
+/* The fleet's relative re-arm drop *10 (LP_REARM_DEFAULT_X10 until an admin sets one): what the
+ * hub pushes to every remote gate and the link to gate 0. The setter saves it in NVS; false (and
+ * nothing changed) outside 0..LP_REARM_MAX_X10. */
+uint16_t c6_store_rearm_x10(void);
+bool c6_store_set_rearm_x10(int32_t x10);

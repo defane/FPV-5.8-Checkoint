@@ -16,7 +16,7 @@ lp_config_t c3_config_default(void)
     const lp_config_t c = {
         .alpha_milli = 250, .active_db_x10 = 80, .hysteresis_db_x10 = 30,
         .drop_db_x10 = 30, .min_peak_db_x10 = 100, .refractory_ms = 1500,
-        .stale_ms = 1000, .volume_pct = 60, .muted = 0,
+        .stale_ms = 1000, .rearm_db_x10 = LP_REARM_DEFAULT_X10, .volume_pct = 60, .muted = 0,
     };
     return c;
 }
@@ -26,7 +26,7 @@ static void load_nvs(void)
     nvs_handle_t h;
     if (nvs_open(NVS_NS, NVS_READONLY, &h) != ESP_OK) return;
     lp_config_t c;
-    size_t len = sizeof c;
+    size_t len = sizeof c;   /* a blob from before the re-arm drop (32 bytes) is ignored: the C5's echo replaces it */
     if (nvs_get_blob(h, NVS_KEY, &c, &len) == ESP_OK && len == sizeof c) {
         s_st.config = c;
         s_st.has_config = true;

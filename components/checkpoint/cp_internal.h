@@ -30,6 +30,7 @@
 typedef struct {
     scan_detector_t sd;
     pd_config_t wanted; volatile bool wanted_dirty;       /* console/link copy, applied by the scan task */
+    float wanted_rearm_db;                                 /* the relative re-arm's drop beside it, dB (0 = off) */
     uint8_t gain;                                          /* saved; applied through sdr_rx_request_gain */
     volatile bool gain_dirty;                              /* gain posted, not yet applied */
     volatile bool trace, live, learning, bench_running;    /* live: the engine is up and no bench runs */
@@ -52,7 +53,7 @@ typedef struct {
     bool has_last; pd_event_t last;
 } cp_t;
 
-extern portMUX_TYPE cp_mux;   /* the mailbox fields of cp_t (wanted, gain, recal_req, bench_req) */
+extern portMUX_TYPE cp_mux;   /* the mailbox fields of cp_t (wanted, wanted_rearm_db, gain, recal_req, bench_req) */
 
 typedef struct {
     int64_t last_us;

@@ -37,7 +37,22 @@ void pd_init(pass_detector_t *d, const pd_config_t *cfg)
     pd_reset_all(d);
 }
 
-void pd_set_rearm(pass_detector_t *d, float drop_db) { d->rearm_db = drop_db > 0.0f ? drop_db : 0.0f; }
+void pd_set_rearm(pass_detector_t *d, float drop_db)
+{
+    d->rearm_db = drop_db > 0.0f ? drop_db : 0.0f;
+    if (d->rearm_db > 0.0f) return;
+    /* Off: a channel the relative re-arm armed waits for the release again, as it would have
+     * without it. Left relatively armed, its next pass would only have to rise over the trough. */
+    for (unsigned k = 0; k < PD_CHANNELS; ++k) {
+        pd_channel_t *c = &d->ch[k];
+        if (!c->rel) continue;
+        c->rel = false;
+        if (c->state == PD_IDLE) {
+            c->state = PD_COOLDOWN;
+            c->cooldown_until_ms = c->last_ms;   /* its refractory period was over: the release re-arms it */
+        }
+    }
+}
 
 bool pd_set_config(pass_detector_t *d, const pd_config_t *cfg)
 {

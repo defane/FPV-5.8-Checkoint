@@ -30,9 +30,17 @@ static lp_config_t sample_config(void) {
     lp_config_t c = {
         .alpha_milli = 300, .active_db_x10 = 150, .hysteresis_db_x10 = 30,
         .drop_db_x10 = 30, .min_peak_db_x10 = 250, .refractory_ms = 1500,
-        .stale_ms = 1000, .volume_pct = 60, .muted = 0,
+        .stale_ms = 1000, .rearm_db_x10 = 155, .volume_pct = 60, .muted = 0,
     };
     return c;
+}
+
+/* Re-sign a frame after a test edited its header or payload. */
+static void fix_crc(uint8_t *f, size_t n)
+{
+    const uint16_t crc = lp_crc16(&f[1], 3u + f[3]);
+    f[n - 2] = (uint8_t)(crc & 0xFFu);
+    f[n - 1] = (uint8_t)(crc >> 8);
 }
 
 int main(void) {
@@ -63,9 +71,47 @@ int main(void) {
                   r->drop_db_x10 == c.drop_db_x10 &&
                   r->min_peak_db_x10 == c.min_peak_db_x10 &&
                   r->refractory_ms == c.refractory_ms &&
-                  r->stale_ms == c.stale_ms &&
+                  r->stale_ms == c.stale_ms && r->rearm_db_x10 == c.rearm_db_x10 &&
                   r->volume_pct == c.volume_pct && r->muted == c.muted;
         CHECK(ok, "config_set roundtrip (all fields)");
+        CHECK(n == 6u + 34u, "config frame: 34-byte payload (v4: the re-arm drop)");
+    }
+
+    /* The re-arm drop: the codec carries any value (the C5 validates 0..LP_REARM_MAX_X10), its
+     * four bytes in place, and leaves the fields around it alone. */
+    {
+        const int32_t drops[] = { 0, LP_REARM_DEFAULT_X10, LP_REARM_MAX_X10, -1, 0x12345678 };
+        bool ok = true;
+        for (unsigned k = 0; k < sizeof drops / sizeof drops[0]; k++) {
+            lp_config_t c = sample_config();
+            c.rearm_db_x10 = drops[k];
+            size_t n = lp_encode_config(buf, sizeof buf, LP_MSG_CONFIG_STATE, &c);
+            int g = run(buf, n, got, 4);
+            ok = ok && g == 1 && got[0].config.rearm_db_x10 == drops[k] &&
+                 got[0].config.stale_ms == c.stale_ms && got[0].config.volume_pct == c.volume_pct &&
+                 got[0].config.muted == c.muted;
+        }
+        lp_config_t c = sample_config();
+        c.rearm_db_x10 = 0x12345678;
+        size_t n = lp_encode_config(buf, sizeof buf, LP_MSG_CONFIG_SET, &c);
+        ok = ok && n && buf[4 + 28] == 0x78 && buf[4 + 31] == 0x12 && buf[4 + 32] == 60;   /* little endian, then volume */
+        CHECK(ok, "config: the re-arm drop round-trips (0, 160, 400, -1, any), in place");
+        CHECK(LP_REARM_DEFAULT_X10 == 160 && LP_REARM_MAX_X10 == 400, "re-arm drop: 16 dB default, 40 dB ceiling");
+    }
+
+    /* A version-3 CONFIG_SET (30-byte payload, no re-arm drop) is not misread: its version is
+     * refused, and the same short payload under version 4 is too. */
+    {
+        lp_config_t c = sample_config();
+        size_t n = lp_encode_config(buf, sizeof buf, LP_MSG_CONFIG_SET, &c);
+        buf[1] = 3;
+        fix_crc(buf, n);
+        CHECK(run(buf, n, got, 4) == 0, "version-3 config frame rejected");
+        (void)lp_encode_config(buf, sizeof buf, LP_MSG_CONFIG_SET, &c);
+        buf[3] = 30;                                              /* a v3 payload length */
+        n = 6u + 30u;
+        fix_crc(buf, n);                                          /* the CRC where a v3 frame has it */
+        CHECK(run(buf, n, got, 4) == 0, "a 30-byte config payload rejected at version 4");
     }
 
     /* CONFIG_STATE uses the same payload; CONFIG_REQ carries none. */
@@ -86,6 +132,22 @@ int main(void) {
     CHECK(lp_encode_config(buf, sizeof buf, LP_MSG_STATS, &(lp_config_t){0}) == 0,
           "encode_config refuses a non-config type");
 
+    /* The states helpers: every value on every channel, the others untouched; past R8 is IDLE. */
+    {
+        bool ok = true;
+        for (unsigned ch = 0; ch < LP_LEVELS; ch++)
+            for (unsigned v = 0; v < 4u; v++) {
+                const uint16_t st = lp_state_set(0xFFFFu, ch, v);
+                ok = ok && lp_state_of(st, ch) == v && lp_state_of(lp_state_set(0, ch, v), ch) == v;
+                for (unsigned o = 0; o < LP_LEVELS; o++)
+                    ok = ok && (o == ch || lp_state_of(st, o) == LP_STATE_COOLDOWN);
+            }
+        ok = ok && lp_state_of(0x0003u, 0) == LP_STATE_COOLDOWN && lp_state_of(0xC000u, 7) == LP_STATE_COOLDOWN &&
+             lp_state_of(0xFFFFu, LP_LEVELS) == LP_STATE_IDLE && lp_state_set(0x1234u, LP_LEVELS, 3) == 0x1234u &&
+             lp_state_set(0, 2, 7) == lp_state_set(0, 2, 3);
+        CHECK(ok, "lp_state_set / lp_state_of: each channel's 2 bits, R1 low, R8 high");
+    }
+
     /* EVENT_PASS and STATS roundtrip. */
     {
         lp_event_t e = { .channel = 5, .peak_db_x10 = 352, .at_ms = 123456, .age_ms = 60123 };
@@ -96,7 +158,13 @@ int main(void) {
                   got[0].event.at_ms == 123456u && got[0].event.age_ms == 60123u;
         CHECK(ok, "event_pass roundtrip");
 
-        lp_stats_t s = { .cn_x10 = LP_CN_UNKNOWN, .channel = 3, .state = 2,
+        /* R1..R8: every state twice, R1 and R8 COOLDOWN so both ends of the 16 bits are set. */
+        const unsigned want[LP_LEVELS] = { LP_STATE_COOLDOWN, LP_STATE_IDLE, LP_STATE_RISING,
+                                           LP_STATE_PEAK_PASSED, LP_STATE_PEAK_PASSED, LP_STATE_RISING,
+                                           LP_STATE_IDLE, LP_STATE_COOLDOWN };
+        uint16_t states = 0;
+        for (unsigned ch = 0; ch < LP_LEVELS; ch++) states = lp_state_set(states, ch, want[ch]);
+        lp_stats_t s = { .cn_x10 = LP_CN_UNKNOWN, .states = states,
                          .flags = LP_HEALTH_CAL_NEEDED | LP_HEALTH_CALIBRATING, .gain = 83,
                          .passes = 41, .uptime_s = 86400, .heap_min = 123456,
                          .faults = 0xFFFFFFFEu, .levels = {0, 1, -2, 127, -127, LP_LEVEL_UNKNOWN, 7, 8},
@@ -104,13 +172,16 @@ int main(void) {
         n = lp_encode_stats(buf, sizeof buf, &s);
         g = run(buf, n, got, 4);
         const lp_stats_t *r = &got[0].stats;
-        ok = g == 1 && got[0].type == LP_MSG_STATS && n == LP_MAX_FRAME &&
-             r->cn_x10 == LP_CN_UNKNOWN && r->channel == 3 && r->state == 2 &&
+        ok = g == 1 && got[0].type == LP_MSG_STATS && n == LP_MAX_FRAME && buf[3] == 56u &&
+             r->cn_x10 == LP_CN_UNKNOWN && r->states == states &&
              r->flags == (LP_HEALTH_CAL_NEEDED | LP_HEALTH_CALIBRATING) && r->gain == 83 &&
              r->passes == 41 && r->uptime_s == 86400 && r->heap_min == 123456 &&
              r->faults == 0xFFFFFFFEu && memcmp(r->levels, s.levels, LP_LEVELS) == 0 &&
              strcmp(r->fw, "5.0.0-dev+3201b7196ece") == 0;
-        CHECK(ok, "stats roundtrip (health, negative cn, fw id, full payload)");
+        for (unsigned ch = 0; ch < LP_LEVELS; ch++) ok = ok && lp_state_of(r->states, ch) == want[ch];
+        CHECK(ok, "stats roundtrip (each channel's state, health, negative cn, fw id, 56-byte payload)");
+        CHECK(states == 0xC693u && buf[4 + 4] == 0x93u && buf[4 + 5] == 0xC6u,
+              "stats states: 2 bits per channel, R1 in bits 1..0, little-endian at payload 4..5");
 
         /* A fw id filling the whole field is truncated to stay NUL-terminated. */
         memset(s.fw, 'x', sizeof s.fw);
@@ -122,9 +193,7 @@ int main(void) {
         /* A peer that sends 24 non-NUL bytes cannot unterminate it either. */
         n = lp_encode_stats(buf, sizeof buf, &s);
         buf[4 + 32 + LP_FW_LEN - 1u] = 'y';                       /* last fw byte */
-        const uint16_t crc = lp_crc16(&buf[1], 3u + buf[3]);
-        buf[n - 2] = (uint8_t)(crc & 0xFFu);
-        buf[n - 1] = (uint8_t)(crc >> 8);
+        fix_crc(buf, n);
         g = run(buf, n, got, 4);
         ok = g == 1 && got[0].stats.fw[LP_FW_LEN - 1u] == '\0';
         CHECK(ok, "stats fw id never unterminated (decoder)");
@@ -147,9 +216,7 @@ int main(void) {
 
         size_t n = lp_encode_command(buf, sizeof buf, LP_CMD_REBOOT);
         buf[4] = 9;                                                /* forge an unknown op */
-        const uint16_t crc = lp_crc16(&buf[1], 3u + buf[3]);
-        buf[n - 2] = (uint8_t)(crc & 0xFFu);
-        buf[n - 1] = (uint8_t)(crc >> 8);
+        fix_crc(buf, n);
         CHECK(run(buf, n, got, 4) == 0, "unknown command dropped by the decoder");
     }
 
@@ -158,9 +225,7 @@ int main(void) {
         lp_stats_t s = { .cn_x10 = 100 };
         size_t n = lp_encode_stats(buf, sizeof buf, &s);
         buf[1] = 1;
-        const uint16_t crc = lp_crc16(&buf[1], 3u + buf[3]);
-        buf[n - 2] = (uint8_t)(crc & 0xFFu);
-        buf[n - 1] = (uint8_t)(crc >> 8);
+        fix_crc(buf, n);
         CHECK(run(buf, n, got, 4) == 0, "version-1 frame rejected");
     }
 

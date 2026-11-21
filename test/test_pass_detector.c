@@ -111,21 +111,43 @@ static uint32_t hash_event(uint32_t h, const pd_event_t *e)
     return h;
 }
 
-static events_t run_trace(float (*f)(float), float seconds, float rearm_db, float sigma, uint32_t seed, pass_detector_t *out)
+/* A trace with the drop rearm0, changed to rearm1 at switch_s as a CONFIG_SET does at run time
+ * (pd_set_rearm between two samples; *at_switch: the detector just after it). */
+static events_t run_switch(float (*f)(float), float seconds, float rearm0, float switch_s, float rearm1, float sigma,
+                           uint32_t seed, pass_detector_t *out, pass_detector_t *at_switch)
 {
     static pass_detector_t d;
     pd_config_t cfg = pd_config_default();
     pd_init(&d, &cfg);
-    pd_set_rearm(&d, rearm_db);
+    pd_set_rearm(&d, rearm0);
     events_t e = {0};
     s_seed = seed;
+    bool switched = false;
     for (uint32_t k = 0; k * TICK_MS <= (uint32_t)(seconds * 1000.0f); ++k) {
-        const float db = f((float)(k * TICK_MS) / 1000.0f) + gauss(sigma);
+        const float t = (float)(k * TICK_MS) / 1000.0f;
+        if (!switched && t >= switch_s) {
+            pd_set_rearm(&d, rearm1);
+            switched = true;
+            if (at_switch) *at_switch = d;
+        }
+        const float db = f(t) + gauss(sigma);
         pd_event_t ev;
         if (pd_update_w(&d, 0u, db, 1.0f, k * TICK_MS, &ev) && e.n < 8u) e.ev[e.n++] = ev;
     }
     if (out) *out = d;
     return e;
+}
+
+static events_t run_trace(float (*f)(float), float seconds, float rearm_db, float sigma, uint32_t seed, pass_detector_t *out)
+{
+    return run_switch(f, seconds, rearm_db, seconds + 1.0f, rearm_db, sigma, seed, out, NULL);
+}
+
+static bool same_events(const events_t *a, const events_t *b)
+{
+    bool same = a->n == b->n;
+    for (unsigned i = 0; same && i < a->n; i++) same = hash_event(1u, &a->ev[i]) == hash_event(1u, &b->ev[i]);
+    return same;
 }
 
 
@@ -328,6 +350,28 @@ int main(void)
           e.n == 2u && near_ms(e.ev[0].peak_ms, 3000u, 100u) && near_ms(e.ev[1].peak_ms, 30000u, 150u) && e.ev[1].rel);
     e = run_trace(wobble_fall, 34.0f, 0.0f, 0.3f, 4u, NULL);
     check("re-arm 0: the same trace rings its first pass only", e.n == 1u);
+
+    /* The drop changed at run time (a CONFIG_SET or K e/E). Off while a channel is relatively
+     * armed (wobble_fall re-arms at about 11 s, its trough near 25 dB by 16 s): it waits for the
+     * release again, so the wobble and the bumps ring nothing, the same passes as with the re-arm off
+     * all along. Left relatively armed with a drop of 0, a pass would only have to rise over the
+     * trough, and the 4 dB wobble rang. */
+    {
+        pass_detector_t sw;
+        const events_t off = run_trace(wobble_fall, 34.0f, 0.0f, 0.3f, 4u, NULL);
+        e = run_switch(wobble_fall, 34.0f, 16.0f, 16.0f, 0.0f, 0.3f, 4u, NULL, &sw);
+        check("re-arm 16 -> 0 while relatively armed: back to COOLDOWN, not relative",
+              sw.rearm_db == 0.0f && sw.ch[0].state == PD_COOLDOWN && !sw.ch[0].rel);
+        check("re-arm 16 -> 0: the wobble and the bumps ring nothing, the same passes as 0 all along",
+              e.n == 1u && same_events(&e, &off));
+        e = run_switch(plateau_laps, 30.0f, 0.0f, 8.0f, 16.0f, 0.5f, 3u, NULL, &sw);
+        check("re-arm 0 -> 16 while a drone stays up: it re-arms from the pass's peak, the next laps ring (rel)",
+              sw.ch[0].state == PD_COOLDOWN && e.n == 3u && near_ms(e.ev[1].peak_ms, 13000u, 100u) && e.ev[1].rel &&
+                  near_ms(e.ev[2].peak_ms, 23000u, 100u) && e.ev[2].rel);
+        const events_t at16 = run_trace(plateau_laps, 30.0f, 16.0f, 0.5f, 3u, NULL);
+        e = run_switch(plateau_laps, 30.0f, 16.0f, 8.0f, 16.0f, 0.5f, 3u, NULL, NULL);
+        check("re-arm set again to the same drop: nothing changes", same_events(&e, &at16));
+    }
 
     /* Deep fades inside one slow pass: 20 dB for 150 and 300 ms, 3 and 6 s after the peak. The 1 s
      * average barely moves, so no re-arm and no double count; leaving for 3 s does re-arm. */

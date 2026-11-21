@@ -42,10 +42,12 @@ channel (`components/checkpoint/cp_scan.c`, `checkpoint.c`; pure C:
 - **State machine** per channel: `IDLE → RISING → PEAK_PASSED → COOLDOWN` (see
   `pass_detector.h`). A hovering drone only rings once: to re-arm, the refractory period
   must have elapsed **and** either the level must have dropped back under
-  `active_db − hysteresis_db`, or its 1 s average must stand 16 dB under the highest level
-  since the pass (the [relative re-arm](#relative-re-arm), for a drone that stays up
-  between laps). After a relative re-arm, the next pass must also rise 16 dB over the
-  lowest 1 s average since.
+  `active_db − hysteresis_db`, or its 1 s average must stand the re-arm drop D (16 dB by
+  default) under the highest level since the pass (the [relative re-arm](#relative-re-arm),
+  for a drone that stays up between laps). After a relative re-arm, the next pass must also
+  rise D over the lowest 1 s average since. The C5 reports each channel's state in `STATS`,
+  and the web pages draw a dashed blue frame on a channel while it waits to re-arm
+  (`PEAK_PASSED` or `COOLDOWN`: [fleet.md](fleet.md), "Detector states").
 - **One line per pass:**
   `PASS channel=R3 freq=5732 peak_db=15.4 peak_ms=… at_ms=… delay_ms=… comp_ms=63 est_peak_ms=… tau_ms=61 held=0 rearm=abs`,
   and sent over the UART link as an `EVENT_PASS` (the C6 master plays the sound), timed
@@ -233,8 +235,8 @@ never gets there, so every lap after the first was lost:
 The rests cannot help. A rest climbs only in plain IDLE, never in COOLDOWN, and never more
 than 6 dB over the other channels' median.
 
-**The rule** (`pass_detector.c`; the drop D is `CONFIG_CHECKPOINT_REARM_DROP_DB`, 16 dB,
-0 = off):
+**The rule** (`pass_detector.c`; the drop D, 16 dB by default, 0 = off, is a detector
+parameter: [below](#setting-d)):
 
 - **The re-arm.** Once the refractory period is over, COOLDOWN also goes to IDLE when the
   level's 1 s average (`PD_REARM_TAU_MS`) stands D under the highest level since the pass.
@@ -258,10 +260,6 @@ than 6 dB over the other channels' median.
   Forced into COOLDOWN with the level from before the hold as its reference, a channel that
   stays up between laps lost its next lap after any hold over 0.5 s: in check 28, the 17 s
   lap in 20 runs of 20, and in a run whose hold covered a lap, the lap after it too ([host]).
-
-D is a build option, not a console key: it is not saved in NVS and not on the link
-(link_proto v3), so the bridges' pages do not show it. The boot line (`SDR ready …
-rearm_db=16`) and the `T` line (`CHECKPOINT … rearm_db=16`) show the build's value.
 
 **Why 16 dB** ([host] simulation of races, 2026-11-15: the repository's detector, fed
 readings drawn from its DSP on synthetic captures; its key cases are host tests:
@@ -306,8 +304,8 @@ Against other values of D (the same cases, mild fading):
 | 20 | 67 / 0 | 3 / 2 | 0 |
 
 - **It needs contrast.** A lap is caught when its gate pass stands about D + 2 dB over the
-  far side of the track. Put the antenna at the gate (the drone within 1 m), or build with
-  a lower D for a small indoor track. A hot link narrows the contrast: the gate pass hits
+  far side of the track. Put the antenna at the gate (the drone within 1 m), or lower D for
+  a small indoor track. A hot link narrows the contrast: the gate pass hits
   the ADC ceiling (54.5–56.7 dB over the floor at gain 40, [host]), so the IPEX antenna
   indoors loses half its laps at 16 dB.
 - **A parked drone.** It rings an extra pass when its level swings D and back. At 16 dB
@@ -327,13 +325,48 @@ Against other values of D (the same cases, mild fading):
 
 **On the board.**
 
-- `SDR ready … rearm_db=16` at boot, and `rearm_db=` on `T`'s `CHECKPOINT` line. An
-  existing build dir may not see a new Kconfig option: after pulling it, `tools/fw.sh
-  clean`, then build.
+- `SDR ready … rearm_db=16.0` at boot (the saved D), and `rearm_db=` on `T`'s `CHECKPOINT`
+  line. `CHECKPOINT prefs=saved_v3` at boot: a record from before D was saved, read with the
+  build's D until the next save.
 - `PASS … rearm=rel`: the pass followed a relative re-arm.
 - `tools/scan_analyze.py` splits a long rise the same way (`--rearm`, 16 dB by default,
   0 for the old segments), so a recording reads as the board's `PASS` lines do.
 - Bench B6 (d) checks it ([bench.md](bench.md#7-first-bench-b0-to-b11-and-results)).
+
+### Setting D
+
+D is a detector parameter like the others ([the table](#parameters-console-k-saved-in-nvs-namespace-checkpoint-key-prefs)):
+`K` `e`/`E` (±1 dB, 0 to 40), or a bridge's `CONFIG_SET` (`rearm_db_x10`, link_proto v4;
+a value out of range refuses the whole set), saved in the C5's prefs with the rest.
+`CONFIG_CHECKPOINT_REARM_DROP_DB` (16) is the first boot's value, and `K` `0`'s and a
+version-3 record's.
+
+The degraded C3's page sets it in its *Detector* card (*Re-arm drop*, 0 to 40 dB): its round
+"i" button opens a bubble with what it does, the recommended 16 dB and the advice below.
+In a fleet the C6 keeps one value for every gate, set in its advanced view (admin), with
+the same bubble, and sends it to each gate ([fleet.md](fleet.md), "Re-arm drop (fleet)"):
+a gate whose C5 runs another shows it (`D 12`).
+
+A new D applies from the next reading, the channels' states kept:
+
+- a channel in COOLDOWN re-arms once its 1 s average stands the new D under its highest
+  level since the pass;
+- a channel relatively armed needs its next pass to rise the new D over its trough;
+- D set to 0 sends a relatively armed channel back to COOLDOWN: it waits for the release, as
+  if the re-arm had always been off. Left relatively armed, its next pass would only have to
+  rise over the trough: the next 4 dB wobble rang ([host] `test_pass_detector.c`).
+
+The boot line (`SDR ready … rearm_db=16.0`), the `T` line (`CHECKPOINT … rearm_db=16.0`)
+and `K`'s `CHECKPOINT set` line show the value in effect.
+
+Which value ([host], the tables above, mild fading): 16 dB unless the laps say otherwise.
+
+- Laps missed on a small track or with a strong VTX: lower it, 12–14 (indoor, the antenna
+  1–3 m from the line: 9 % missed at 12, 32 % at 16).
+- Extra laps outdoors: raise it, 18–20 (600 mW: 36 % extra at 12, 4 % at 16, 2 % at 20).
+- A lap counts when its gate pass stands about D + 2 dB over the far side of the track,
+  where the lap reads lowest: the next pass climbs from that trough, whatever the rest of
+  the lap reads.
 
 ## Parameters (console `K`, saved in NVS namespace "checkpoint", key "prefs")
 
@@ -346,24 +379,27 @@ Against other values of D (the same cases, mild fading):
 | `min_peak_db` (below it, the drone is too far: no pass) | 10 dB | `m`/`M` ±1 dB |
 | `refractory_ms` | 1500 ms | `r`/`R` ±250 ms |
 | `stale_ms` | 1000 ms | (fixed) |
-| relative re-arm drop (`CONFIG_CHECKPOINT_REARM_DROP_DB`, [above](#relative-re-arm)) | 16 dB | (build option, not saved) |
+| `rearm_db`, the relative re-arm drop D ([above](#relative-re-arm), 0 = off) | 16 dB (`CONFIG_CHECKPOINT_REARM_DROP_DB`) | `e`/`E` ±1 dB, 0 to 40 |
 | RX gain (forced index) | 40 | `g`/`G` ±2 (relearns the rests) |
 
-The record is version 3 (`PREFS_VERSION`): the meter changed (band power, 10-bit,
-clipping instead of folding), so the first boot of sdr_rx ignores a C5VRX-era record
-and starts on the defaults. The bridges send the same fields (`CONFIG_SET`): `alpha`
-keeps its meaning there.
+The record is version 4 (`PREFS_VERSION`). Version 4 adds D in the two bytes version 3
+kept reserved, so a version-3 record is read as it is, every value kept, with the build's
+D (`CHECKPOINT prefs=saved_v3` at boot) until the next save writes version 4. Version 3
+changed the meter (band power, 10-bit, clipping instead of folding), so the first boot of
+sdr_rx ignores a C5VRX-era record and starts on the defaults. The bridges send the same
+fields (`CONFIG_SET`, D as `rearm_db_x10`): `alpha` keeps its meaning there.
 
 The defaults are still the C5VRX meter's, tuned on hand passes at 57 Hz (4 out of 4 at
 +13 to +16 dB at gain 24, weak bumps reaching +8 dB). They are kept until bench B6
 records real passes on this meter, where a 25 mW drone at 0.9 m rises 22–30 dB
 (widscan58), so a far 200 mW drone may still pass `min_peak_db`. Retune them then,
 together with the C3's and the C6's copies (`firmware/node/main/c3_store.c`,
-`firmware/master/main/c6_hub.c`), in one commit.
+`firmware/master/main/c6_hub.c`; D's is `LP_REARM_DEFAULT_X10` in `link_proto.h`), in one
+commit.
 
 Other keys: `K` then `l` (live rise of R1-R8 and each LO's saturated captures, `CP_TRACE`
 lines, 5 a second), `0`
-(defaults), `k` (show), `i` (antenna onboard/IPEX, C5-Zero only: GPIO 26, not saved,
+(defaults, D included), `k` (show), `i` (antenna onboard/IPEX, C5-Zero only: GPIO 26, not saved,
 then every LO recalibrated on it), the engine benches `s`, `z`, `x`, `n`, `p` and `S`
 ([bench.md](bench.md#4-engine-bench)), `q` (close). The `K` window stays open 5 s after
 each key. At the top level: `T` prints the `FIRMWARE`, `STATUS`, `SDR` and `CHECKPOINT`
@@ -375,4 +411,4 @@ mode. The top-level keys are in `components/checkpoint/cp_console.c`, the `K` ke
 **Setting `active_db`:** put it below the rise of a drone passing the gate, but above the
 rise of the same drone elsewhere on the track. Otherwise only the [relative
 re-arm](#relative-re-arm) re-arms the channel between laps, and only if the drone falls
-16 dB under its pass.
+D under its pass.
