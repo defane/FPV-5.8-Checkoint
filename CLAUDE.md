@@ -54,6 +54,7 @@ firmware/master/    ESP32-C6 master (UART + ESP-NOW hub + speaker + admin web + 
 hardware/           carrier PCBs, node (C5+C3) and master (C5+C6+amp): generator, KiCad files, Gerbers
 hardware/antenna/   5.8 GHz quasi-Yagi: gen_qyagi.py is its source, sim_qyagi.py its openEMS model; not built yet
 hardware/enclosure/ 3D-printed node/master box: enclosure.sc (SolidCraft, a configuration per set) is its source, print/ its 3MF parts
+                    (edit enclosure.sc in place with solidcraft-cli, then re-export the 3MFs: README "Editing the design")
 ```
 
 Every firmware builds only `main`'s dependency closure (`set(COMPONENTS main)`): of

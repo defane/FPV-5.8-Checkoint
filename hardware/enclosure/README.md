@@ -62,6 +62,52 @@ the lid (103.3 mm deep for a node), without the arm.
 - **Vents:** grilles low and high, on both sides of the DC-DC and carrier compartments.
 - **Lid:** 4 M3 screws into inserts; it also holds the plates down.
 
+## Editing the design
+
+Work **in `enclosure.sc` itself**, not on a copy or an exported mesh: it is the source, and the
+3MFs in `print/` are re-exported from it after every change. The headless CLI of SolidCraft
+(`solidcraft-cli`, in the release tarball, no display needed) opens it, changes it and saves it
+back in place:
+
+```sh
+CLI=path/to/solidcraft-0.41.0-linux-aarch64/bin/solidcraft-cli
+cat > /tmp/change.json <<'EOF'
+{"commands": [{"command": "parameters.change", "params": {"name": "leg_d", "expression": "3"}}]}
+EOF
+$CLI run /tmp/change.json --in enclosure.sc --save enclosure.sc --quiet   # edit in place
+$CLI eval enclosure.sc --json-out /tmp/e.json    # volume, bounding box, mass of every body
+$CLI commands                                    # every command and its parameters
+```
+
+- **Change a parameter, not the geometry:** `parameters.change` (or `parameters.add` for a new
+  one, with a `comment`). Every dimension is a named parameter, and a sketch point takes an
+  expression (`dial_y - leg_hw`). For a new dimension, add the parameter, then point the
+  sketch's expression at it.
+- **Check what moved:** `eval` before and after. Only the body you meant to change should have
+  another volume, and both configurations (`config.activate`, `master` and `node`) must still
+  rebuild.
+- **Re-export the parts that changed**, in the same run, fine quality, laid on their print face
+  (`body.print_face` takes a point on a flat face, in the model's coordinates, and is not saved
+  in the design). The roll clamp, for instance, lies on its plate:
+
+  ```json
+  {"commands": [
+    {"command": "body.print_face", "params": {"body": "Antenna roll clamp", "point": [128.3, 17.85, 107.1]}},
+    {"command": "file.export", "params": {"path": "print/common/antenna-roll-clamp.3mf", "format": "3mf",
+     "bodies": ["Antenna roll clamp"], "quality": "fine", "lay_on_print_faces": true}}]}
+  ```
+
+  Export the part first from the unchanged design: it must match the committed 3MF (same
+  bounding box, same orientation) before you trust the new one.
+- **What the CLI does to the file:** the saved design is named after its file (keep it
+  `enclosure.sc`), and the thumbnail (`cache/thumbnail.*`) is dropped: copy it back from the
+  previous file, or save once from the app. `enclosure.sc.bak` and `.*~*.sc.lock*` are the app's
+  own and are ignored by git.
+- **File format:** the file is saved by a newer SolidCraft than the CLI 0.41 reads (format 58,
+  the CLI reads 55). It prints a warning and rebuilds everything all the same: compare the saved
+  `document.json` with the old one (only your parameters and features should differ). Open the
+  file in the desktop app once before a print.
+
 ## Antenna arm
 
 ![the roll joint: the roll clamp on the arm's seat](enclosure-roll.png)
@@ -81,7 +127,8 @@ the lid (103.3 mm deep for a node), without the arm.
   5.5 to 15 mm from the SMA edge, and stay clear of the line, the PI and the balun. A pocket in
   the rear jaw takes the SMA's legs: 20 mm wide (`leg_hw`), the V1 board's 14 mm leg span
   (`sma_span`, pads at 10-12 and 22-24 mm) plus 3 mm of air on each side (`sma_margin`), so a V2
-  board's 6 mm span fits too. It stops 0.5 mm past the V1 pads' 5 mm, where the clamped band starts.
+  board's 6 mm span fits too. It is 3 mm deep (`leg_d`) in the 5 mm jaw (`rear_t`):
+  keep at least 1.2 mm (3 perimeters) of jaw behind it. It stops 0.5 mm past the V1 pads' 5 mm, where the clamped band starts.
 - **Clearance:** pointing back, the roll joint is partly beside the wall. Rolled 90°, the jaws
   come within 4 mm of the wall's plane and never closer: the arm's rise (`riser`, 12 mm) is set
   for that.
