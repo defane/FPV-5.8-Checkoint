@@ -79,7 +79,9 @@ the lid (103.3 mm deep for a node), without the arm.
   clamp, and screw them into the two inserts now under its holes.
 - **Clamps:** the roll clamp's rear jaw and two front jaws hold the antenna by its ground band,
   5.5 to 15 mm from the SMA edge, and stay clear of the line, the PI and the balun. A pocket in
-  the rear jaw takes the SMA's legs.
+  the rear jaw takes the SMA's legs: 20 mm wide (`leg_hw`), the V1 board's 14 mm leg span
+  (`sma_span`, pads at 10-12 and 22-24 mm) plus 3 mm of air on each side (`sma_margin`), so a V2
+  board's 6 mm span fits too. It stops 0.5 mm past the V1 pads' 5 mm, where the clamped band starts.
 - **Clearance:** pointing back, the roll joint is partly beside the wall. Rolled 90°, the jaws
   come within 4 mm of the wall's plane and never closer: the arm's rise (`riser`, 12 mm) is set
   for that.
