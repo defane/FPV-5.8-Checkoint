@@ -179,16 +179,105 @@ class Gate:
                 "heap_min": self.heap_min, "faults": self.faults, "fw": "5.0.0-mock", "rearm_db_x10": self.rearm}
 
 
-class Master:
+class ConsoleDebug:
+    """Debug mode of a page with a local C5: c3_web.c / c6_web.c post_log, post_debug, post_key over
+    c3_link.c / c6_link.c's ring (link_proto's lp_logring, lp_keys_valid, lp_keys_blind)."""
+    LOG_RING, LOG_CHUNK = 4096, 700       # LOG_RING in c3_link.c and c6_link.c, C3_LOG_CHUNK / C6_LOG_CHUNK
+    BLIND = "szxnpSgGi"                   # lp_keys_blind(): after K
+
+    def init_debug(self):
+        self.text, self.log_total, self.debug = "", 0, False   # the C5's console text as the bridge keeps it; off at boot
+
+    def local_c5(self):
+        """The Gate the page's local C5 is."""
+        raise NotImplementedError
+
+    def active_x10(self):
+        """The VTX guard's threshold, the C5's active_db."""
+        return ACTIVE_X10
+
+    def say(self, text):
+        """The C5 prints: the bridge stores it sanitized (lp_logring_put)."""
+        text = "".join(c if c == "\n" else "" if c == "\r" else "'" if c == '"' else "/" if c == "\\"
+                       else c if " " <= c <= "~" else "?" for c in text)
+        if not self.debug:
+            return
+        self.text = (self.text + text)[-self.LOG_RING:]
+        self.log_total += len(text)
+
+    def set_debug(self, b, t):
+        """post_debug()."""
+        on = b.get("on", -1)
+        if on >= 0:
+            if on and not self.debug:
+                self.text, self.log_total = "", 0
+            self.debug = bool(on)
+        return {"ok": True, "debug": int(self.debug)}
+
+    def log(self, b, t):
+        """post_log(): the text after b["since"], 700 bytes at most."""
+        g, since = self.local_c5(), b.get("since", 0)
+        oldest = max(0, self.log_total - self.LOG_RING)
+        lost = False
+        if since > self.log_total:
+            since = oldest
+        elif since < oldest:
+            since, lost = oldest, True
+        chunk = self.text[since - oldest:][:self.LOG_CHUNK]
+        return {"debug": int(self.debug), "next": since + len(chunk), "lost": int(lost), "c5_alive": int(g.up(t)), "text": chunk}
+
+    @classmethod
+    def blinds(cls, keys):
+        """lp_keys_blind()."""
+        in_k = False
+        for k in keys:
+            if in_k:
+                if k == "q":
+                    in_k = False
+                elif k in cls.BLIND:
+                    return True
+            elif k == "K":
+                in_k = True
+            elif k in "FB":
+                return True
+        return False
+
+    def key(self, b, t):
+        """post_key(): None for its 400. The C5 answers on the console."""
+        keys, g = b.get("keys", ""), self.local_c5()
+        if not keys or len(keys) > 16 or any(not " " <= c <= "~" or c == "`" for c in keys):
+            return None
+        if not self.debug:
+            return {"ok": False, "msg": "debug mode is off"}
+        if not g.up(t):
+            return {"ok": False, "msg": "no C5 linked"}
+        if self.blinds(keys) and not b.get("force"):
+            cn = g.cn_x10(t)
+            if cn > self.active_x10():
+                return {"ok": False, "vtx": True, "cn_x10": cn}
+            return {"ok": False, "blind": True}
+        self.say(f"> {keys}\n")
+        if keys[0] == "K":
+            self.say("CHECKPOINT K + key (lower = down, upper = up; K stays open 5 s after each key, q closes):\n")
+        elif keys == "T":
+            self.say(f"STATUS uptime_s={int(t)} heap_internal=118000 fw={g.health(t)['fw']}\n")
+        elif keys in ("F", "B"):
+            g.run("cal_quick" if keys == "F" else "cal_full", t)
+        return {"ok": True}
+
+
+class Master(ConsoleDebug):
     """firmware/master/main/c6_web.c."""
     TAG = "c6"
     # POST path -> (method, char buf[N] of its C handler)
     ADMIN = {"/api/pairing": ("set_pairing", 128), "/api/node": ("set_node", 128),
              "/api/node_remove": ("remove_node", 128), "/api/reset": ("reset_race", 16),
              "/api/volume": ("set_volume", 128), "/api/command": ("command", 128),
-             "/api/rearm": ("set_rearm", 64)}
+             "/api/rearm": ("set_rearm", 64),
+             "/api/log": ("log", 64), "/api/key": ("key", 96), "/api/debug": ("set_debug", 32)}
 
     def __init__(self, vtx=False):
+        self.init_debug()
         self.vtx, self.pairing, self.volume, self.join_at = vtx, False, 60, None
         self.rearm = REARM_X10                            # the fleet's re-arm drop (c6_store)
         self.local = Gate(0, 0, 7.0, vtx)
@@ -216,7 +305,12 @@ class Master:
         self.laps, self.events, self.total = {}, [], 0
         return {"ok": True}
 
+    def local_c5(self):
+        return self.local
+
     def pass_at(self, g, at, peak):
+        if g is self.local:
+            self.say(f"PASS channel=R{g.channel + 1} peak_db={peak / 10:.1f} at_ms={int(at * 1000)}\n")
         self.total += 1
         self.events = [{"gate": g.gate, "channel": g.channel, "peak_db_x10": peak,
                         "at_ms": int(at * 1000)}] + self.events[:PASSES_KEPT["master"] - 1]
@@ -349,21 +443,25 @@ class Master:
         return {"ok": True, "sent": sent, "failed": failed, "busy": sorted(busy)}
 
 
-class Node:
+class Node(ConsoleDebug):
     """firmware/node/main/c3_web.c, the degraded local web."""
     TAG = "c3"
     ADMIN = {"/api/config": ("set_config", 512), "/api/command": ("command", 96),
-             "/api/log": ("log", 64), "/api/key": ("key", 96), "/api/debug": ("debug", 32)}
-    LOG_RING, LOG_CHUNK = 4096, 700       # c3_link.c LOG_RING, c3_link.h C3_LOG_CHUNK
-    BLIND = "szxnpSgGi"                   # keys_blind() in c3_web.c: after K
+             "/api/log": ("log", 64), "/api/key": ("key", 96), "/api/debug": ("set_debug", 32)}
 
     def __init__(self, vtx=False):
-        self.text, self.log_total, self.debug = "", 0, False   # the C5's console text as the C3 keeps it; debug is off at boot
+        self.init_debug()
         self.gate = Gate(0, 0, 7.0, vtx, cal_needed=True)
         self.events, self.total = [], 0
         self.config = {"alpha_milli": 300, "active_db_x10": 150, "hysteresis_db_x10": 30, "drop_db_x10": 30,
                        "min_peak_db_x10": 250, "refractory_ms": 1500, "stale_ms": 1000,
                        "rearm_db_x10": REARM_X10, "volume_pct": 60, "muted": 0}
+
+    def local_c5(self):
+        return self.gate
+
+    def active_x10(self):
+        return self.config["active_db_x10"]
 
     def state(self, t):
         g = self.gate
@@ -383,75 +481,6 @@ class Node:
 
     def set_config(self, b, t):
         self.config.update({k: v for k, v in b.items() if k in self.config})
-        return {"ok": True}
-
-    def say(self, text):
-        """The C5 prints: the C3 stores it sanitized (log_store)."""
-        text = "".join(c if c == "\n" else "" if c == "\r" else "'" if c == '"' else "/" if c == "\\"
-                       else c if " " <= c <= "~" else "?" for c in text)
-        if not self.debug:
-            return
-        self.text = (self.text + text)[-self.LOG_RING:]
-        self.log_total += len(text)
-
-    def set_debug(self, b, t):
-        """post_debug() in c3_web.c."""
-        on = b.get("on", -1)
-        if on >= 0:
-            if on and not self.debug:
-                self.text, self.log_total = "", 0
-            self.debug = bool(on)
-        return {"ok": True, "debug": int(self.debug)}
-
-    def log(self, b, t):
-        """post_log() in c3_web.c: the text after b["since"], 700 bytes at most."""
-        g, since = self.gate, b.get("since", 0)
-        oldest = max(0, self.log_total - self.LOG_RING)
-        lost = False
-        if since > self.log_total:
-            since = oldest
-        elif since < oldest:
-            since, lost = oldest, True
-        chunk = self.text[since - oldest:][:self.LOG_CHUNK]
-        return {"debug": int(self.debug), "next": since + len(chunk), "lost": int(lost), "c5_alive": int(g.up(t)), "text": chunk}
-
-    @classmethod
-    def blinds(cls, keys):
-        """keys_blind() in c3_web.c."""
-        in_k = False
-        for k in keys:
-            if in_k:
-                if k == "q":
-                    in_k = False
-                elif k in cls.BLIND:
-                    return True
-            elif k == "K":
-                in_k = True
-            elif k in "FB":
-                return True
-        return False
-
-    def key(self, b, t):
-        """post_key() in c3_web.c: None for its 400. The C5 answers on the console."""
-        keys, g = b.get("keys", ""), self.gate
-        if not keys or len(keys) > 16 or any(not " " <= c <= "~" or c == "`" for c in keys):
-            return None
-        if not self.debug:
-            return {"ok": False, "msg": "debug mode is off"}
-        if not g.up(t):
-            return {"ok": False, "msg": "no C5 linked"}
-        if self.blinds(keys) and not b.get("force"):
-            cn = g.cn_x10(t)
-            if cn > self.config["active_db_x10"]:
-                return {"ok": False, "vtx": True, "cn_x10": cn}
-            return {"ok": False, "blind": True}
-        self.say(f"> {keys}\n")
-        if keys[0] == "K":
-            self.say("CHECKPOINT K + key (lower = down, upper = up; K stays open 5 s after each key, q closes):\n")
-        elif keys == "T":
-            self.say(f"STATUS uptime_s={int(t)} heap_internal=118000 fw={g.health(t)['fw']}\n")
-        elif keys in ("F", "B"):
-            g.run("cal_quick" if keys == "F" else "cal_full", t)
         return {"ok": True}
 
     def command(self, b, t):

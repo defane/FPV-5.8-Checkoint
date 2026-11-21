@@ -10,11 +10,18 @@
 #include "sdkconfig.h"
 
 #define LINK_UART     ((uart_port_t)CONFIG_C6_UART_NUM)
-#define LINK_RX_BUF   256u
+#define LINK_RX_BUF   1024u   /* debug mode streams LOG frames next to the passes */
 #define LINK_READ_MS  100u
 
 static const char *TAG = "c6_link";
 static volatile bool s_rearm_sync = true;   /* push the fleet's drop at the next CONFIG_STATE */
+
+/* Debug mode: the local C5's console text (LOG frames) in a ring, sanitized for the page's JSON. */
+#define LOG_RING 4096u
+static char s_log[LOG_RING];
+static lp_logring_t s_ring = { .buf = s_log, .cap = LOG_RING };
+static portMUX_TYPE s_log_mux = portMUX_INITIALIZER_UNLOCKED;
+static volatile bool s_debug;
 
 static void on_pass(const lp_event_t *e) {
     c6_hub_local_pass(e->channel, e->peak_db_x10, e->at_ms);   /* gate 0, timed + sounded by the hub */
@@ -46,10 +53,27 @@ static void sync_rearm(const lp_config_t *echo) {
     ESP_LOGI(TAG, "local C5 re-arm drop %ld -> %u (x10, the fleet's)", (long)echo->rearm_db_x10, want);
 }
 
+static void send_frame(const uint8_t *b, size_t n) {
+    if (n) uart_write_bytes(LINK_UART, (const char *)b, n);
+}
+
 static void handle_msg(const lp_msg_t *m) {
+    uint8_t b[LP_MAX_FRAME];
     switch (m->type) {
+    case LP_MSG_LOG:
+        if (s_debug) {
+            portENTER_CRITICAL(&s_log_mux);
+            lp_logring_put(&s_ring, &m->data);
+            portEXIT_CRITICAL(&s_log_mux);
+        }
+        break;
     case LP_MSG_EVENT_PASS:   on_pass(&m->event); break;
-    case LP_MSG_STATS:        c6_store_set_local_stats(&m->stats); break;
+    case LP_MSG_STATS:
+        c6_store_set_local_stats(&m->stats);
+        /* Our DEBUG frame may have been lost, or the C5 rebooted since: say it again with every
+         * STATS while debug is on (the C5 ignores a repeat). */
+        if (s_debug) send_frame(b, lp_encode_debug(b, sizeof b, true));
+        break;
     case LP_MSG_CONFIG_STATE:
         c6_store_set_local_config(&m->config);
         if (s_rearm_sync) sync_rearm(&m->config);
@@ -85,6 +109,30 @@ static void link_task(void *arg) {
             send_config_req();
         }
     }
+}
+
+void c6_link_debug_set(bool on) {
+    uint8_t b[LP_MAX_FRAME];
+    portENTER_CRITICAL(&s_log_mux);
+    if (on && !s_debug) lp_logring_reset(&s_ring);   /* a fresh log: the page restarts from 0 */
+    s_debug = on;
+    portEXIT_CRITICAL(&s_log_mux);
+    send_frame(b, lp_encode_debug(b, sizeof b, on));
+}
+
+bool c6_link_debug(void) { return s_debug; }
+
+size_t c6_link_log_read(uint32_t since, char *out, size_t max, uint32_t *next, bool *lost) {
+    portENTER_CRITICAL(&s_log_mux);
+    const size_t n = lp_logring_read(&s_ring, since, out, max, next, lost);
+    portEXIT_CRITICAL(&s_log_mux);
+    return n;
+}
+
+void c6_link_send_keys(const char *keys, size_t n) {
+    if (!s_debug) return;
+    uint8_t b[LP_MAX_FRAME];
+    send_frame(b, lp_encode_key(b, sizeof b, keys, n));
 }
 
 /* From the web task: the link task pushes at the echo, with the C5's settings of that moment. */

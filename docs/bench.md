@@ -461,7 +461,8 @@ decide from them whether the IPEX lead needs a fixed attenuator (a PI pad, see
 Debug mode (off at boot): on the C3's page, unlock as admin, open *Debug*, switch it on. Pass:
 the `PASS` and `CHECKPOINT` lines appear within about 1 s; `T` prints the status, `K` the menu,
 `Ka` lowers the smoothing (the log shows the new `set alpha=`); `F` asks before it blinds the gate.
-Switched off (or after a C3 reboot): no log, and a key is refused.
+Switched off (or after a C3 reboot): no log, and a key is refused. Same on the C6's page (advanced
+view, admin, *Debug* under "Master & local gate (0)"), for its own C5 (gate 0).
 - Pass: the *calibrating* badge for 4 s at most (F) or 5 s (B), then OK; the VTX guard
   refuses with a VTX on; *Reboot* prints `SDR reboot=requested` and `STATS` come back within
   5 s; the download key enters the ROM loader every time (`enter_download.py` sees the

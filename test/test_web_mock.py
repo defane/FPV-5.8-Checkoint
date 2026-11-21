@@ -248,6 +248,19 @@ class Protocol(unittest.TestCase):
         self.assertEqual((status, json.loads(data)["session"]), (401, False))
         self.assertEqual(self.call("POST", "/api/reset", b"{}")[0], 401, "unsigned")
 
+    def test_debug_routes_over_http(self):
+        """Signed /api/debug, /api/key and /api/log reach the mock's handlers (not only the methods)."""
+        sid = self.open()
+        self.assertEqual(self.call("POST", "/api/debug", b'{"on":1}')[0], 401, "unsigned")
+        self.assertEqual(json.loads(self.signed(sid, 1, "POST", "/api/debug", b"{}")[1])["debug"], 0, "off at boot")
+        self.assertEqual(json.loads(self.signed(sid, 2, "POST", "/api/debug", b'{"on":1}')[1])["debug"], 1)
+        self.sim.state(60.0)
+        self.assertEqual(json.loads(self.signed(sid, 3, "POST", "/api/key", b'{"keys":"T","force":0}')[1]), {"ok": True})
+        out = json.loads(self.signed(sid, 4, "POST", "/api/log", b'{"since":0}')[1])
+        self.assertEqual((out["debug"], out["c5_alive"]), (1, 1))
+        self.assertIn("STATUS", out["text"])
+        self.assertEqual(self.signed(sid, 5, "POST", "/api/key", b'{"keys":"`"}')[0], 400)
+
     def test_reset_of_one_channel(self):
         status, data = self.call("GET", "/api/results")
         self.assertEqual(status, 200)
@@ -282,11 +295,12 @@ class Protocol(unittest.TestCase):
         self.assertEqual(self.signed(sid, 2, "POST", "/api/reset", b" " * 16)[0], 400)
 
 
-class NodeDebug(unittest.TestCase):
-    """The degraded C3's debug mode: /api/log and /api/key against c3_web.c's rules."""
+class DebugCases:
+    """Debug mode of a page with a local C5: /api/log, /api/debug and /api/key against c3_web.c's and
+    c6_web.c's rules (the same on both: link_proto's lp_logring, lp_keys_valid, lp_keys_blind)."""
 
     def setUp(self):
-        self.sim = web_mock.Node()
+        self.sim = self.cls()
 
     def test_off_by_default(self):
         self.sim.state(60.0)
@@ -306,12 +320,18 @@ class NodeDebug(unittest.TestCase):
         self.assertEqual(self.sim.log({"since": out["next"]}, 1.0)["text"], "")
         self.sim.say("a" * 5000)                       # more than the ring keeps
         out = self.sim.log({"since": 0}, 1.0)
-        self.assertEqual((out["lost"], len(out["text"])), (1, web_mock.Node.LOG_CHUNK))
-        self.assertEqual(self.sim.log({"since": 10 ** 9}, 1.0)["lost"], 0, "a C3 reboot restarts at the oldest")
+        self.assertEqual((out["lost"], len(out["text"])), (1, self.cls.LOG_CHUNK))
+        self.assertEqual(self.sim.log({"since": 10 ** 9}, 1.0)["lost"], 0, "a reboot restarts at the oldest")
+
+    def quiet(self, t):
+        """No drone near the gate: its C/N stays under the VTX guard, whenever the test runs."""
+        g = self.sim.local_c5()
+        g.next_pass, g.last_pass = t + 100.0, t - 100.0
 
     def test_keys(self):
         t = 60.0
         self.sim.state(t)
+        self.quiet(t)
         self.sim.set_debug({"on": 1}, t)
         self.assertIsNone(self.sim.key({"keys": "`"}, t), "the download key never goes out")
         self.assertIsNone(self.sim.key({"keys": ""}, t))
@@ -323,6 +343,50 @@ class NodeDebug(unittest.TestCase):
         self.assertTrue(self.sim.key({"keys": "Ks"}, t).get("blind"), "a bench blinds the gate")
         self.assertEqual(self.sim.key({"keys": "Kaq", "force": 0}, t), {"ok": True})
         self.assertTrue(self.sim.blinds("Kqi") is False and self.sim.blinds("Kq" "F"))
+
+    def test_a_carrier_asks_before_blinding(self):
+        sim = self.cls(vtx=True)
+        t = 60.0
+        sim.state(t)
+        sim.set_debug({"on": 1}, t)
+        out = sim.key({"keys": "B"}, t)
+        self.assertTrue(out.get("vtx") and out["cn_x10"] > web_mock.ACTIVE_X10, out)
+        self.assertEqual(sim.key({"keys": "T"}, t), {"ok": True}, "a status blinds nothing")
+
+    def test_page_sends_what_the_firmware_reads(self):
+        """The debug panel's bodies: each key the page sends is parsed by the C handler and read by the mock,
+        the C handler's buffer holds the widest one, and every route is the mock's."""
+        page = (ROOT / self.page).read_text()
+        src = (ROOT / SOURCES[self.cls]).read_text()
+        routes = dict(re.findall(r'\.uri = "(/api/\w+)",\s*\.method = HTTP_POST,\s*\.handler = (\w+)', src))
+        sent = {}
+        for uri, args in re.findall(r'AdminAuth\.request\("POST", "(/api/(?:log|key|debug))", (.*?)\);?\n', page):
+            for obj in re.findall(r"\{([^{}]*)\}", args):
+                sent.setdefault(uri, set()).update(re.findall(r"(?:^|,)\s*(\w+)\s*(?=[:,]|$)", obj.strip()))
+        self.assertEqual(sent, {"/api/log": {"since"}, "/api/debug": {"on"}, "/api/key": {"keys", "force"}})
+        for uri, keys in sent.items():
+            self.assertIn(uri, routes, "a POST the firmware does not route")
+            self.assertLessEqual(keys, c_reads(c_function(src, routes[uri])), f"{uri}: a field the firmware would not read")
+            self.assertLessEqual(keys, mock_reads(self.cls, self.cls.ADMIN[uri][0]), f"{uri}: a field the mock would not read")
+        widest = '{"keys":"' + "\\\\" * 16 + '","force":1}'          # 16 keys, each escaped by JSON.stringify
+        self.assertLess(len(widest), self.cls.ADMIN["/api/key"][1])
+
+    def test_every_route_calls_a_method(self):
+        for uri, (name, cap) in self.cls.ADMIN.items():
+            self.assertTrue(callable(getattr(self.cls, name, None)), f"{uri}: {name} is not a handler")
+
+
+class NodeDebug(DebugCases, unittest.TestCase):
+    cls, page = web_mock.Node, "firmware/node/main/www/index.html"
+
+
+class MasterDebug(DebugCases, unittest.TestCase):
+    cls, page = web_mock.Master, "firmware/master/main/www/index.html"
+
+    def test_the_local_gates_passes_reach_the_log(self):
+        self.sim.set_debug({"on": 1}, 0.0)
+        self.sim.state(60.0)
+        self.assertIn("PASS channel=R1", self.sim.log({"since": 0}, 60.0)["text"])
 
 
 if __name__ == "__main__":

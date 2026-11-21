@@ -1,6 +1,7 @@
 #include "c6_web.h"
 #include "admin_hash.h"
 #include "c6_hub.h"
+#include "c6_link.h"
 #include "c6_store.h"
 #include "fleet_proto.h"
 #include "esp_http_server.h"
@@ -373,11 +374,88 @@ static esp_err_t post_command(httpd_req_t *req) {
     return httpd_resp_send(req, out, o);
 }
 
+/* Debug mode (admin): the local C5's console text and typed keys. The remote gates' consoles stay
+ * on their own C3's page. POST {"since":N} answers {"debug","next","lost","c5_alive","text"}: the
+ * bytes after position N (c6_link_log_read; the text holds no quote, backslash or control other
+ * than the newline, which is escaped here). The page asks again from "next". */
+static esp_err_t post_log(httpd_req_t *req) {
+    char buf[64];
+    if (!web_auth_request(req, buf, sizeof buf)) return ESP_OK;
+    static char raw[C6_LOG_CHUNK];                  /* larger than the stack; httpd runs one handler at a time */
+    static char body[2 * C6_LOG_CHUNK + 96];
+    uint32_t next;
+    bool lost;
+    const size_t n = c6_link_log_read((uint32_t)json_i(buf, "since", 0), raw, sizeof raw, &next, &lost);
+    int o = snprintf(body, sizeof body, "{\"debug\":%u,\"next\":%lu,\"lost\":%u,\"c5_alive\":%u,\"text\":\"",
+                     c6_link_debug() ? 1u : 0u, (unsigned long)next, lost ? 1u : 0u,
+                     c6_store_has_local() ? 1u : 0u);
+    for (size_t i = 0; i < n; i++) {
+        if (raw[i] == '\n') { body[o++] = '\\'; body[o++] = 'n'; }
+        else body[o++] = raw[i];
+    }
+    o += snprintf(body + o, sizeof body - o, "\"}");
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_send(req, body, o);
+}
+
+/* Debug mode on or off ({"on":0|1}; no "on" only asks). Off at every boot: nothing is mirrored from
+ * the C5, and /api/key sends nothing, until an admin switches it on. */
+static esp_err_t post_debug(httpd_req_t *req) {
+    char buf[32];
+    if (!web_auth_request(req, buf, sizeof buf)) return ESP_OK;
+    const int32_t on = json_i(buf, "on", -1);
+    if (on >= 0) {
+        c6_link_debug_set(on != 0);
+        ESP_LOGW(TAG, "debug mode %s from web", on ? "ON" : "off");
+    }
+    char r[32];
+    snprintf(r, sizeof r, "{\"ok\":true,\"debug\":%u}", c6_link_debug() ? 1u : 0u);
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, r);
+}
+
+/* {"keys":"Ka","force":0|1}: typed on the local C5's console as on its USB ("K" opens the settings
+ * menu, "T" is the status, "F"/"B" calibrate). The keys that blind the gate follow post_command's
+ * rule: refused with {"blind":true}, or {"vtx":true} while a carrier is seen, until the page asks
+ * the admin and retries with force. The C5's answer comes back through /api/log. */
+static esp_err_t post_key(httpd_req_t *req) {
+    char buf[96], keys[LP_KEY_MAX + 1];
+    if (!web_auth_request(req, buf, sizeof buf)) return ESP_OK;
+    if (!json_s(buf, "keys", keys, sizeof keys) || !keys[0]) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "no keys");
+        return ESP_FAIL;
+    }
+    if (!lp_keys_valid(keys)) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad key");
+        return ESP_FAIL;
+    }
+    const bool force = json_i(buf, "force", 0) != 0;
+
+    httpd_resp_set_type(req, "application/json");
+    if (!c6_link_debug())
+        return httpd_resp_sendstr(req, "{\"ok\":false,\"msg\":\"debug mode is off\"}");
+    if (!c6_store_has_local())
+        return httpd_resp_sendstr(req, "{\"ok\":false,\"msg\":\"no C5 linked\"}");
+    if (lp_keys_blind(keys) && !force) {
+        c6_store_snapshot(&s_snap);
+        const int32_t active = s_snap.has_local_cfg ? s_snap.local_cfg.active_db_x10 : c6_hub_vtx_threshold_x10();
+        char r[72];
+        if (s_snap.local.cn_x10 != LP_CN_UNKNOWN && s_snap.local.cn_x10 > active)
+            snprintf(r, sizeof r, "{\"ok\":false,\"vtx\":true,\"cn_x10\":%ld}", (long)s_snap.local.cn_x10);
+        else
+            snprintf(r, sizeof r, "{\"ok\":false,\"blind\":true}");
+        return httpd_resp_sendstr(req, r);
+    }
+    c6_link_send_keys(keys, strlen(keys));
+    ESP_LOGW(TAG, "keys \"%s\" from web%s", keys, force ? " (forced)" : "");
+    return httpd_resp_sendstr(req, "{\"ok\":true}");
+}
+
 void c6_web_start(void) {
     web_auth_init(s_admin_key, ADMIN_SALT, ADMIN_ITERATIONS, ADMIN_AUTH_OPEN);
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.lru_purge_enable = true;
-    cfg.max_uri_handlers = 13;   /* 11 here + web_auth's 2 */
+    cfg.max_uri_handlers = 16;   /* 14 here + web_auth's 2 */
     cfg.stack_size = 6144;       /* the signature's PSA HMAC under post_command: ~3.5 KB of the 4 KB default */
     httpd_handle_t srv = NULL;
     if (httpd_start(&srv, &cfg) != ESP_OK) { ESP_LOGE(TAG, "httpd start failed"); return; }
@@ -393,6 +471,9 @@ void c6_web_start(void) {
         { .uri = "/api/volume",   .method = HTTP_POST, .handler = post_volume },
         { .uri = "/api/rearm",    .method = HTTP_POST, .handler = post_rearm },
         { .uri = "/api/command",  .method = HTTP_POST, .handler = post_command },
+        { .uri = "/api/log",      .method = HTTP_POST, .handler = post_log },
+        { .uri = "/api/key",      .method = HTTP_POST, .handler = post_key },
+        { .uri = "/api/debug",    .method = HTTP_POST, .handler = post_debug },
     };
     for (unsigned i = 0; i < sizeof uris / sizeof uris[0]; i++) httpd_register_uri_handler(srv, &uris[i]);
     web_auth_register(srv);   /* POST /api/session, GET /auth.js */

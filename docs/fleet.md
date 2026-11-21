@@ -203,9 +203,9 @@ page for a gate with no master.
   the C6 re-sends it, and its thresholds were tuned on the C5VRX meter. Keep the defaults
   until the bench retunes them ([bench.md](bench.md), B6).
 
-## Debug mode (degraded C3 page, admin)
+## Debug mode (degraded C3 page and C6 master page, admin)
 
-For development: the C5's console text and its keys, over the C3's web, without a USB cable.
+For development: the C5's console text and its keys, over the web of the board its UART is wired to (a degraded C3, or the C6 for its own gate 0), without a USB cable.
 **Off by default, at every boot**: an admin switches it on with the "debug mode" switch of the
 **Debug** panel (`POST /api/debug` `{"on": 0|1}`, a `DEBUG` frame to the C5; the C3 repeats it with
 every `STATS` while on, and the C5 switches off on a `HELLO`, i.e. when the C3 reboots). While it is
@@ -213,12 +213,19 @@ off the C5 mirrors nothing (no `LOG` traffic), the C3 keeps no text and `/api/ke
 On: the C5 mirrors what its console prints (`cp_printf`: `PASS`, `CHECKPOINT ...`, `K` menus, `T`,
 `K l` traces, bench summaries) into a 2 KiB heap ring that `cp_link` sends as `LOG` frames (two per
 loop, so a pass never waits); a full ring drops the newest text and says how much. The C3 keeps
-the last 4 KiB (`c3_link.c`) and serves it to `POST /api/log` `{"since": N}` (admin, signed; the
+the last 4 KiB (`c3_link.c`; the C6 keeps the same in `c6_link.c`, both through `link_proto`'s `lp_logring`) and serves it to `POST /api/log` `{"since": N}` (admin, signed; the
 page polls it once a second while the Debug panel is open). `POST /api/key` `{"keys": "Ka",
 "force": 0|1}` sends a `KEY` frame: the C5 types the keys on its console queue in order, so
 `K` + key, `T` (status), `F` and `B` behave as on USB (the download key is never sent). Keys that
 blind the gate (`F`, `B`, `K` + `s z x n p S g G i`) are refused first with `{"blind":true}` (or
 `{"vtx":true}` while a carrier is seen); the page asks, then retries with `force`.
 Not mirrored: the `K S` scan-recording rows and what the engine (`sdr_rx`) and the USB heartbeat
-print. Logging out of the page leaves debug mode on until the C3 reboots. The C6 master's own page
-does not have it yet (a remote gate would need a `fleet_proto` relay).
+print. Logging out of the page leaves debug mode on until the board reboots.
+
+**The C6 master's page** has the same panel (advanced view, admin, *Debug* under "Master & local
+gate (0)"), with the same three routes (`/api/debug`, `/api/log`, `/api/key`), for **gate 0's C5
+only**: the C6 is the UART master of that C5 as the C3 is of its own. The VTX guard of a blind key
+uses gate 0's C/N and its `active_db`. A **remote gate's console** is not reachable from the C6: it
+would need `LOG`/`KEY`/`DEBUG` relayed over `fleet_proto` (ESP-NOW frames of 250 B, a log stream
+per gate to budget against the passes). Until then a remote gate is debugged over USB, or with its
+C3 out of the master's reach (a C3 that finds no master shows its degraded page, debug included).
