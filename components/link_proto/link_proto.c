@@ -144,6 +144,21 @@ size_t lp_encode_command(uint8_t *buf, size_t cap, lp_cmd_t cmd) {
     return frame(buf, cap, LP_MSG_COMMAND, &pl, LP_LEN_CMD);
 }
 
+size_t lp_encode_log(uint8_t *buf, size_t cap, const char *text, size_t len) {
+    if (!text || len == 0 || len > LP_TEXT_MAX) return 0;
+    return frame(buf, cap, LP_MSG_LOG, (const uint8_t *)text, (uint8_t)len);
+}
+
+size_t lp_encode_debug(uint8_t *buf, size_t cap, bool on) {
+    const uint8_t pl = on ? 1u : 0u;
+    return frame(buf, cap, LP_MSG_DEBUG, &pl, 1u);
+}
+
+size_t lp_encode_key(uint8_t *buf, size_t cap, const char *keys, size_t len) {
+    if (!keys || len == 0 || len > LP_KEY_MAX) return 0;
+    return frame(buf, cap, LP_MSG_KEY, (const uint8_t *)keys, (uint8_t)len);
+}
+
 /* ---- streaming decoder ----
  *
  * Bytes accumulate in d->buf; after each byte we try to parse a frame anchored
@@ -205,6 +220,20 @@ static bool decode_payload(uint8_t type, uint8_t len, const uint8_t *p,
         out->type = LP_MSG_COMMAND;
         out->command = p[0];
         return true;
+    case LP_MSG_DEBUG:
+        if (len != 1u || p[0] > 1u) return false;
+        out->type = LP_MSG_DEBUG;
+        out->debug = p[0];
+        return true;
+    case LP_MSG_LOG:
+    case LP_MSG_KEY: {
+        const uint8_t max = type == LP_MSG_LOG ? LP_TEXT_MAX : LP_KEY_MAX;
+        if (len == 0 || len > max) return false;
+        out->type = (lp_type_t)type;
+        out->data.len = len;
+        for (uint8_t i = 0; i < len; i++) out->data.text[i] = (char)p[i];
+        return true;
+    }
     default:
         return false; /* unknown type: drop */
     }

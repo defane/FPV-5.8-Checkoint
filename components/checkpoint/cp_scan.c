@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "checkpoint.h"
+#include "cp_log.h"
 #include "checkpoint_link.h"
 #include "cp_bench.h"
 #include "cp_internal.h"
@@ -68,7 +69,7 @@ void cp_on_pass(cp_t *cp, const pd_event_t *e)
     const uint32_t held = cp->sd.held[ch] - cp->held_at_pass[ch];
     cp->held_at_pass[ch] = cp->sd.held[ch];
     /* rearm: how the channel was armed for it, the release (abs) or the relative re-arm (rel). */
-    printf("PASS channel=R%u freq=%u peak_db=%.1f peak_ms=%" PRIu32 " at_ms=%" PRIu32 " delay_ms=%" PRIu32
+    cp_printf("PASS channel=R%u freq=%u peak_db=%.1f peak_ms=%" PRIu32 " at_ms=%" PRIu32 " delay_ms=%" PRIu32
            " comp_ms=%" PRIu32 " est_peak_ms=%" PRIu32 " tau_ms=%.0f held=%" PRIu32 " rearm=%s\n",
            e->channel + 1u, (unsigned)s_ch_mhz[ch], (double)e->peak_db, e->peak_ms, e->at_ms, e->at_ms - e->peak_ms,
            comp_ms, e->peak_ms - comp_ms, (double)sd_tau_ms(&cp->sd), held, e->rel ? "rel" : "abs");
@@ -84,17 +85,17 @@ static void cp_trace(cp_t *cp, int64_t now_us)
     const unsigned top = sd_strongest(sd);
     const sdr_plan_t *p = sdr_bench_plan();
     const unsigned nhops = p && p->nhops < SDR_RX_MAX_HOPS ? p->nhops : SDR_RX_MAX_HOPS;
-    printf("CP_TRACE t_ms=%lld rise_db=%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f top=R%u state=%s sat=", now_us / 1000,
+    cp_printf("CP_TRACE t_ms=%lld rise_db=%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f top=R%u state=%s sat=", now_us / 1000,
            (double)sd_rise_db(sd, 0), (double)sd_rise_db(sd, 1), (double)sd_rise_db(sd, 2),
            (double)sd_rise_db(sd, 3), (double)sd_rise_db(sd, 4), (double)sd_rise_db(sd, 5),
            (double)sd_rise_db(sd, 6), (double)sd_rise_db(sd, 7), top + 1u, pd_state_name(sd->det.ch[top].state));
-    for (unsigned j = 0; j < nhops; j++) printf("%s%u", j ? "," : "", (unsigned)cp->trace_sat[j]);
-    printf(" held=");
+    for (unsigned j = 0; j < nhops; j++) cp_printf("%s%u", j ? "," : "", (unsigned)cp->trace_sat[j]);
+    cp_printf(" held=");
     for (unsigned ch = 0; ch < SDR_RX_CHANNELS; ch++) {
-        printf("%s%" PRIu32, ch ? "," : "", sd->held[ch] - cp->held_at_trace[ch]);
+        cp_printf("%s%" PRIu32, ch ? "," : "", sd->held[ch] - cp->held_at_trace[ch]);
         cp->held_at_trace[ch] = sd->held[ch];
     }
-    printf("\n");
+    cp_printf("\n");
     memset(cp->trace_sat, 0, sizeof(cp->trace_sat));
 }
 
@@ -120,7 +121,7 @@ unsigned cp_feed_hop(scan_detector_t *sd, const sdr_hop_t *h, pd_event_t ev[SDR_
 static void run_bench(cp_t *cp, char key, cp_yield_t *y)
 {
     if (sdr_rx_calibrating()) {                  /* a recalibration got in first */
-        printf("CHECKPOINT bench=%c refused=busy\n", key);
+        cp_printf("CHECKPOINT bench=%c refused=busy\n", key);
         return;
     }
     cp->scan_stop = false;
@@ -161,7 +162,7 @@ static void cp_apply_requests(cp_t *cp, cp_yield_t *y)
             cp->relearn_pending = true;          /* sd_relearn once it has run */
         } else {
             cp->relearn_pending = false;         /* a later foreign recalibration must not relearn */
-            printf("CHECKPOINT command=%s refused=busy from=%s\n", kind == SDR_RECAL_FULL ? "cal_full" : "cal_quick",
+            cp_printf("CHECKPOINT command=%s refused=busy from=%s\n", kind == SDR_RECAL_FULL ? "cal_full" : "cal_quick",
                    from ? from : "?");
         }
     }
@@ -197,7 +198,7 @@ static void print_ready(const cp_t *cp, uint32_t cal_ms)
      * settings: an sdkconfig kept from a bench control (verify_tries=1: the verify only logs;
      * pair_guard=0: CONFIG_CHECKPOINT_PAIR_GUARD=n) is visible in every log. rearm_db is the relative
      * re-arm's drop the detector starts with (saved; the build's on a first boot; 0: none). */
-    printf("SDR ready lo=%s gain=%u verify_tries=%u pair_guard=%u rearm_db=%.1f cal_ms=%" PRIu32
+    cp_printf("SDR ready lo=%s gain=%u verify_tries=%u pair_guard=%u rearm_db=%.1f cal_ms=%" PRIu32
            " boot_ms=%lld chip_rev=v%u.%u\n",
            lo, (unsigned)sdr_rx_gain(), (unsigned)CONFIG_SDR_RX_VERIFY_TRIES, CP_PAIR_GUARD, (double)rearm, cal_ms,
            (esp_timer_get_time() - s_boot_t0_us) / 1000, (unsigned)(chip.revision / 100u),
@@ -218,13 +219,13 @@ static void scan_task(void *arg)
     if (sdr_rx_init(&rc) != ESP_OK) {            /* not subscribed to the TWDT: a suspended task would trip it */
         cp->engine_failed = true;                /* STATS: CAL_NEEDED, faults >= 1, levels unknown */
         checkpoint_boot_stage("sdr_failed");
-        printf("SDR init failed: no detection; console stays up\n");
+        cp_printf("SDR init failed: no detection; console stays up\n");
         for (;;) vTaskSuspend(NULL);
     }
     print_ready(cp, (uint32_t)((esp_timer_get_time() - t0) / 1000));
     checkpoint_boot_stage("ready");
     if (esp_task_wdt_add(NULL) == ESP_OK) cp_wdt_subscribed = true;   /* a hung scan task reboots the gate */
-    else printf("CHECKPOINT warning: the scan task is not watched by the task watchdog\n");
+    else cp_printf("CHECKPOINT warning: the scan task is not watched by the task watchdog\n");
     portENTER_CRITICAL(&cp_mux);
     const pd_config_t cfg = cp->wanted;
     const float rearm = cp->wanted_rearm_db;

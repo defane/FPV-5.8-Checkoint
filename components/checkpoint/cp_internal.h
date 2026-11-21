@@ -102,6 +102,7 @@ unsigned cp_feed_hop(scan_detector_t *sd, const sdr_hop_t *h, pd_event_t ev[SDR_
 /* cp_console.c */
 TaskHandle_t cp_console_task(void);
 TaskHandle_t cp_usb_task(void);
+void cp_console_inject(const char *keys, size_t n);   /* the link's KEY frames, as typed keys */
 
 /* cp_nvs.c: blobs in NVS namespace "checkpoint". */
 bool cp_blob_load(const char *key, void *data, size_t size);

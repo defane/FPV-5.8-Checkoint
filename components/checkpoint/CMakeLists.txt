@@ -4,7 +4,7 @@
 # and the link only post requests to it. The detector has no amplifier and no status LED.
 # Public header: checkpoint.h (app_main's boot calls).
 idf_component_register(
-    SRCS "checkpoint.c" "cp_scan.c" "cp_bench.c" "cp_console.c" "fw_id.c" "cp_nvs.c" "checkpoint_link.c"
+    SRCS "checkpoint.c" "cp_scan.c" "cp_bench.c" "cp_console.c" "fw_id.c" "cp_nvs.c" "cp_log.c" "checkpoint_link.c"
     INCLUDE_DIRS "."
     LDFRAGMENTS "cp_hot_iram.lf"
     REQUIRES sdr_rx pass_detector link_proto nvs_flash esp_timer

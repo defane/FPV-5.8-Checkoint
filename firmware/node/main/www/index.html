@@ -56,6 +56,9 @@
   dialog button { margin: 0; }
   .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   input[type=text], input[type=password] { background: #0f1216; color: #e7ebf0; border: 1px solid #2a313a; border-radius: 6px; padding: 6px; }
+  #dbg_log { height: 260px; overflow: auto; margin: 0; padding: 8px; background: #0f1216; border-radius: 6px;
+             font: .75rem/1.35 ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; word-break: break-all; }
+  details > summary { cursor: pointer; }
   .admin-only { display: none; }
   body.is-admin .admin-only { display: revert; }
   .field { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 8px 0; font-size: .92rem; }
@@ -155,6 +158,41 @@
   </div>
   </div>
 
+  <div class="admin-only">
+  <h2>Debug (admin)</h2>
+  <details id="dbg" class="card">
+    <summary>C5 console: log and keys</summary>
+    <div class="bar">
+      <button id="dbg_on" class="switch" role="switch" aria-checked="false"><i></i><span>debug mode</span></button>
+      <span class="muted" style="font-size:.8rem">off at every boot; while off the C5 sends no log and ignores keys</span>
+    </div>
+    <div id="dbg_body" hidden>
+    <pre id="dbg_log"></pre>
+    <div class="bar">
+      <button id="dbg_pause" class="ghost">Pause</button>
+      <button id="dbg_clear" class="ghost">Clear</button>
+      <button id="dbg_copy" class="ghost">Copy</button>
+      <input id="dbg_filter" type="text" placeholder="filter (PASS, CHECKPOINT…)" style="flex:1;min-width:120px;margin-top:12px">
+    </div>
+    <div class="bar">
+      <input id="dbg_keys" type="text" maxlength="16" placeholder="keys, e.g. Ka  (K = settings, T = status)" autocomplete="off" spellcheck="false" style="flex:1;min-width:160px;margin-top:12px">
+      <button id="dbg_send">Send</button>
+    </div>
+    <div class="bar">
+      <button data-keys="T" class="ghost">T status</button>
+      <button data-keys="K" class="ghost">K menu</button>
+      <button data-keys="Kk" class="ghost">K k show</button>
+      <button data-keys="Kl" class="ghost">K l trace</button>
+      <button data-keys="Kq" class="ghost">K q close</button>
+      <button data-keys="F" class="ghost">F</button>
+      <button data-keys="B" class="ghost">B</button>
+    </div>
+    </div>
+    <span id="dbg_msg" class="muted"></span>
+    <div class="muted" style="margin-top:8px;font-size:.8rem">Keys are typed on the C5's console in order. Calibrations, benches, gain and antenna blind the gate: they ask first. Benches' scan recording (K S) and the engine's own prints stay on USB.</div>
+  </details>
+  </div>
+
   <h2>Recent passes</h2>
   <ul id="events" class="card"></ul>
 </main>
@@ -210,7 +248,7 @@ document.addEventListener("keydown", e => {
 
 function setAdmin(on) {             // back to spectator forgets the key and unsaved detector edits
   admin = on;
-  if (!on) { AdminAuth.logout(); dirty = false; infoClose(); }
+  if (!on) { AdminAuth.logout(); dirty = false; infoClose(); dbgText = ""; dbgNext = 0; $("dbg").open = false; dbgShow(false); dbgRender(); }
   document.body.classList.toggle("is-admin", on);
   $("role").setAttribute("aria-checked", on);
 }
@@ -379,8 +417,88 @@ document.querySelectorAll("button[data-cmd]").forEach(b => b.addEventListener("c
   } catch (e) { $("cmd_msg").textContent = "failed"; }
 }));
 
+// Debug: the C5's console text (POST /api/log from the position we have) and its keys.
+const DBG_MAX = 60000;
+let dbgNext = 0, dbgText = "", dbgPaused = false, dbgBusy = false, dbgOn = false;
+function dbgShow(on) {
+  dbgOn = on; $("dbg_on").setAttribute("aria-checked", on); $("dbg_body").hidden = !on;
+}
+async function dbgSwitch(on) {   // on: true/false to set it, undefined to ask
+  const r = await AdminAuth.request("POST", "/api/debug", JSON.stringify(on === undefined ? {} : { on: on ? 1 : 0 }));
+  if (r.status === 401) { setAdmin(false); return; }
+  if (!r.ok) return;
+  const j = await r.json();
+  if (!!j.debug !== dbgOn) { dbgText = ""; dbgNext = 0; dbgRender(); }
+  dbgShow(!!j.debug);
+}
+$("dbg_on").addEventListener("click", () => { dbgSwitch(!dbgOn).catch(() => { $("dbg_msg").textContent = "failed"; }); });
+function dbgRender() {
+  const f = $("dbg_filter").value.toLowerCase();
+  const lines = dbgText.split("\n");
+  const shown = f ? lines.filter(l => l.toLowerCase().includes(f)) : lines;
+  const box = $("dbg_log"), stick = box.scrollTop + box.clientHeight >= box.scrollHeight - 8;
+  box.textContent = shown.join("\n");
+  if (stick) box.scrollTop = box.scrollHeight;
+}
+async function dbgPoll() {
+  if (!admin || !$("dbg").open || !dbgOn || dbgPaused || dbgBusy) return;
+  dbgBusy = true;
+  try {
+    const r = await AdminAuth.request("POST", "/api/log", JSON.stringify({ since: dbgNext }));
+    if (r.status === 401) { setAdmin(false); return; }
+    if (!r.ok) return;
+    const j = await r.json();
+    if (!j.debug) { dbgShow(false); return; }   // the C3 rebooted: off again
+    if (j.next < dbgNext) dbgText += "\n[C3 restarted]\n";
+    if (j.lost) dbgText += "\n[log: older lines were lost]\n";
+    dbgNext = j.next;
+    if (j.text) {
+      dbgText += j.text;
+      if (dbgText.length > DBG_MAX) dbgText = dbgText.slice(dbgText.length - DBG_MAX);
+      dbgRender();
+    }
+  } catch (_) { /* offline: the next tick retries */ }
+  finally { dbgBusy = false; }
+}
+async function dbgKeys(keys, force) {
+  const r = await AdminAuth.request("POST", "/api/key", JSON.stringify({ keys, force }));
+  if (r.status === 401) { setAdmin(false); return { ok: false, msg: "password required" }; }
+  return r.ok ? r.json() : { ok: false, msg: "failed (" + r.status + ")" };
+}
+async function dbgSend(keys) {
+  if (!keys) return;
+  $("dbg_msg").textContent = "sending…";
+  try {
+    let r = await dbgKeys(keys, 0);
+    if (r.vtx || r.blind) {
+      const why = r.vtx ? `The gate sees a strong signal (${(r.cn_x10 / 10).toFixed(1)} dB over its rest): a VTX may be on. ` : "";
+      if (!confirm(why + `"${keys}" blinds the gate (no detection) for a few seconds or the length of a bench; all VTXs should be OFF. Send?`)) {
+        $("dbg_msg").textContent = "cancelled"; return;
+      }
+      r = await dbgKeys(keys, 1);
+    }
+    $("dbg_msg").textContent = r.ok ? "sent" : (r.msg || "failed");
+    if (r.ok) { setTimeout(() => $("dbg_msg").textContent = "", 2000); setTimeout(dbgPoll, 300); }
+  } catch (e) { $("dbg_msg").textContent = "failed"; }
+}
+$("dbg_send").addEventListener("click", () => { dbgSend($("dbg_keys").value); });
+$("dbg_keys").addEventListener("keydown", e => { if (e.key === "Enter") dbgSend($("dbg_keys").value); });
+document.querySelectorAll("button[data-keys]").forEach(b => b.addEventListener("click", () => dbgSend(b.dataset.keys)));
+$("dbg_pause").addEventListener("click", () => {
+  dbgPaused = !dbgPaused; $("dbg_pause").textContent = dbgPaused ? "Resume" : "Pause";
+});
+$("dbg_clear").addEventListener("click", () => { dbgText = ""; dbgRender(); });
+$("dbg_filter").addEventListener("input", dbgRender);
+$("dbg_copy").addEventListener("click", async () => {
+  try { await navigator.clipboard.writeText(dbgText); $("dbg_msg").textContent = "copied"; }
+  catch (_) { $("dbg_msg").textContent = "copy: select the log by hand"; }
+  setTimeout(() => $("dbg_msg").textContent = "", 2000);
+});
+$("dbg").addEventListener("toggle", () => { if ($("dbg").open) dbgSwitch().catch(() => {}); });
+
 poll();
 setInterval(poll, 1000);
+setInterval(dbgPoll, 1000);
 </script>
 </body>
 </html>

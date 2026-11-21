@@ -4,6 +4,7 @@
  * its settings there intact. */
 #include <stdio.h>
 #include "cp_internal.h"
+#include "cp_log.h"
 #include "nvs.h"
 
 #define NAMESPACE "checkpoint"
@@ -27,6 +28,6 @@ bool cp_blob_store(const char *key, const void *data, size_t size)
         if (err == ESP_OK) err = nvs_commit(h);
         nvs_close(h);
     }
-    if (err != ESP_OK) printf("NVS store key=%s err=%s\n", key, esp_err_to_name(err));
+    if (err != ESP_OK) cp_printf("NVS store key=%s err=%s\n", key, esp_err_to_name(err));
     return err == ESP_OK;
 }

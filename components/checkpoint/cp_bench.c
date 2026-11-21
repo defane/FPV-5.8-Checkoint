@@ -22,6 +22,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "checkpoint.h"
+#include "cp_log.h"
 #include "hop_stats.h"
 #include "sdkconfig.h"
 #include "sdr_rx_bench.h"
@@ -278,7 +279,7 @@ static void timing_run(cp_t *cp, cp_yield_t *y, s_bench_t *b, sdr_tune_method_t 
     const hs_spread_t rot = hs_spread(b->rot_us, nrot), tu = hs_hist_spread(&t[T_TUNE]),
                       ca = hs_hist_spread(&t[T_CAP]), wa = hs_hist_spread(&t[T_WAIT]),
                       ds = hs_hist_spread(&t[T_DSP]), de = hs_hist_spread(&t[T_DETECTOR]);
-    printf("SDRBENCH method=%s rotations=%u yields=%u rot_us=%" PRIu32 "/%" PRIu32 "/%" PRIu32
+    cp_printf("SDRBENCH method=%s rotations=%u yields=%u rot_us=%" PRIu32 "/%" PRIu32 "/%" PRIu32
            " per_channel_hz_x10=%" PRIu32 " tune_us=%" PRIu32 "/%" PRIu32 "/%" PRIu32 " cap_us=%" PRIu32 "/%" PRIu32
            "/%" PRIu32 " wait_us=%" PRIu32 "/%" PRIu32 "/%" PRIu32 " dsp_us=%" PRIu32 "/%" PRIu32 "/%" PRIu32
            " detector_us=%" PRIu32 "/%" PRIu32 "/%" PRIu32 " faults=%" PRIu32 " stale=%u\n",
@@ -291,12 +292,12 @@ static void timing_run(cp_t *cp, cp_yield_t *y, s_bench_t *b, sdr_tune_method_t 
 static void bench_timing(cp_t *cp, cp_yield_t *y, s_bench_t *b)
 {
     unsigned lines = 0;
-    printf("SDRBENCH start rotations=%u+%u: PLL tune, then full channel setup (about 6 s)\n", S_PLL_ROTATIONS,
+    cp_printf("SDRBENCH start rotations=%u+%u: PLL tune, then full channel setup (about 6 s)\n", S_PLL_ROTATIONS,
            S_FULL_ROTATIONS);
     timing_run(cp, y, b, SDR_TUNE_PLL, S_PLL_ROTATIONS, &lines);
     timing_run(cp, y, b, SDR_TUNE_FULL, S_FULL_ROTATIONS, &lines);
     sdr_bench_set_tune_method(SDR_TUNE_PLL);
-    printf("SDRBENCH done\n");
+    cp_printf("SDRBENCH done\n");
 }
 
 /* ---- K z: settle/residue after a hop off a strong LO ---- */
@@ -341,7 +342,7 @@ static void residue_method(cp_yield_t *y, z_bench_t *b, sdr_tune_method_t method
                 for (unsigned j = 0; j < Z_QUARTERS; j++) b->sum[k][d][j] += lv[j];
                 b->n[k][d]++;
             }
-    printf("SDRRESIDUE method=%s strong=R%u lo=%" PRIu32 " level_qdb=%" PRId32 " quiet=R%u lo=%" PRIu32
+    cp_printf("SDRRESIDUE method=%s strong=R%u lo=%" PRIu32 " level_qdb=%" PRId32 " quiet=R%u lo=%" PRIu32
            " control=R%u lo=%" PRIu32 " gain=%u repeats=%u\n",
            name, s + 1u, lo_s / 1000u, s_qdb, q + 1u, lo_q / 1000u, c + 1u, lo_c / 1000u, (unsigned)sdr_rx_gain(),
            Z_REPEATS);
@@ -358,18 +359,18 @@ static void residue_method(cp_yield_t *y, z_bench_t *b, sdr_tune_method_t method
             }
         const bool have_a[Z_QUARTERS] = {b->n[0][d] > 0u, b->n[0][d] > 0u, b->n[0][d] > 0u, b->n[0][d] > 0u};
         const bool have_c[Z_QUARTERS] = {b->n[1][d] > 0u, b->n[1][d] > 0u, b->n[1][d] > 0u, b->n[1][d] > 0u};
-        printf("SDRRESIDUE method=%s d_us=%u after_qdb=%s control_qdb=%s", name, (unsigned)k_z_delay_us[d],
+        cp_printf("SDRRESIDUE method=%s d_us=%u after_qdb=%s control_qdb=%s", name, (unsigned)k_z_delay_us[d],
                fmt_list(a, sizeof a, v[0], have_a, Z_QUARTERS), fmt_list(ctl, sizeof ctl, v[1], have_c, Z_QUARTERS));
         if (b->n[0][d] < Z_REPEATS || b->n[1][d] < Z_REPEATS)
-            printf(" n=%u/%u", (unsigned)b->n[0][d], (unsigned)b->n[1][d]);
-        printf("\n");
+            cp_printf(" n=%u/%u", (unsigned)b->n[0][d], (unsigned)b->n[1][d]);
+        cp_printf("\n");
         pace(y, lines);
     }
     /* The first delay from which every later quarter of `after` stays within 1 dB of `control`. */
     const size_t from = hs_settled_from(b->mean[0], b->mean[1], Z_DELAYS * Z_QUARTERS, Z_TOL_QDB);
     const size_t d = (from + Z_QUARTERS - 1u) / Z_QUARTERS;
-    if (d < Z_DELAYS) printf("SDRRESIDUE method=%s settle_us=%u\n", name, (unsigned)k_z_delay_us[d]);
-    else printf("SDRRESIDUE method=%s settle_us=none (not within 1 dB at %u us)\n", name,
+    if (d < Z_DELAYS) cp_printf("SDRRESIDUE method=%s settle_us=%u\n", name, (unsigned)k_z_delay_us[d]);
+    else cp_printf("SDRRESIDUE method=%s settle_us=none (not within 1 dB at %u us)\n", name,
                 (unsigned)k_z_delay_us[Z_DELAYS - 1u]);
     pace(y, lines);
 }
@@ -378,12 +379,12 @@ static void bench_residue(cp_yield_t *y, z_bench_t *b)
 {
     const sdr_plan_t *p = sdr_bench_plan();
     unsigned lines = 0;
-    printf("SDRRESIDUE start: levels over %u rotations, then %u delays x %u repeats, PLL tune then full "
+    cp_printf("SDRRESIDUE start: levels over %u rotations, then %u delays x %u repeats, PLL tune then full "
            "(about 5 s, VTX on and strong)\n", LV_ROTATIONS, (unsigned)Z_DELAYS, Z_REPEATS);
     int32_t med[SDR_RX_CHANNELS], cand[SDR_RX_CHANNELS];
     bool have[SDR_RX_CHANNELS];
     if (median_levels(y, &b->lv, LV_ROTATIONS, med, have, NULL) < LV_ROTATIONS) {
-        printf("SDRRESIDUE stopped: the engine gave no rotation\nSDRRESIDUE done\n");
+        cp_printf("SDRRESIDUE stopped: the engine gave no rotation\nSDRRESIDUE done\n");
         return;
     }
     /* S: the strongest channel; Q: the quietest on another LO; C: the quietest on a third one. */
@@ -401,16 +402,16 @@ static void bench_residue(cp_yield_t *y, z_bench_t *b)
     }
     const unsigned c = (unsigned)hs_weakest_i32(cand, SDR_RX_CHANNELS);
     if (!have[s] || hs < 0 || !have_q || cand[c] == INT32_MAX) {
-        printf("SDRRESIDUE refused: needs readings on 3 LOs\nSDRRESIDUE done\n");
+        cp_printf("SDRRESIDUE refused: needs readings on 3 LOs\nSDRRESIDUE done\n");
         return;
     }
     if (med[s] - med[q] < 120)
-        printf("SDRRESIDUE weak: R%u is only %.1f dB over R%u, bring the VTX closer (>= 30 dB)\n", s + 1u,
+        cp_printf("SDRRESIDUE weak: R%u is only %.1f dB over R%u, bring the VTX closer (>= 30 dB)\n", s + 1u,
                (double)(med[s] - med[q]) / SDR_QDB_PER_DB, q + 1u);
     residue_method(y, b, SDR_TUNE_PLL, p, s, q, c, med[s], &lines);
     residue_method(y, b, SDR_TUNE_FULL, p, s, q, c, med[s], &lines);
     sdr_bench_set_tune_method(SDR_TUNE_PLL);
-    printf("SDRRESIDUE done\n");
+    cp_printf("SDRRESIDUE done\n");
 }
 
 /* ---- K x: image rejection between the two channels of an LO ---- */
@@ -461,7 +462,7 @@ static const char *irr_text(char *buf, size_t size, const char *name, float s_db
 /* Run 2's VTX is too weak: S stands over_qdb over its stored floor. */
 static void image_weak(unsigned s, int32_t over_qdb)
 {
-    printf("SDRIMAGE weak: bring the VTX closer (need >= 50 dB over the floor) strong=R%u over_db=%.1f\n"
+    cp_printf("SDRIMAGE weak: bring the VTX closer (need >= 50 dB over the floor) strong=R%u over_db=%.1f\n"
            "SDRIMAGE done\n", s + 1u, (double)over_qdb / SDR_QDB_PER_DB);
 }
 
@@ -473,7 +474,7 @@ static void bench_image(cp_t *cp, cp_yield_t *y, x_bench_t *b)
     bool have[SDR_RX_CHANNELS];
     char buf[96];
     if (median_levels(y, &b->lv, LV_ROTATIONS, med, have, NULL) < LV_ROTATIONS) {
-        printf("SDRIMAGE stopped: the engine gave no rotation\nSDRIMAGE done\n");
+        cp_printf("SDRIMAGE stopped: the engine gave no rotation\nSDRIMAGE done\n");
         return;
     }
     const bool stored = cp->image_floor_gain && cp->image_floor_gain == gain;
@@ -485,7 +486,7 @@ static void bench_image(cp_t *cp, cp_yield_t *y, x_bench_t *b)
         return;
     }
     if (v.run == HS_X_REFUSED) {                   /* a VTX is on: keep what was stored */
-        printf("SDRIMAGE refused: R%d is %.1f dB over the channels' median (a floor allows %d dB), a VTX is on, "
+        cp_printf("SDRIMAGE refused: R%d is %.1f dB over the channels' median (a floor allows %d dB), a VTX is on, "
                "nothing stored: switch every VTX off, then K x\nSDRIMAGE done\n", v.top + 1,
                (double)v.excess / SDR_QDB_PER_DB, HS_X_FLOOR_SPREAD_QDB / SDR_QDB_PER_DB);
         return;
@@ -493,9 +494,9 @@ static void bench_image(cp_t *cp, cp_yield_t *y, x_bench_t *b)
     if (v.run == HS_X_FLOOR) {                     /* run 1: VTX off, the floor of every channel */
         for (unsigned ch = 0; ch < SDR_RX_CHANNELS; ch++) cp->image_floor_qdb[ch] = (int16_t)med[ch];
         cp->image_floor_gain = gain;
-        printf("SDRIMAGE floor stored gain=%u floor_qdb=%s\n", (unsigned)gain,
+        cp_printf("SDRIMAGE floor stored gain=%u floor_qdb=%s\n", (unsigned)gain,
                fmt_list(buf, sizeof buf, med, have, SDR_RX_CHANNELS));
-        printf("SDRIMAGE next: VTX on one channel at -10..-5 dBFS, then K x\nSDRIMAGE done\n");
+        cp_printf("SDRIMAGE next: VTX on one channel at -10..-5 dBFS, then K x\nSDRIMAGE done\n");
         return;
     }
     /* Run 2: S is the channel highest over its floor, P shares its LO. */
@@ -507,7 +508,7 @@ static void bench_image(cp_t *cp, cp_yield_t *y, x_bench_t *b)
     unsigned js = 0;
     const int hs = hop_of(p, s, &js);
     if (hs < 0 || p->hop[hs].nch != 2u) {
-        printf("SDRIMAGE refused: R%u shares its LO with no other channel\nSDRIMAGE done\n", s + 1u);
+        cp_printf("SDRIMAGE refused: R%u shares its LO with no other channel\nSDRIMAGE done\n", s + 1u);
         return;
     }
     const sdr_plan_hop_t *hop = &p->hop[hs];
@@ -515,7 +516,7 @@ static void bench_image(cp_t *cp, cp_yield_t *y, x_bench_t *b)
     const uint32_t lo = hop->lo_khz;
     const int32_t floor_p = cp->image_floor_qdb[pc];
     if (floor_p == SDR_LEVEL_NONE) {
-        printf("SDRIMAGE refused: no floor stored for R%u (VTX off, then K x)\nSDRIMAGE done\n", pc + 1u);
+        cp_printf("SDRIMAGE refused: no floor stored for R%u (VTX off, then K x)\nSDRIMAGE done\n", pc + 1u);
         return;
     }
     unsigned sat = 0, n_on, n_off, n_single;
@@ -524,7 +525,7 @@ static void bench_image(cp_t *cp, cp_yield_t *y, x_bench_t *b)
     if (!sat) n_off = image_captures(y, lo, -1, 0, NULL, hop->offset_hz[jp], b->p_off, &m, true, &sat);
     else n_off = 0;
     if (sat) {
-        printf("SDRIMAGE clipped: move the VTX away\nSDRIMAGE done\n");
+        cp_printf("SDRIMAGE clipped: move the VTX away\nSDRIMAGE done\n");
         return;
     }
     /* Diagnostic: P on its own LO, the SINGLE placement (no partner image on it). */
@@ -536,7 +537,7 @@ static void bench_image(cp_t *cp, cp_yield_t *y, x_bench_t *b)
     n_single = image_captures(y, (uint32_t)lo_single, -1, 0, NULL, (int32_t)((p_khz - lo_single) * 1000), b->p_single,
                               NULL, false, &sat_single);
     if (!n_on || !n_off) {
-        printf("SDRIMAGE stopped: no capture at LO %" PRIu32 "\nSDRIMAGE done\n", lo / 1000u);
+        cp_printf("SDRIMAGE stopped: no capture at LO %" PRIu32 "\nSDRIMAGE done\n", lo / 1000u);
         return;
     }
     const int32_t s_on = hs_spread_i32(b->s_on, n_on).median, p_on = hs_spread_i32(b->p_on, n_on).median,
@@ -546,15 +547,15 @@ static void bench_image(cp_t *cp, cp_yield_t *y, x_bench_t *b)
     char on[48], off[48], single[24];
     if (n_single) snprintf(single, sizeof single, "%" PRId32, p_single);
     else snprintf(single, sizeof single, "none");
-    printf("SDRIMAGE strong=R%u partner=R%u lo=%" PRIu32 " gain=%u strong_qdb=%" PRId32 " partner_on_qdb=%" PRId32
+    cp_printf("SDRIMAGE strong=R%u partner=R%u lo=%" PRIu32 " gain=%u strong_qdb=%" PRId32 " partner_on_qdb=%" PRId32
            " partner_off_qdb=%" PRId32 " floor_qdb=%" PRId32 " partner_single_qdb=%s %s %s moments_irr_db=%.1f"
            " ema_irr_db=%.1f",
            s + 1u, pc + 1u, lo / 1000u, (unsigned)gain, s_on, p_on, p_off, floor_p, single,
            irr_text(on, sizeof on, "irr_on_db", s_db, (float)p_on / SDR_QDB_PER_DB, f_db),
            irr_text(off, sizeof off, "irr_off_db", s_db, (float)p_off / SDR_QDB_PER_DB, f_db),
            (double)sdr_bench_moments_irr_db(&m), (double)sdr_bench_irr_db(hs));
-    if (sat_single) printf(" single_clipped=%u", sat_single);
-    printf("\nSDRIMAGE done\n");
+    if (sat_single) cp_printf(" single_clipped=%u", sat_single);
+    cp_printf("\nSDRIMAGE done\n");
 }
 
 /* ---- K n: noise against the sample count, and the borrowed-calibration DC control ---- */
@@ -566,7 +567,7 @@ static void bench_noise(cp_yield_t *y, n_bench_t *b)
     unsigned lines = 0;
     uint32_t dc_cal = 0;
     char a[96], c[96];
-    printf("SDRNOISE start: %u captures per LO of %u/%u/%u words, then a borrowed calibration (about 12 s, VTX off)\n",
+    cp_printf("SDRNOISE start: %u captures per LO of %u/%u/%u words, then a borrowed calibration (about 12 s, VTX off)\n",
            N_CAPTURES, k_n_words[0], k_n_words[1], k_n_words[2]);
     for (unsigned z = 0; z < N_SIZES; z++) {
         const unsigned words = k_n_words[z];
@@ -612,21 +613,21 @@ static void bench_noise(cp_yield_t *y, n_bench_t *b)
             if (w < 0) break;
             len += (size_t)w;
         }
-        printf("SDRNOISE n=%u segments=%u dsp_us=%" PRIu32 " sd_db=%s mean_qdb=%s", words, words / NFFT,
+        cp_printf("SDRNOISE n=%u segments=%u dsp_us=%" PRIu32 " sd_db=%s mean_qdb=%s", words, words / NFFT,
                hs_spread(b->dsp_us, nd).med, c, fmt_list(a, sizeof a, mean, have, SDR_RX_CHANNELS));
-        if (errors || sat) printf(" errors=%u clipped=%u", errors, sat);
-        printf("\n");
+        if (errors || sat) cp_printf(" errors=%u clipped=%u", errors, sat);
+        cp_printf("\n");
         pace(y, &lines);
     }
     /* ONCE emulation: the last LO with the first LO's DC/IQ tables (a band edge with the other
      * edge's calibration), as widscan58's RECALMODE ONCE: the DC that CAL_NEEDED must catch. */
     const sdr_plan_hop_t *edge = &p->hop[p->nhops - 1u];
     const uint32_t lo = edge->lo_khz, from = p->hop[0].lo_khz;
-    printf("SDRNOISE dc gain=%u calibrated_dc_max=%" PRIu32 " threshold=%u borrowed lo=%" PRIu32 " cal_from=%" PRIu32,
+    cp_printf("SDRNOISE dc gain=%u calibrated_dc_max=%" PRIu32 " threshold=%u borrowed lo=%" PRIu32 " cal_from=%" PRIu32,
            (unsigned)gain, dc_cal, (unsigned)CONFIG_SDR_RX_DC_CAL_NEEDED, lo / 1000u, from / 1000u);
     const esp_err_t err = p->nhops > 1u ? sdr_bench_borrow_cal(lo, from) : ESP_ERR_INVALID_STATE;
     if (err != ESP_OK) {
-        printf(" refused=%s\n", esp_err_to_name(err));
+        cp_printf(" refused=%s\n", esp_err_to_name(err));
     } else {
         float dc_i = 0.0f, dc_q = 0.0f;
         uint16_t n[SDR_RX_PER_HOP] = {0};
@@ -653,12 +654,12 @@ static void bench_noise(cp_yield_t *y, n_bench_t *b)
             hs_mean_sd_qdb(b->lv[j], n[j], &mean[j], &sd_mdb);
             have[j] = n[j] > 0u;
         }
-        printf(" dc_i=%ld dc_q=%ld mean_qdb=%s%s\n", lroundf(dc_i), lroundf(dc_q),
+        cp_printf(" dc_i=%ld dc_q=%ld mean_qdb=%s%s\n", lroundf(dc_i), lroundf(dc_q),
                fmt_list(a, sizeof a, mean, have, edge->nch < SDR_RX_PER_HOP ? edge->nch : SDR_RX_PER_HOP),
                stale ? " stale=1" : "");
     }
     sdr_bench_borrow_end();
-    printf("SDRNOISE done\n");
+    cp_printf("SDRNOISE done\n");
 }
 
 /* ---- K p: the SINGLE plan against PAIRS ---- */
@@ -666,15 +667,15 @@ static void bench_noise(cp_yield_t *y, n_bench_t *b)
 static void print_plan(cp_yield_t *y, const char *mode, unsigned *lines)
 {
     const sdr_plan_t *p = sdr_bench_plan();
-    printf("SDRPLAN mode=%s hops=%u\n", mode, p->nhops);
+    cp_printf("SDRPLAN mode=%s hops=%u\n", mode, p->nhops);
     pace(y, lines);
     for (unsigned h = 0; h < p->nhops; h++) {
         const sdr_plan_hop_t *hop = &p->hop[h];
-        printf("SDRPLAN hop=%u lo=%" PRIu32, h, hop->lo_khz / 1000u);
+        cp_printf("SDRPLAN hop=%u lo=%" PRIu32, h, hop->lo_khz / 1000u);
         for (unsigned j = 0; j < hop->nch; j++)
-            printf(" R%u=%+.1fMHz/bins%d..%d", hop->ch[j] + 1u, (double)hop->offset_hz[j] / 1e6, hop->band[j].r0,
+            cp_printf(" R%u=%+.1fMHz/bins%d..%d", hop->ch[j] + 1u, (double)hop->offset_hz[j] / 1e6, hop->band[j].r0,
                    hop->band[j].r1);
-        printf("\n");
+        cp_printf("\n");
         pace(y, lines);
     }
 }
@@ -686,17 +687,17 @@ static void bench_plan(cp_yield_t *y, lv_buf_t *b)
     bool have_p[SDR_RX_CHANNELS], have_s[SDR_RX_CHANNELS];
     uint32_t rot_p = 0, rot_s = 0;
     char a[96], c[96];
-    printf("SDRPLAN start: %u rotations in PAIRS, then %u in SINGLE (its new LOs calibrate first), not saved\n",
+    cp_printf("SDRPLAN start: %u rotations in PAIRS, then %u in SINGLE (its new LOs calibrate first), not saved\n",
            LV_ROTATIONS, P_SINGLE_ROTATIONS);
     print_plan(y, "pairs", &lines);
     const unsigned np = median_levels(y, b, LV_ROTATIONS, pairs, have_p, &rot_p);
     sdr_bench_set_plan(SDR_PLAN_SINGLE);
     print_plan(y, "single", &lines);
     const unsigned ns = median_levels(y, b, P_SINGLE_ROTATIONS, single, have_s, &rot_s);
-    printf("SDRPLAN compare gain=%u pairs_qdb=%s single_qdb=%s pairs_hz_x10=%" PRIu32 " single_hz_x10=%" PRIu32
+    cp_printf("SDRPLAN compare gain=%u pairs_qdb=%s single_qdb=%s pairs_hz_x10=%" PRIu32 " single_hz_x10=%" PRIu32
            " rotations=%u/%u\n", (unsigned)sdr_rx_gain(), fmt_list(a, sizeof a, pairs, have_p, SDR_RX_CHANNELS),
            fmt_list(c, sizeof c, single, have_s, SDR_RX_CHANNELS), hz_x10(rot_p), hz_x10(rot_s), np, ns);
-    printf("SDRPLAN done (PAIRS again)\n");
+    cp_printf("SDRPLAN done (PAIRS again)\n");
 }
 
 /* ---- K S: scan recording ---- */
@@ -735,7 +736,7 @@ static void bench_record(cp_t *cp, cp_yield_t *y, scan_row_t *ring, size_t cap)
     const uint8_t gain = sdr_rx_gain();
     char order[4u * SDR_RX_CHANNELS];
     plan_order(order, sizeof order);
-    printf("SCANBENCH start decim=%u row_ms=%.1f rows=%u keep_s=%.0f max_s=%u order=%s gain=%u: "
+    cp_printf("SCANBENCH start decim=%u row_ms=%.1f rows=%u keep_s=%.0f max_s=%u order=%s gain=%u: "
            "K then S stops; no detection meanwhile\n", decim, (double)decim * 1e4 / rate, (unsigned)cap,
            (double)cap * decim * 10.0 / rate, R_MAX_S, order, (unsigned)gain);
     rotation_t r;
@@ -795,7 +796,7 @@ static void bench_record(cp_t *cp, cp_yield_t *y, scan_row_t *ring, size_t cap)
                 have[ch] = peak[ch] != SDR_LEVEL_NONE;
                 peak[ch] = SDR_LEVEL_NONE;
             }
-            printf("SCANBENCH live t_s=%lld rotations=%" PRIu32 " per_channel_hz_x10=%" PRIu32 " faults=%" PRIu32
+            cp_printf("SCANBENCH live t_s=%lld rotations=%" PRIu32 " per_channel_hz_x10=%" PRIu32 " faults=%" PRIu32
                    " peak_qdb=%s kept_s=%.1f\n", (long long)((end - t0) / 1000000), rotations,
                    (uint32_t)(((uint64_t)(rotations - live_rot) * 10000000u) / (uint64_t)(end - live_t)),
                    sdr_rx_fault_count() - faults0, fmt_list(a, sizeof a, pk, have, SDR_RX_CHANNELS),
@@ -810,7 +811,7 @@ static void bench_record(cp_t *cp, cp_yield_t *y, scan_row_t *ring, size_t cap)
     vTaskDelay(pdMS_TO_TICKS(R_DUMP_PAUSE_MS));
     const size_t kept = hs_ring_kept(rows, cap), oldest = hs_ring_oldest(rows, cap);
     unsigned lines = 0;
-    printf("SCANDUMP begin rotations=%" PRIu32 " kept=%u kept_s=%.1f decim=%u format=qdb order=%s gain=%u rot_us=%" PRIu32
+    cp_printf("SCANDUMP begin rotations=%" PRIu32 " kept=%u kept_s=%.1f decim=%u format=qdb order=%s gain=%u rot_us=%" PRIu32
            " fw=%s\n", rotations, (unsigned)kept, (double)kept_s(ring, cap, rows, decim, rot_med), decim, order,
            (unsigned)gain, rot_med, firmware_id());
     for (size_t i = 0; i < kept; i++) {
@@ -819,9 +820,9 @@ static void bench_record(cp_t *cp, cp_yield_t *y, scan_row_t *ring, size_t cap)
                e->qdb[4], e->qdb[5], e->qdb[6], e->qdb[7], (unsigned)e->sat);
         pace(y, &lines);
     }
-    printf("SCANDUMP end rotations=%" PRIu32 " decim=%u format=qdb order=%s gain=%u\n", rotations, decim, order,
+    cp_printf("SCANDUMP end rotations=%" PRIu32 " decim=%u format=qdb order=%s gain=%u\n", rotations, decim, order,
            (unsigned)gain);   /* the begin line can get lost */
-    printf("SCANBENCH done stop=%s rotations=%" PRIu32 " rows=%" PRIu32 " faults=%" PRIu32 "\n", stop, rotations, rows,
+    cp_printf("SCANBENCH done stop=%s rotations=%" PRIu32 " rows=%" PRIu32 " faults=%" PRIu32 "\n", stop, rotations, rows,
            sdr_rx_fault_count() - faults0);
 }
 
@@ -831,7 +832,7 @@ void cp_bench_run(cp_t *cp, char key, cp_yield_t *y)
     void *scratch = sdr_bench_scratch(&bytes);
     const sdr_plan_t *p = sdr_bench_plan();
     if (!scratch || bytes < SCRATCH_BYTES || !p || !p->nhops) {
-        printf("CHECKPOINT bench=%c refused=no_engine\n", key);
+        cp_printf("CHECKPOINT bench=%c refused=no_engine\n", key);
         return;
     }
     switch (key) {
@@ -841,6 +842,6 @@ void cp_bench_run(cp_t *cp, char key, cp_yield_t *y)
     case 'n': bench_noise(y, scratch); break;
     case 'p': bench_plan(y, scratch); break;
     case 'S': bench_record(cp, y, scratch, bytes / sizeof(scan_row_t)); break;
-    default: printf("CHECKPOINT bench=%c refused=unknown\n", key); break;
+    default: cp_printf("CHECKPOINT bench=%c refused=unknown\n", key); break;
     }
 }

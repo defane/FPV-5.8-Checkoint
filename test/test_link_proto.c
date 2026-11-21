@@ -280,6 +280,47 @@ int main(void) {
         CHECK(g == 0, "unknown type dropped");
     }
 
+    /* LOG and KEY carry raw bytes, 1..LP_TEXT_MAX / 1..LP_KEY_MAX of them. */
+    {
+        const char text[] = "PASS channel=R3 \"x\"\n\r\x01";
+        size_t n = lp_encode_log(buf, sizeof buf, text, sizeof text - 1);
+        int g = run(buf, n, got, 4);
+        CHECK(g == 1 && got[0].type == LP_MSG_LOG && got[0].data.len == sizeof text - 1 &&
+              memcmp(got[0].data.text, text, sizeof text - 1) == 0, "log chunk roundtrip");
+        char full[LP_TEXT_MAX];
+        memset(full, 'a', sizeof full);
+        n = lp_encode_log(buf, sizeof buf, full, sizeof full);
+        g = run(buf, n, got, 4);
+        CHECK(g == 1 && got[0].data.len == LP_TEXT_MAX, "a full log chunk fits one frame");
+        CHECK(lp_encode_log(buf, sizeof buf, full, sizeof full + 1) == 0, "log chunk over the maximum refused");
+        CHECK(lp_encode_log(buf, sizeof buf, full, 0) == 0, "empty log chunk refused");
+
+        n = lp_encode_key(buf, sizeof buf, "Ka", 2);
+        g = run(buf, n, got, 4);
+        CHECK(g == 1 && got[0].type == LP_MSG_KEY && got[0].data.len == 2 && got[0].data.text[0] == 'K' &&
+              got[0].data.text[1] == 'a', "key roundtrip");
+        CHECK(lp_encode_key(buf, sizeof buf, full, LP_KEY_MAX + 1) == 0, "key string over the maximum refused");
+        CHECK(lp_encode_key(buf, sizeof buf, "", 0) == 0, "empty key string refused");
+        /* A key frame with no payload is CRC-valid but unusable. */
+        uint8_t f[6] = { LP_SOF, LP_VERSION, LP_MSG_KEY, 0 };
+        uint16_t crc = lp_crc16(&f[1], 3);
+        f[4] = (uint8_t)crc; f[5] = (uint8_t)(crc >> 8);
+        CHECK(run(f, sizeof f, got, 4) == 0, "empty key frame dropped");
+    }
+
+    {
+        size_t n = lp_encode_debug(buf, sizeof buf, true);
+        int g = run(buf, n, got, 4);
+        CHECK(g == 1 && got[0].type == LP_MSG_DEBUG && got[0].debug == 1, "debug on roundtrip");
+        n = lp_encode_debug(buf, sizeof buf, false);
+        g = run(buf, n, got, 4);
+        CHECK(g == 1 && got[0].debug == 0, "debug off roundtrip");
+        uint8_t f[7] = { LP_SOF, LP_VERSION, LP_MSG_DEBUG, 1, 7 };
+        uint16_t crc = lp_crc16(&f[1], 4);
+        f[5] = (uint8_t)crc; f[6] = (uint8_t)(crc >> 8);
+        CHECK(run(f, sizeof f, got, 4) == 0, "debug value out of range dropped");
+    }
+
     printf("%d/%d link_proto checks passed\n", g_pass, g_pass + g_fail);
     return g_fail ? 1 : 0;
 }

@@ -352,9 +352,13 @@ class Master:
 class Node:
     """firmware/node/main/c3_web.c, the degraded local web."""
     TAG = "c3"
-    ADMIN = {"/api/config": ("set_config", 512), "/api/command": ("command", 96)}
+    ADMIN = {"/api/config": ("set_config", 512), "/api/command": ("command", 96),
+             "/api/log": ("log", 64), "/api/key": ("key", 96), "/api/debug": ("debug", 32)}
+    LOG_RING, LOG_CHUNK = 4096, 700       # c3_link.c LOG_RING, c3_link.h C3_LOG_CHUNK
+    BLIND = "szxnpSgGi"                   # keys_blind() in c3_web.c: after K
 
     def __init__(self, vtx=False):
+        self.text, self.log_total, self.debug = "", 0, False   # the C5's console text as the C3 keeps it; debug is off at boot
         self.gate = Gate(0, 0, 7.0, vtx, cal_needed=True)
         self.events, self.total = [], 0
         self.config = {"alpha_milli": 300, "active_db_x10": 150, "hysteresis_db_x10": 30, "drop_db_x10": 30,
@@ -365,6 +369,7 @@ class Node:
         g = self.gate
         for at, peak in g.advance(t):
             self.total += 1
+            self.say(f"PASS channel=R{g.channel + 1} peak_db={peak / 10:.1f} at_ms={int(at * 1000)}\n")
             self.events = [{"channel": g.channel, "peak_db_x10": peak,
                             "at_ms": int(at * 1000)}] + self.events[:PASSES_KEPT["node"] - 1]
         h = g.health(t)
@@ -378,6 +383,75 @@ class Node:
 
     def set_config(self, b, t):
         self.config.update({k: v for k, v in b.items() if k in self.config})
+        return {"ok": True}
+
+    def say(self, text):
+        """The C5 prints: the C3 stores it sanitized (log_store)."""
+        text = "".join(c if c == "\n" else "" if c == "\r" else "'" if c == '"' else "/" if c == "\\"
+                       else c if " " <= c <= "~" else "?" for c in text)
+        if not self.debug:
+            return
+        self.text = (self.text + text)[-self.LOG_RING:]
+        self.log_total += len(text)
+
+    def set_debug(self, b, t):
+        """post_debug() in c3_web.c."""
+        on = b.get("on", -1)
+        if on >= 0:
+            if on and not self.debug:
+                self.text, self.log_total = "", 0
+            self.debug = bool(on)
+        return {"ok": True, "debug": int(self.debug)}
+
+    def log(self, b, t):
+        """post_log() in c3_web.c: the text after b["since"], 700 bytes at most."""
+        g, since = self.gate, b.get("since", 0)
+        oldest = max(0, self.log_total - self.LOG_RING)
+        lost = False
+        if since > self.log_total:
+            since = oldest
+        elif since < oldest:
+            since, lost = oldest, True
+        chunk = self.text[since - oldest:][:self.LOG_CHUNK]
+        return {"debug": int(self.debug), "next": since + len(chunk), "lost": int(lost), "c5_alive": int(g.up(t)), "text": chunk}
+
+    @classmethod
+    def blinds(cls, keys):
+        """keys_blind() in c3_web.c."""
+        in_k = False
+        for k in keys:
+            if in_k:
+                if k == "q":
+                    in_k = False
+                elif k in cls.BLIND:
+                    return True
+            elif k == "K":
+                in_k = True
+            elif k in "FB":
+                return True
+        return False
+
+    def key(self, b, t):
+        """post_key() in c3_web.c: None for its 400. The C5 answers on the console."""
+        keys, g = b.get("keys", ""), self.gate
+        if not keys or len(keys) > 16 or any(not " " <= c <= "~" or c == "`" for c in keys):
+            return None
+        if not self.debug:
+            return {"ok": False, "msg": "debug mode is off"}
+        if not g.up(t):
+            return {"ok": False, "msg": "no C5 linked"}
+        if self.blinds(keys) and not b.get("force"):
+            cn = g.cn_x10(t)
+            if cn > self.config["active_db_x10"]:
+                return {"ok": False, "vtx": True, "cn_x10": cn}
+            return {"ok": False, "blind": True}
+        self.say(f"> {keys}\n")
+        if keys[0] == "K":
+            self.say("CHECKPOINT K + key (lower = down, upper = up; K stays open 5 s after each key, q closes):\n")
+        elif keys == "T":
+            self.say(f"STATUS uptime_s={int(t)} heap_internal=118000 fw={g.health(t)['fw']}\n")
+        elif keys in ("F", "B"):
+            g.run("cal_quick" if keys == "F" else "cal_full", t)
         return {"ok": True}
 
     def command(self, b, t):

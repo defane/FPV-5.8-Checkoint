@@ -15,6 +15,7 @@
 #define LINK_RX_BUF   256u
 #define LINK_READ_MS  100u
 #define OUTQ_DEPTH    4u
+#define LOG_RING      4096u
 #define C5_SILENT_MS  3000u   /* 3 STATS periods without a frame: the C5 is absent */
 #define CONFIG_POLL_MS 1000u  /* CONFIG_REQ period: a console K edit on the C5 echoes nothing */
 
@@ -33,6 +34,64 @@ static lp_config_t s_master_cfg;
 static bool s_has_master_cfg;
 
 typedef struct { uint8_t buf[LP_MAX_FRAME]; uint8_t len; } frame_t;
+
+static void enqueue(const uint8_t *b, size_t n);
+
+static char s_log[LOG_RING];
+static uint32_t s_log_total;   /* bytes ever stored: position of the next one */
+static portMUX_TYPE s_log_mux = portMUX_INITIALIZER_UNLOCKED;
+
+static volatile bool s_debug;
+
+void c3_link_debug_set(bool on) {
+    uint8_t b[LP_MAX_FRAME];
+    portENTER_CRITICAL(&s_log_mux);
+    if (on && !s_debug) s_log_total = 0;   /* a fresh log: the page restarts from 0 */
+    s_debug = on;
+    portEXIT_CRITICAL(&s_log_mux);
+    enqueue(b, lp_encode_debug(b, sizeof b, on));
+}
+
+bool c3_link_debug(void) { return s_debug; }
+
+static void log_store(const lp_text_t *t) {
+    if (!s_debug) return;
+    char c[LP_TEXT_MAX];
+    size_t n = 0;
+    for (uint8_t i = 0; i < t->len; i++) {
+        char ch = t->text[i];
+        if (ch == '\r') continue;
+        if (ch == '"') ch = '\'';
+        else if (ch == '\\') ch = '/';
+        else if (ch != '\n' && (ch < ' ' || ch > '~')) ch = '?';
+        c[n++] = ch;
+    }
+    portENTER_CRITICAL(&s_log_mux);
+    for (size_t i = 0; i < n; i++) s_log[(s_log_total + i) % LOG_RING] = c[i];
+    s_log_total += (uint32_t)n;
+    portEXIT_CRITICAL(&s_log_mux);
+}
+
+size_t c3_link_log_read(uint32_t since, char *out, size_t max, uint32_t *next, bool *lost) {
+    size_t n = 0;
+    portENTER_CRITICAL(&s_log_mux);
+    const uint32_t total = s_log_total;
+    const uint32_t oldest = total > LOG_RING ? total - LOG_RING : 0;
+    *lost = false;
+    if (since > total) since = oldest;                 /* the C3 rebooted since the page last asked */
+    else if (since < oldest) { since = oldest; *lost = true; }
+    n = total - since < max ? total - since : max;
+    for (size_t i = 0; i < n; i++) out[i] = s_log[(since + i) % LOG_RING];
+    *next = since + (uint32_t)n;
+    portEXIT_CRITICAL(&s_log_mux);
+    return n;
+}
+
+void c3_link_send_keys(const char *keys, size_t n) {
+    if (!s_debug) return;
+    uint8_t b[LP_MAX_FRAME];
+    enqueue(b, lp_encode_key(b, sizeof b, keys, n));
+}
 
 static uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
 
@@ -78,8 +137,14 @@ void c3_link_send_command(lp_cmd_t cmd) {
 static void handle_msg(const lp_msg_t *m) {
     uint8_t b[LP_MAX_FRAME];
     switch (m->type) {
+    case LP_MSG_LOG:        log_store(&m->data); break;
     case LP_MSG_EVENT_PASS: if (s_on_pass) s_on_pass(&m->event); break;
-    case LP_MSG_STATS:      if (s_on_stats) s_on_stats(&m->stats); break;
+    case LP_MSG_STATS:
+        if (s_on_stats) s_on_stats(&m->stats);
+        /* The outgoing queue may have dropped our DEBUG frame, or the C5 rebooted since: say it
+         * again with every STATS while debug is on (the C5 ignores a repeat). */
+        if (s_debug) enqueue(b, lp_encode_debug(b, sizeof b, true));
+        break;
     /* The C5's real config (answer to CONFIG_REQ / our HELLO, echo of a
      * CONFIG_SET): the degraded web's form and VTX guard follow it. RAM only
      * (the C5 keeps its own prefs) and never pushed back to the C5. */

@@ -156,11 +156,11 @@ no WS2812 either. Full scheme (colours per state and role): **`docs/status-led.m
 Race timing across ordered gates (each gate = a C5). The **C6** (`firmware/master`,
 esp32c6) is UART-wired to its own C5 (gate 0) and aggregates remote gates over
 **ESP-NOW**; a remote gate is a C5 UART-wired to a **C3** (`firmware/node`).
-Protocols (both v4; reflash every board together after a change):
+Protocols (`link_proto` v5, `fleet_proto` v4; reflash every board together after a change):
 `components/link_proto` (C5↔bridge UART: config, passes, `STATS` with the 8 levels, the 8
 detector states (2 bits each, `lp_state_of()`) and the C5's health (CAL_NEEDED = an LO's
 DC or IQ out of range or its captures failing, no engine or a stalled scan; faults =
-capture faults), `LP_MSG_COMMAND` calibrate/reboot),
+capture faults), `LP_MSG_COMMAND` calibrate/reboot, `LOG`/`KEY`/`DEBUG` for the C3 debug page),
 `components/fleet_proto` over `components/espnow_link` (pairing, beacons, `CONFIG`
 carrying the detector settings with D, `GATE_PASS`, `NODE_STATUS` relaying the states, the
 health and the C5's echoed D, `FP_MSG_COMMAND`),

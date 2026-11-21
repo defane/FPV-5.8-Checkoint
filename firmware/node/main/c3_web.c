@@ -220,6 +220,105 @@ static esp_err_t post_command(httpd_req_t *req)
     return httpd_resp_sendstr(req, "{\"ok\":true}");
 }
 
+/* Debug mode (admin): the C5's console text and typed keys. POST {"since":N} answers
+ * {"next":M,"lost":0|1,"text":"..."}: the bytes after position N (c3_link_log_read; the text
+ * holds no quote, backslash or control other than the newline, which is escaped here). The page
+ * asks again from "next". */
+static esp_err_t post_log(httpd_req_t *req)
+{
+    char buf[64];
+    if (!web_auth_request(req, buf, sizeof buf)) return ESP_OK;
+    char raw[C3_LOG_CHUNK];
+    uint32_t next;
+    bool lost;
+    const size_t n = c3_link_log_read((uint32_t)json_i(buf, "since", 0), raw, sizeof raw, &next, &lost);
+
+    char body[2 * C3_LOG_CHUNK + 96];
+    int o = snprintf(body, sizeof body, "{\"debug\":%u,\"next\":%lu,\"lost\":%u,\"c5_alive\":%u,\"text\":\"",
+                     c3_link_debug() ? 1u : 0u, (unsigned long)next, lost ? 1u : 0u, c3_link_c5_alive() ? 1u : 0u);
+    for (size_t i = 0; i < n; i++) {
+        if (raw[i] == '\n') { body[o++] = '\\'; body[o++] = 'n'; }
+        else body[o++] = raw[i];
+    }
+    o += snprintf(body + o, sizeof body - o, "\"}");
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_send(req, body, o);
+}
+
+/* Debug mode on or off ({"on":0|1}; no "on" only asks). Off at every boot: nothing is mirrored
+ * from the C5, and /api/key sends nothing, until an admin switches it on. */
+static esp_err_t post_debug(httpd_req_t *req)
+{
+    char buf[32];
+    if (!web_auth_request(req, buf, sizeof buf)) return ESP_OK;
+    const int32_t on = json_i(buf, "on", -1);
+    if (on >= 0) {
+        c3_link_debug_set(on != 0);
+        ESP_LOGW(TAG, "debug mode %s from web", on ? "ON" : "off");
+    }
+    char r[32];
+    snprintf(r, sizeof r, "{\"ok\":true,\"debug\":%u}", c3_link_debug() ? 1u : 0u);
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, r);
+}
+
+/* Would these keystrokes, typed on the C5's console, blind the gate (no detection for a few
+ * seconds or the length of a bench)? F and B recalibrate; after K, the benches (s z x n p S),
+ * the gain (g G) and the antenna (i) do. K stays open until q (the C5's own window is 5 s per
+ * key, and the keys of one request arrive together). */
+static bool keys_blind(const char *keys)
+{
+    bool in_k = false;
+    for (const char *k = keys; *k; k++) {
+        if (in_k) {
+            if (*k == 'q') in_k = false;
+            else if (strchr("szxnpSgGi", *k)) return true;
+        } else if (*k == 'K') in_k = true;
+        else if (*k == 'F' || *k == 'B') return true;
+    }
+    return false;
+}
+
+/* {"keys":"Ka","force":0|1}: typed on the C5's console as on its USB ("K" opens the settings
+ * menu, "T" is the status, "F"/"B" calibrate). The keys that blind the gate follow
+ * post_command's rule: refused with {"blind":true}, or {"vtx":true} while a carrier is seen,
+ * until the page asks the admin and retries with force. The C5's answer comes back through
+ * /api/log. */
+static esp_err_t post_key(httpd_req_t *req)
+{
+    char buf[96], keys[17];
+    if (!web_auth_request(req, buf, sizeof buf)) return ESP_OK;
+    if (!json_s(buf, "keys", keys, sizeof keys) || !keys[0]) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "no keys");
+        return ESP_FAIL;
+    }
+    for (const char *k = keys; *k; k++)
+        if (*k < ' ' || *k > '~' || *k == '`') {      /* ` is the C5's download key */
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad key");
+            return ESP_FAIL;
+        }
+    const bool force = json_i(buf, "force", 0) != 0;
+
+    httpd_resp_set_type(req, "application/json");
+    if (!c3_link_debug())
+        return httpd_resp_sendstr(req, "{\"ok\":false,\"msg\":\"debug mode is off\"}");
+    if (!c3_link_c5_alive())
+        return httpd_resp_sendstr(req, "{\"ok\":false,\"msg\":\"no C5 linked\"}");
+    if (keys_blind(keys) && !force) {
+        c3_snapshot_t s;
+        c3_store_snapshot(&s);
+        char r[72];
+        if (s.has_stats && s.stats.cn_x10 != LP_CN_UNKNOWN && s.stats.cn_x10 > s.config.active_db_x10)
+            snprintf(r, sizeof r, "{\"ok\":false,\"vtx\":true,\"cn_x10\":%ld}", (long)s.stats.cn_x10);
+        else
+            snprintf(r, sizeof r, "{\"ok\":false,\"blind\":true}");
+        return httpd_resp_sendstr(req, r);
+    }
+    c3_link_send_keys(keys, strlen(keys));
+    ESP_LOGW(TAG, "keys \"%s\" from web%s", keys, force ? " (forced)" : "");
+    return httpd_resp_sendstr(req, "{\"ok\":true}");
+}
+
 void c3_web_start(void)
 {
     web_auth_init(s_admin_key, ADMIN_SALT, ADMIN_ITERATIONS, ADMIN_AUTH_OPEN);
@@ -240,6 +339,12 @@ void c3_web_start(void)
     httpd_register_uri_handler(srv, &authu);
     httpd_register_uri_handler(srv, &conf);
     httpd_register_uri_handler(srv, &cmd);
+    const httpd_uri_t logu = { .uri = "/api/log", .method = HTTP_POST, .handler = post_log };
+    const httpd_uri_t keyu = { .uri = "/api/key", .method = HTTP_POST, .handler = post_key };
+    httpd_register_uri_handler(srv, &logu);
+    httpd_register_uri_handler(srv, &keyu);
+    const httpd_uri_t dbgu = { .uri = "/api/debug", .method = HTTP_POST, .handler = post_debug };
+    httpd_register_uri_handler(srv, &dbgu);
     web_auth_register(srv);   /* POST /api/session, GET /auth.js */
     ESP_LOGI(TAG, "web UI on http://192.168.4.1/");
 }

@@ -20,10 +20,10 @@ flash FW=master-wave-c5` (or `idf.py -DIDF_TARGET=esp32c5 -DSDKCONFIG=sdkconfig.
 `firmware/master`, → `build-c5/master-c5.bin`). Later swap that C5 for a real C6
 with no change on the gate side.
 
-- **Protocols:** `components/link_proto` v4 (C5↔bridge UART: `CONFIG_*` with the
+- **Protocols:** `components/link_proto` v5 (C5↔bridge UART: `CONFIG_*` with the
   detector settings, the relative re-arm drop included, `EVENT_PASS` with the pass's age,
   `STATS` with the 8 channels' levels, each channel's detector state, the strongest rise
-  (the calibration guard's) and the C5's health, `COMMAND`);
+  (the calibration guard's) and the C5's health, `COMMAND`, `LOG` console text, `KEY` console keystrokes, `DEBUG`);
   `components/fleet_proto` v4 (C6↔C3 ESP-NOW: pairing, time beacons, `CONFIG` (the gate
   and its detector settings, link_proto's `lp_config_t` as it goes to the C5, re-arm drop
   included), `GATE_PASS`, `NODE_STATUS` relaying the C5's `STATS` and the re-arm drop its
@@ -202,3 +202,23 @@ page for a gate with no master.
   flashing a gate with the sdr_rx engine, review the detector config the C6 stores for it:
   the C6 re-sends it, and its thresholds were tuned on the C5VRX meter. Keep the defaults
   until the bench retunes them ([bench.md](bench.md), B6).
+
+## Debug mode (degraded C3 page, admin)
+
+For development: the C5's console text and its keys, over the C3's web, without a USB cable.
+**Off by default, at every boot**: an admin switches it on with the "debug mode" switch of the
+**Debug** panel (`POST /api/debug` `{"on": 0|1}`, a `DEBUG` frame to the C5; the C3 repeats it with
+every `STATS` while on, and the C5 switches off on a `HELLO`, i.e. when the C3 reboots). While it is
+off the C5 mirrors nothing (no `LOG` traffic), the C3 keeps no text and `/api/key` refuses.
+On: the C5 mirrors what its console prints (`cp_printf`: `PASS`, `CHECKPOINT ...`, `K` menus, `T`,
+`K l` traces, bench summaries) into a 2 KiB heap ring that `cp_link` sends as `LOG` frames (two per
+loop, so a pass never waits); a full ring drops the newest text and says how much. The C3 keeps
+the last 4 KiB (`c3_link.c`) and serves it to `POST /api/log` `{"since": N}` (admin, signed; the
+page polls it once a second while the Debug panel is open). `POST /api/key` `{"keys": "Ka",
+"force": 0|1}` sends a `KEY` frame: the C5 types the keys on its console queue in order, so
+`K` + key, `T` (status), `F` and `B` behave as on USB (the download key is never sent). Keys that
+blind the gate (`F`, `B`, `K` + `s z x n p S g G i`) are refused first with `{"blind":true}` (or
+`{"vtx":true}` while a carrier is seen); the page asks, then retries with `force`.
+Not mirrored: the `K S` scan-recording rows and what the engine (`sdr_rx`) and the USB heartbeat
+print. Logging out of the page leaves debug mode on until the C3 reboots. The C6 master's own page
+does not have it yet (a remote gate would need a `fleet_proto` relay).

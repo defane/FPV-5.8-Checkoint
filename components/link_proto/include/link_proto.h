@@ -22,8 +22,8 @@ extern "C" {
 #endif
 
 #define LP_SOF      0xC5u
-#define LP_VERSION  4u   /* 4: CONFIG carries the re-arm drop, STATS each channel's detector state;
-                          * 3: the C5 scans: STATS levels, EVENT_PASS age */
+#define LP_VERSION  5u   /* 5: LOG (C5 text), KEY (console keystrokes), DEBUG. 4: CONFIG carries the re-arm drop,
+                          * STATS each channel's detector state. 3: the C5 scans: STATS levels, EVENT_PASS age */
 #define LP_MAX_PAYLOAD 56u
 #define LP_MAX_FRAME   (6u + LP_MAX_PAYLOAD)   /* SOF+VER+TYPE+LEN + payload + CRC16(2) */
 
@@ -35,6 +35,9 @@ typedef enum {
     LP_MSG_EVENT_PASS = 5,   /* C5 -> bridge: a drone passed on a channel */
     LP_MSG_STATS = 6,        /* C5 -> bridge: periodic levels, detector states, health */
     LP_MSG_COMMAND = 8,      /* bridge -> C5: run an lp_cmd_t */
+    LP_MSG_LOG = 9,          /* C5 -> bridge: a chunk of the console's text output (debug mode) */
+    LP_MSG_DEBUG = 11,       /* bridge -> C5: debug mode on/off (off by default: no LOG, KEY ignored) */
+    LP_MSG_KEY = 10,         /* bridge -> C5: console keystrokes ("Ka", "T", "F" ...), debug mode */
 } lp_type_t;
 
 typedef enum { LP_ROLE_C5 = 1, LP_ROLE_C3 = 2 } lp_role_t;
@@ -130,6 +133,15 @@ typedef struct {
 
 #define LP_CN_UNKNOWN (-990)
 
+/* LOG and KEY carry raw bytes: a LOG chunk is any slice of the console text (not line aligned),
+ * a KEY frame is typed on the console in order (the C5 drops the download key). */
+#define LP_TEXT_MAX LP_MAX_PAYLOAD
+#define LP_KEY_MAX  16u
+typedef struct {
+    uint8_t len;                /* 1..LP_TEXT_MAX (LOG) or 1..LP_KEY_MAX (KEY) */
+    char    text[LP_TEXT_MAX];
+} lp_text_t;
+
 typedef struct {
     lp_type_t type;
     union {
@@ -138,6 +150,8 @@ typedef struct {
         lp_stats_t  stats;      /* STATS */
         uint8_t     role;       /* HELLO */
         uint8_t     command;    /* COMMAND: an lp_cmd_t (unknown values are not decoded) */
+        lp_text_t   data;       /* LOG / KEY */
+        uint8_t     debug;      /* DEBUG: 0 off, 1 on */
     };
 } lp_msg_t;
 
@@ -149,6 +163,10 @@ size_t lp_encode_config_req(uint8_t *buf, size_t cap);
 size_t lp_encode_event(uint8_t *buf, size_t cap, const lp_event_t *e);
 size_t lp_encode_stats(uint8_t *buf, size_t cap, const lp_stats_t *s);
 size_t lp_encode_command(uint8_t *buf, size_t cap, lp_cmd_t cmd);   /* 0 for an unknown cmd */
+/* 0 when len is 0 or over LP_TEXT_MAX / LP_KEY_MAX. */
+size_t lp_encode_log(uint8_t *buf, size_t cap, const char *text, size_t len);
+size_t lp_encode_debug(uint8_t *buf, size_t cap, bool on);
+size_t lp_encode_key(uint8_t *buf, size_t cap, const char *keys, size_t len);
 
 /* Streaming decoder: feed one received byte at a time. Returns true and fills
  * *out when a complete, CRC-valid frame ends on this byte. It buffers at most

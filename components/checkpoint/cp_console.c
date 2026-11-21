@@ -9,6 +9,7 @@
 #include "checkpoint.h"
 #include "checkpoint_link.h"
 #include "cp_internal.h"
+#include "cp_log.h"
 #include "esp_heap_caps.h"
 #include "freertos/queue.h"
 #include "hal/usb_serial_jtag_ll.h"
@@ -32,7 +33,7 @@ static unsigned stack_free(TaskHandle_t t) { return t ? (unsigned)uxTaskGetStack
 static void status(void)
 {
     firmware_print();
-    printf("STATUS uptime_s=%lld heap_internal=%u heap_largest=%u heap_min=%u heap_ok=%u scan_stack_free=%u "
+    cp_printf("STATUS uptime_s=%lld heap_internal=%u heap_largest=%u heap_min=%u heap_ok=%u scan_stack_free=%u "
            "console_stack_free=%u usb_stack_free=%u link_stack_free=%u fw=%s\n",
            esp_timer_get_time() / 1000000, (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
            (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
@@ -46,7 +47,7 @@ static void status(void)
 
 static void help(void)
 {
-    printf("Detector keys: T status, F recalibrate every LO, B recalibrate + verify the image rejection (VTX off),\n"
+    cp_printf("Detector keys: T status, F recalibrate every LO, B recalibrate + verify the image rejection (VTX off),\n"
            "  K + key checkpoint detector settings and engine benches, ` reboot to USB download (flashing)\n");
 }
 
@@ -88,7 +89,7 @@ static void console_task(void *arg)
         uint8_t c;
         if (xQueueReceive(s_keys, &c, pdMS_TO_TICKS(100)) != pdTRUE) continue;
         if (k_until && esp_timer_get_time() < k_until) {
-            if (c == 'q') { k_until = 0; printf("CHECKPOINT settings closed\n"); continue; }
+            if (c == 'q') { k_until = 0; cp_printf("CHECKPOINT settings closed\n"); continue; }
             if (checkpoint_key((char)c)) { k_until = esp_timer_get_time() + K_WINDOW_US; continue; }
         }
         k_until = 0;
@@ -103,15 +104,26 @@ static void console_task(void *arg)
     }
 }
 
+/* Keystrokes from the bridge's debug page (LP_MSG_KEY), typed in order as if on the USB console.
+ * The download key is dropped: a reboot goes through the link COMMAND. */
+void cp_console_inject(const char *keys, size_t n)
+{
+    if (!s_keys) return;
+    for (size_t i = 0; i < n; i++) {
+        const uint8_t c = (uint8_t)keys[i];
+        if (c >= ' ' && c <= '~' && c != '`') (void)xQueueSend(s_keys, &c, 0);
+    }
+}
+
 /* First in app_main: flashing (the download key) and diagnostics stay reachable whatever a
  * later boot step does. */
 void checkpoint_console_start(void)
 {
     if (s_keys) return;
     s_keys = xQueueCreate(KEY_QUEUE, 1);
-    if (!s_keys) { printf("CONSOLE disabled: no memory\n"); return; }
+    if (!s_keys) { cp_printf("CONSOLE disabled: no memory\n"); return; }
     if (xTaskCreate(usb_reader_task, "usb_reader", USB_STACK, NULL, USB_PRIORITY, &s_usb) != pdPASS)
-        printf("CONSOLE usb_reader not started: no memory\n");
+        cp_printf("CONSOLE usb_reader not started: no memory\n");
     if (xTaskCreate(console_task, "console", CONSOLE_STACK, NULL, CONSOLE_PRIORITY, &s_console) != pdPASS)
-        printf("CONSOLE task not started: no memory\n");
+        cp_printf("CONSOLE task not started: no memory\n");
 }

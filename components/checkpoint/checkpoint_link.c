@@ -10,6 +10,8 @@
  * write happens from this one task and never races. It reads the UART for
  * LINK_READ_MS at a time, so a queued pass leaves within about that. */
 #include "checkpoint_link.h"
+#include "cp_internal.h"
+#include "cp_log.h"
 #include "sdkconfig.h"
 #include <stdio.h>
 
@@ -23,10 +25,11 @@
 
 #define LINK_UART       ((uart_port_t)CONFIG_CHECKPOINT_LINK_UART_NUM)
 #define LINK_PRIORITY   1u      /* as the scan task: they time-slice at every tick */
-#define LINK_STACK      3072u
+#define LINK_STACK      4096u
 #define LINK_RX_BUF     256u
 #define LINK_EVQ_DEPTH  4u
 #define LINK_READ_MS    10u     /* a queued pass waits at most about this */
+#define LINK_LOG_CHUNKS 2u      /* LOG frames per loop: about 10 ms of wire at 115200, a pass never waits longer */
 
 static QueueHandle_t s_evq;     /* pd_event_t from the scan task */
 static TaskHandle_t s_task;
@@ -57,15 +60,24 @@ static void handle_msg(const lp_msg_t *m) {
         (void)checkpoint_link_apply_config(&m->config);
         send_config_state();    /* echo the validated/clamped result */
         break;
+    case LP_MSG_HELLO:          /* the C3 just (re)booted: debug mode is off on its side too */
+        cp_log_enable(false);
+        send_config_state();
+        break;
     case LP_MSG_CONFIG_REQ:
-    case LP_MSG_HELLO:          /* the C3 just connected: sync it */
         send_config_state();
         break;
     case LP_MSG_COMMAND:        /* recalibrate or reboot: the bridge's web confirmed it */
         checkpoint_link_command(m->command);
         break;
+    case LP_MSG_DEBUG:          /* the bridge's admin switched the debug page on or off */
+        cp_log_enable(m->debug != 0);
+        break;
+    case LP_MSG_KEY:            /* debug page: typed on the console, which applies it between two hops */
+        if (cp_log_enabled()) cp_console_inject(m->data.text, m->data.len);
+        break;
     default:
-        break;                  /* C5 does not consume STATE/EVENT/STATS */
+        break;                  /* C5 does not consume STATE/EVENT/STATS/LOG */
     }
 }
 
@@ -96,6 +108,20 @@ static void link_task(void *arg) {
             send_frame(buf, lp_encode_event(buf, sizeof buf, &le));
         }
 
+        for (unsigned i = 0; i < LINK_LOG_CHUNKS; i++) {   /* console text for the bridge's debug page */
+            char text[LP_TEXT_MAX];
+            uint32_t lost = 0;
+            const size_t k = cp_log_take(text, sizeof text, &lost);
+            uint8_t buf[LP_MAX_FRAME];
+            if (lost) {
+                char note[40];
+                const int m = snprintf(note, sizeof note, "\n[log: %lu bytes lost]\n", (unsigned long)lost);
+                send_frame(buf, lp_encode_log(buf, sizeof buf, note, (size_t)m));
+            }
+            if (!k) break;
+            send_frame(buf, lp_encode_log(buf, sizeof buf, text, k));
+        }
+
         const uint32_t now = now_ms();
         if (now - last_stats >= (uint32_t)CONFIG_CHECKPOINT_LINK_STATS_MS) {
             last_stats = now;
@@ -107,6 +133,7 @@ static void link_task(void *arg) {
 void checkpoint_link_start(void) {
     if (s_evq) return;
     s_evq = xQueueCreate(LINK_EVQ_DEPTH, sizeof(pd_event_t));
+    (void)cp_log_start();       /* no ring: the debug page just shows nothing */
     if (!s_evq) { printf("CHECKPOINT link disabled: no memory\n"); return; }
 
     const uart_config_t cfg = {

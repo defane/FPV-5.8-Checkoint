@@ -21,3 +21,17 @@ bool c3_link_c5_alive(void);
 /* The re-arm drop *10 of the C5's last CONFIG_STATE (what it runs, polled every second, so a
  * console K e/E shows), -1 before its first one. Link task only (the fleet relay's NODE_STATUS). */
 int32_t c3_link_c5_rearm_x10(void);
+
+/* Debug mode (web): the C5's console text and typed keys. The text of its LOG frames is kept in
+ * a ring (sanitized: no quote, backslash or control other than newline, so it can sit in JSON);
+ * positions count bytes since boot. */
+#define C3_LOG_CHUNK 700u
+/* Copies up to max bytes from position `since`. *next is where to continue; *lost is set when the
+ * ring had already dropped bytes after `since` (they are skipped). `since` past the end (the C3
+ * rebooted) restarts at the oldest byte kept. */
+size_t c3_link_log_read(uint32_t since, char *out, size_t max, uint32_t *next, bool *lost);
+/* Debug mode, off at every boot (the C5 switches off on our HELLO too): the log is kept and the keys
+ * go out only while it is on. */
+void c3_link_debug_set(bool on);
+bool c3_link_debug(void);
+void c3_link_send_keys(const char *keys, size_t n);   /* KEY frame: typed on the C5's console */

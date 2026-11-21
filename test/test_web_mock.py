@@ -282,5 +282,48 @@ class Protocol(unittest.TestCase):
         self.assertEqual(self.signed(sid, 2, "POST", "/api/reset", b" " * 16)[0], 400)
 
 
+class NodeDebug(unittest.TestCase):
+    """The degraded C3's debug mode: /api/log and /api/key against c3_web.c's rules."""
+
+    def setUp(self):
+        self.sim = web_mock.Node()
+
+    def test_off_by_default(self):
+        self.sim.state(60.0)
+        self.assertEqual(self.sim.log({"since": 0}, 60.0)["debug"], 0)
+        self.assertEqual(self.sim.log({"since": 0}, 60.0)["text"], "", "nothing is kept while off")
+        self.assertEqual(self.sim.key({"keys": "T"}, 60.0), {"ok": False, "msg": "debug mode is off"})
+        self.assertEqual(self.sim.set_debug({}, 60.0)["debug"], 0, "no \"on\" only asks")
+        self.assertEqual(self.sim.set_debug({"on": 1}, 60.0)["debug"], 1)
+        self.assertEqual(self.sim.key({"keys": "T"}, 60.0), {"ok": True})
+        self.assertEqual(self.sim.set_debug({"on": 0}, 60.0)["debug"], 0)
+
+    def test_log_pages_through_the_ring(self):
+        self.sim.set_debug({"on": 1}, 1.0)
+        self.sim.say('PASS "x" \\ \r\x01\n')
+        out = self.sim.log({"since": 0}, 1.0)
+        self.assertEqual(out["text"], "PASS 'x' / ?\n")
+        self.assertEqual(self.sim.log({"since": out["next"]}, 1.0)["text"], "")
+        self.sim.say("a" * 5000)                       # more than the ring keeps
+        out = self.sim.log({"since": 0}, 1.0)
+        self.assertEqual((out["lost"], len(out["text"])), (1, web_mock.Node.LOG_CHUNK))
+        self.assertEqual(self.sim.log({"since": 10 ** 9}, 1.0)["lost"], 0, "a C3 reboot restarts at the oldest")
+
+    def test_keys(self):
+        t = 60.0
+        self.sim.state(t)
+        self.sim.set_debug({"on": 1}, t)
+        self.assertIsNone(self.sim.key({"keys": "`"}, t), "the download key never goes out")
+        self.assertIsNone(self.sim.key({"keys": ""}, t))
+        self.assertIsNone(self.sim.key({"keys": "K" * 17}, t))
+        self.assertEqual(self.sim.key({"keys": "Ka"}, t), {"ok": True})
+        self.assertEqual(self.sim.key({"keys": "T"}, t), {"ok": True})
+        self.assertTrue(self.sim.key({"keys": "F"}, t).get("blind"), "F blinds the gate")
+        self.assertEqual(self.sim.key({"keys": "F", "force": 1}, t), {"ok": True})
+        self.assertTrue(self.sim.key({"keys": "Ks"}, t).get("blind"), "a bench blinds the gate")
+        self.assertEqual(self.sim.key({"keys": "Kaq", "force": 0}, t), {"ok": True})
+        self.assertTrue(self.sim.blinds("Kqi") is False and self.sim.blinds("Kq" "F"))
+
+
 if __name__ == "__main__":
     unittest.main()

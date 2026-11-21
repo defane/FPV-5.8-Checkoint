@@ -4,6 +4,7 @@
  * file only (CMakeLists.txt), so a new commit recompiles nothing else. */
 #include <stdio.h>
 #include "checkpoint.h"
+#include "cp_log.h"
 #include "esp_app_desc.h"
 #include "esp_chip_info.h"
 
@@ -27,7 +28,7 @@ void firmware_print(void)
     (void)esp_app_get_elf_sha256(elf, sizeof(elf));
     esp_chip_info_t chip;
     esp_chip_info(&chip);
-    printf("FIRMWARE id=%s version=%s commit=%s elf_sha256=%s built=\"%s %s\" idf=%s engine=sdr_rx chip_rev=v%u.%u\n",
+    cp_printf("FIRMWARE id=%s version=%s commit=%s elf_sha256=%s built=\"%s %s\" idf=%s engine=sdr_rx chip_rev=v%u.%u\n",
            firmware_id(), d->version, CHECKPOINT_COMMIT, elf[0] ? elf : "unknown", d->date, d->time, d->idf_ver,
            (unsigned)(chip.revision / 100u), (unsigned)(chip.revision % 100u));
 }

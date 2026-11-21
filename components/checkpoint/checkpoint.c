@@ -14,6 +14,7 @@
  * for its own gate) gets the console's T as health in STATS and its B, F and a reset as link
  * COMMANDs. */
 #include "checkpoint.h"
+#include "cp_log.h"
 #include <inttypes.h>
 #include <math.h>
 #include <stddef.h>
@@ -63,7 +64,7 @@ const char *cp_boot_stage(void) { return (const char *)s_stage; }
 
 void checkpoint_reserve(void)
 {
-    if (!cp_scan_reserve()) printf("CHECKPOINT warning: no memory for the scan task's stack\n");
+    if (!cp_scan_reserve()) cp_printf("CHECKPOINT warning: no memory for the scan task's stack\n");
 }
 
 void cp_health(const cp_t *cp, bool *live, bool *stalled)
@@ -95,7 +96,7 @@ static void prefs_load(pd_config_t *det, uint8_t *gain, float *rearm_db)
     *gain = saved && p.gain >= CP_GAIN_MIN && p.gain <= 83u ? p.gain : (uint8_t)CONFIG_SDR_RX_GAIN_DEFAULT;
     *det = saved && pd_config_valid(&p.det) ? p.det : sd_config_default();
     *rearm_db = v4 && p.rearm_db_x10 <= LP_REARM_MAX_X10 ? (float)p.rearm_db_x10 / 10.0f : CP_REARM_DEFAULT_DB;
-    printf("CHECKPOINT prefs=%s gain=%u rearm_db=%.1f\n", v4 ? "saved" : saved ? "saved_v3" : "defaults", *gain,
+    cp_printf("CHECKPOINT prefs=%s gain=%u rearm_db=%.1f\n", v4 ? "saved" : saved ? "saved_v3" : "defaults", *gain,
            (double)*rearm_db);
 }
 
@@ -108,7 +109,7 @@ static void prefs_save(const cp_t *cp)
     const float rearm = cp->wanted_rearm_db;
     portEXIT_CRITICAL(&cp_mux);
     p.rearm_db_x10 = (uint16_t)to_x10(rearm);   /* 0..LP_REARM_MAX_X10: checked by every poster */
-    if (!cp_blob_store(PREFS_KEY, &p, sizeof(p))) printf("CHECKPOINT warning: settings not saved (NVS)\n");
+    if (!cp_blob_store(PREFS_KEY, &p, sizeof(p))) cp_printf("CHECKPOINT warning: settings not saved (NVS)\n");
 }
 
 void checkpoint_start(int64_t boot_t0_us)
@@ -116,14 +117,14 @@ void checkpoint_start(int64_t boot_t0_us)
     if (s_cp) return;
     checkpoint_boot_stage("checkpoint");
     cp_t *cp = calloc(1, sizeof(*cp));
-    if (!cp) { printf("CHECKPOINT disabled: no memory\n"); return; }
+    if (!cp) { cp_printf("CHECKPOINT disabled: no memory\n"); return; }
     cp->recal_req = -1;
     prefs_load(&cp->wanted, &cp->gain, &cp->wanted_rearm_db);
     sd_init(&cp->sd, &cp->wanted);
     pd_set_rearm(&cp->sd.det, cp->wanted_rearm_db);   /* the scan task starts it again from the mailbox */
     if (!cp_scan_start(cp, boot_t0_us)) {
         free(cp);
-        printf("CHECKPOINT disabled: no memory for the scan task\n");
+        cp_printf("CHECKPOINT disabled: no memory for the scan task\n");
         return;
     }
     s_cp = cp;
@@ -133,12 +134,12 @@ void checkpoint_start(int64_t boot_t0_us)
 void checkpoint_print(void)
 {
     cp_t *cp = s_cp;
-    if (!cp) { printf("CHECKPOINT off\n"); return; }
+    if (!cp) { cp_printf("CHECKPOINT off\n"); return; }
     bool live, stalled;
     cp_health(cp, &live, &stalled);
     const pd_config_t *c = &cp->sd.det.cfg;
     const unsigned top = sd_strongest(&cp->sd);
-    printf("CHECKPOINT source=sdr live=%u learning=%u bench=%u engine_failed=%u stalled=%u stalls=%" PRIu32
+    cp_printf("CHECKPOINT source=sdr live=%u learning=%u bench=%u engine_failed=%u stalled=%u stalls=%" PRIu32
            " gain=%u top=R%u rise_db=%.1f state=%s rotations=%" PRIu32 " readings=%" PRIu32 " passes=%" PRIu32
            " alpha=%.2f tau_ms=%.1f active_db=%.1f hyst_db=%.1f drop_db=%.1f min_peak_db=%.1f refractory_ms=%" PRIu32
            " stale_ms=%" PRIu32 " rearm_db=%.1f\n",
@@ -147,7 +148,7 @@ void checkpoint_print(void)
            cp->passes, (double)c->alpha, (double)sd_tau_ms(&cp->sd), (double)c->active_db, (double)c->hysteresis_db,
            (double)c->drop_db, (double)c->min_peak_db, c->refractory_ms, c->stale_ms, (double)cp->sd.det.rearm_db);
     if (cp->has_last)
-        printf("CHECKPOINT last_pass channel=R%u peak_db=%.1f peak_ms=%" PRIu32 "\n", cp->last.channel + 1u,
+        cp_printf("CHECKPOINT last_pass channel=R%u peak_db=%.1f peak_ms=%" PRIu32 "\n", cp->last.channel + 1u,
                (double)cp->last.peak_db, cp->last.peak_ms);
 }
 
@@ -171,7 +172,7 @@ static bool post_recal(cp_t *cp, sdr_recal_t kind, const char *from)
 {
     const char *name = kind == SDR_RECAL_FULL ? "cal_full" : "cal_quick";
     if (!cp || cp->engine_failed) {
-        printf("CHECKPOINT command=%s refused=no_engine from=%s\n", name, from);
+        cp_printf("CHECKPOINT command=%s refused=no_engine from=%s\n", name, from);
         return false;
     }
     const bool calibrating = sdr_rx_calibrating();
@@ -182,7 +183,7 @@ static bool post_recal(cp_t *cp, sdr_recal_t kind, const char *from)
         cp->recal_from = from;
     }
     portEXIT_CRITICAL(&cp_mux);
-    printf(busy ? "CHECKPOINT command=%s refused=busy from=%s\n" : "CHECKPOINT command=%s from=%s\n", name, from);
+    cp_printf(busy ? "CHECKPOINT command=%s refused=busy from=%s\n" : "CHECKPOINT command=%s from=%s\n", name, from);
     return !busy;
 }
 
@@ -192,10 +193,10 @@ void cp_command(uint8_t cmd, const char *from)
     case LP_CMD_CAL_FULL:  (void)post_recal(s_cp, SDR_RECAL_FULL, from); break;
     case LP_CMD_CAL_QUICK: (void)post_recal(s_cp, SDR_RECAL_QUICK, from); break;
     case LP_CMD_REBOOT:
-        printf("CHECKPOINT command=reboot from=%s\n", from);
+        cp_printf("CHECKPOINT command=reboot from=%s\n", from);
         sdr_rx_reboot();                      /* quiesces the captures, never returns */
     default:
-        printf("CHECKPOINT command=%u refused=unknown from=%s\n", cmd, from);
+        cp_printf("CHECKPOINT command=%u refused=unknown from=%s\n", cmd, from);
         break;
     }
 }
@@ -204,7 +205,7 @@ static void post_bench(cp_t *cp, char key)
 {
     if (key == 'S' && cp->bench_running && cp->bench_key == 'S') {   /* the recording runs: stop it */
         cp->scan_stop = true;
-        printf("CHECKPOINT bench=S stop\n");
+        cp_printf("CHECKPOINT bench=S stop\n");
         return;
     }
     const bool calibrating = sdr_rx_calibrating();
@@ -213,13 +214,13 @@ static void post_bench(cp_t *cp, char key)
     const bool busy = !ready || calibrating || bench_owns(cp) || cp->recal_req >= 0 || cp->gain_dirty;
     if (!busy) cp->bench_req = (uint8_t)key;
     portEXIT_CRITICAL(&cp_mux);
-    if (busy) printf("CHECKPOINT bench=%c refused=%s\n", key, ready ? "busy" : "not_ready");
-    else printf("CHECKPOINT bench=%c start\n", key);
+    if (busy) cp_printf("CHECKPOINT bench=%c refused=%s\n", key, ready ? "busy" : "not_ready");
+    else cp_printf("CHECKPOINT bench=%c start\n", key);
 }
 
 static void post_gain(cp_t *cp, bool up)
 {
-    if (bench_owns(cp)) { printf("CHECKPOINT gain refused=busy\n"); return; }
+    if (bench_owns(cp)) { cp_printf("CHECKPOINT gain refused=busy\n"); return; }
     const unsigned max = sdr_rx_gain_max();
     portENTER_CRITICAL(&cp_mux);
     int g = (int)cp->gain + (up ? (int)CP_GAIN_STEP : -(int)CP_GAIN_STEP);
@@ -229,7 +230,7 @@ static void post_gain(cp_t *cp, bool up)
     cp->gain_dirty = true;
     portEXIT_CRITICAL(&cp_mux);
     prefs_save(cp);
-    printf("CHECKPOINT gain=%d/%u (saved; the rests are learnt again)\n", g, max);
+    cp_printf("CHECKPOINT gain=%d/%u (saved; the rests are learnt again)\n", g, max);
 }
 
 /* ---- C5<->C3 link accessors (checkpoint_link.h), called from the link task ---- */
@@ -351,7 +352,7 @@ static void antenna_select(bool ipex, const char *then)
     gpio_set_direction(ANTENNA_GPIO, GPIO_MODE_OUTPUT);
     gpio_set_level(ANTENNA_GPIO, ipex);
     s_antenna_ipex = ipex;
-    printf("CHECKPOINT antenna=%s (GPIO %d %s)%s\n", ipex ? "ipex" : "onboard", ANTENNA_GPIO, ipex ? "high" : "low",
+    cp_printf("CHECKPOINT antenna=%s (GPIO %d %s)%s\n", ipex ? "ipex" : "onboard", ANTENNA_GPIO, ipex ? "high" : "low",
            then);
 }
 
@@ -368,7 +369,7 @@ static void antenna_toggle(cp_t *cp)
 {
     const bool calibrating = sdr_rx_calibrating();
     if (cp->engine_failed || calibrating || bench_owns(cp) || cp->recal_req >= 0) {
-        printf("CHECKPOINT antenna refused=busy\n");
+        cp_printf("CHECKPOINT antenna refused=busy\n");
         return;
     }
     antenna_select(!s_antenna_ipex, " recal=quick");
@@ -377,7 +378,7 @@ static void antenna_toggle(cp_t *cp)
 
 void checkpoint_help(void)
 {
-    printf("CHECKPOINT K + key (lower = down, upper = up; K stays open 5 s after each key, q closes):\n"
+    cp_printf("CHECKPOINT K + key (lower = down, upper = up; K stays open 5 s after each key, q closes):\n"
            "  a/A smoothing alpha -/+0.05 (per 17.5 ms)   t/T activity threshold -/+1 dB   h/H hysteresis -/+0.5 dB\n"
            "  d/D pass drop -/+0.5 dB        m/M minimum peak -/+1 dB         r/R refractory -/+250 ms\n"
            "  e/E re-arm drop -/+1 dB (0 = off)   l live rise of R1-R8 on/off (5 lines/s)   0 defaults   k show\n"
@@ -414,7 +415,7 @@ bool checkpoint_key(char key)
     }
     case 'l':
         cp->trace = !cp->trace;
-        printf("CHECKPOINT trace %s\n", cp->trace ? "ON" : "OFF");
+        cp_printf("CHECKPOINT trace %s\n", cp->trace ? "ON" : "OFF");
         return true;
     case '0': c = sd_config_default(); rearm = CP_REARM_DEFAULT_DB; break;
     case 'k': case '?': checkpoint_print(); return true;
@@ -423,12 +424,12 @@ bool checkpoint_key(char key)
     default: return false;
     }
     if (!pd_config_valid(&c)) {
-        printf("CHECKPOINT refused: minimum peak %.1f dB must stay at or above the activity threshold %.1f dB\n",
+        cp_printf("CHECKPOINT refused: minimum peak %.1f dB must stay at or above the activity threshold %.1f dB\n",
                (double)c.min_peak_db, (double)c.active_db);
         return true;
     }
     post_config(cp, &c, rearm);
-    printf("CHECKPOINT set alpha=%.2f active_db=%.1f hyst_db=%.1f drop_db=%.1f min_peak_db=%.1f refractory_ms=%" PRIu32
+    cp_printf("CHECKPOINT set alpha=%.2f active_db=%.1f hyst_db=%.1f drop_db=%.1f min_peak_db=%.1f refractory_ms=%" PRIu32
            " rearm_db=%.1f (saved)\n", (double)c.alpha, (double)c.active_db, (double)c.hysteresis_db, (double)c.drop_db,
            (double)c.min_peak_db, c.refractory_ms, (double)rearm);
     return true;
