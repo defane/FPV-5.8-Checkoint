@@ -38,6 +38,6 @@ if(NOT C5_PHY_SHA256 STREQUAL "dbf33c418c8d408d4005c849d12a1432deea82e2e5e57de3c
 endif()
 # A generated sdkconfig from before this branch keeps options the defaults no longer set.
 if(CONFIG_ESP_PHY_ENABLE_CERT_TEST OR CONFIG_COMPILER_OPTIMIZATION_DEBUG)
-    message(FATAL_ERROR "sdr_rx: stale sdkconfig (cert-test archive or -Og): delete "
-                        "firmware/detector/sdkconfig* and rebuild (spec 3.5)")
+    message(FATAL_ERROR "sdr_rx: stale sdkconfig (cert-test archive or -Og): run tools/fw.sh "
+                        "clean (never delete a *.defaults) and rebuild (spec 3.5)")
 endif()

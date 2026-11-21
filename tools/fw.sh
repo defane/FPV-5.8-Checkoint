@@ -5,7 +5,7 @@
 #   tools/fw.sh build [name...]        build the named firmwares (default: all)
 #   tools/fw.sh flash  [FW] [PORT]     flash one (interactive menu if omitted)
 #   tools/fw.sh monitor [FW] [PORT]    open the serial monitor
-#   tools/fw.sh clean                  remove all build dirs
+#   tools/fw.sh clean                  remove every build dir and generated sdkconfig
 #
 # build always needs ESP-IDF (sourced from $IDF_EXPORT, default
 # ~/esp/esp-idf-v6.0.2/export.sh). flash/monitor use ESP-IDF when it is
@@ -179,8 +179,24 @@ case "$cmd" in
         fi
         ;;
     clean)
-        for fw in $FIRMWARES; do resolve "$fw"; rm -rf "$DIR/$BUILDDIR"; done
-        echo ">>> build dirs removed."
+        # Every build dir and generated sdkconfig of the FIRMWARES table (resolve's BUILDDIR
+        # and SDKCFG): ESP-IDF never reapplies the *.defaults to an existing sdkconfig, so a
+        # stale one wins over an edited default. Never a *.defaults file, committed or local.
+        for fw in $FIRMWARES; do
+            resolve "$fw"
+            if [ -d "$DIR/$BUILDDIR" ]; then
+                echo ">>> removing $DIR/$BUILDDIR/"
+                rm -rf "$DIR/$BUILDDIR"
+            fi
+            case "$SDKCFG" in
+                *.defaults) ;;
+                *)  if [ -f "$DIR/$SDKCFG" ]; then
+                        echo ">>> removing $DIR/$SDKCFG"
+                        rm -f "$DIR/$SDKCFG"
+                    fi ;;
+            esac
+        done
+        echo ">>> clean: build dirs and generated sdkconfigs removed (the *.defaults kept)."
         ;;
     variants|list)
         echo "Firmware variants (FW=<name>):"
@@ -197,7 +213,9 @@ FPV 5.8 Checkpoint firmware helper (firmwares: $FIRMWARES)
   tools/fw.sh flash  [FW] [PORT]   flash one (menu if omitted)
   tools/fw.sh monitor [FW] [PORT]  serial monitor
   tools/fw.sh variants             list the FW= names and their boards
-  tools/fw.sh clean                remove all build dirs
+  tools/fw.sh clean                remove every build dir and generated sdkconfig
+                                   (never a *.defaults; a menuconfig change is lost:
+                                   put it in sdkconfig.local.defaults)
 
 FW= names: a role (detector/node/master) is its default board; "<role>-<tag>"
 is a variant. build needs ESP-IDF; flash/monitor use it when present, else fall

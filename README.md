@@ -123,6 +123,10 @@ cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/pass_detector/include \
    test_pass_detector.c ../components/pass_detector/pass_detector.c -lm -o /tmp/t && /tmp/t
 cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/pass_detector/include test_scan_detector.c \
    ../components/pass_detector/scan_detector.c ../components/pass_detector/pass_detector.c -lm -o /tmp/t && /tmp/t
+cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/pass_detector/include -I../components/sdr_rx \
+   -I../components/sdr_rx/include test_pair_ghost.c ../components/pass_detector/scan_detector.c \
+   ../components/pass_detector/pass_detector.c ../components/sdr_rx/sdr_psd.c ../components/sdr_rx/sdr_level.c \
+   ../components/sdr_rx/sdr_plan.c -lm -o /tmp/t && /tmp/t   # the guard end to end on the DSP
 cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/audio_player/include \
    test_audio_resample.c -lm -o /tmp/t && /tmp/t
 cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/link_proto/include \
@@ -144,9 +148,9 @@ python3 test_scan_analyze.py   # tools/scan_analyze.py on synthetic recordings
 python3 test_flash_tool.py     # tools/flash.py: download key, --check, logs
 ```
 
-After editing a `firmware/detector/sdkconfig*.defaults`, delete the generated
-`firmware/detector/sdkconfig` (and the variants' `sdkconfig.<variant>`, never the
-`*.defaults`) and run `tools/fw.sh clean`: ESP-IDF never reapplies the defaults.
+After editing a `firmware/detector/sdkconfig*.defaults`, run `tools/fw.sh clean`: it
+deletes every build dir and generated `sdkconfig`/`sdkconfig.<variant>` (never a
+`*.defaults`), since ESP-IDF never reapplies the defaults.
 
 ## Architecture
 

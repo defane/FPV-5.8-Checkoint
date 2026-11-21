@@ -24,7 +24,46 @@
  * and holds its next readings until the median is full again (a lone burst after the gap
  * stays a lone burst); its average then resumes where it was or, after a gap longer than
  * pd's stale_ms (pd has forgotten the channel), starts again from that median. A late
- * reading (over twice the usual interval) weighs in the average as one on time. */
+ * reading (over twice the usual interval) weighs in the average as one on time.
+ *
+ * Relative re-arm (pd_set_rearm(&sd->det, drop), pass_detector.h; off after sd_init): a channel
+ * re-armed by it is not quiet, so its rest does not climb. A channel back from a long hold of the
+ * pair guard starts again from the level it comes back at (pd_resume): armed under the release; over
+ * it, relatively armed there, or in COOLDOWN until it falls under the release with the re-arm off.
+ *
+ * Pair guard (sd_feed_hop, the readings of one capture). In PAIRS mode one capture carries two
+ * channels 37 MHz apart, each in the other's image window. While a strong channel drives the ADC
+ * into its rails (SD_FLAG_SATURATED, one flag per capture), the I/Q correction no longer holds and
+ * the rails' own products land in the partner's window: the partner reads a level made by the
+ * strong channel (host model: a median 23-29 dB under it, a few % of captures above it) and rang
+ * phantom passes on the bench. So on a saturated capture (and, within a saturated run that has
+ * lasted SD_HOLD_HOVER_US, until SD_HOLD_TAIL_US after its last saturated capture), the reading of
+ * a channel whose smoothed level stands more than SD_HOLD_DOM_DB under its partner's is held: not
+ * fed, its state frozen. The comparison is on the smoothed levels, not on one capture's readings:
+ * the products top their source on a few % of captures. Except after a jump: a VTX switched on or
+ * armed beside the antenna clips while its average is still low (at the floor, or more than
+ * SD_HOLD_DOM_DB under a partner that stands up), and the smoothed levels alone would hold the
+ * source itself, frozen low for the whole run, and feed its products to the partner. So when the
+ * median of a channel's last 3 readings stands more than SD_HOLD_DOM_DB over its partner's and more
+ * than SD_HOLD_JUMP_DB over its own average, it is the run's source: its partner is held until the
+ * saturated run ends. A drone flown in never leads its live average that much (host model), so
+ * there both rules hold the same channel. A held channel's average is frozen, though: a drone that
+ * crosses close while another clips can be named partway through that run, and the clipping drone
+ * is then held to its end (its pass lost past SD_HOLD_LONG_US; docs/detector.md). The rule needs
+ * the partner more than SD_HOLD_DOM_DB under the
+ * source's rails reading (about 40 dB over the floor at most): a partner higher than that leaves the
+ * source held as by the smoothed levels alone. When a held channel is fed again, its median
+ * restarts on fresh readings; if it stood min_peak_db up as its hold began (a real pass under way),
+ * its average catches up to the fresh median less drop_db (never down, so a catch-up never rings by
+ * itself). After a hold longer than SD_HOLD_LONG_US, what it did while blind is unknown: once its
+ * median is full, its average starts again from that median, whatever the hold's length. One median
+ * can sit 10 dB off the level (a VTX's FM swings its band power), so pd follows that average,
+ * ringing nothing, for SD_HOLD_SETTLE_TAUS time constants of fed readings (0.3 s at the default alpha),
+ * then starts again from it (pd_resume: armed under the release; over it relatively armed with that
+ * level as its trough, or in COOLDOWN with the re-arm off). A shorter hold meanwhile pauses the settle
+ * for as long as it lasts; a long one starts it again. The falling tail of a pass it missed does not
+ * rise the re-arm's drop over that level, so it rings nothing; its next pass does. Unsaturated
+ * captures go through exactly as sd_feed. */
 #pragma once
 #include "pass_detector.h"
 #include <stdbool.h>
@@ -43,6 +82,22 @@ extern "C" {
 #define SD_LEARN_RATE     10.0f
 #define SD_DT_MAX_US      100000      /* a longer gap restarts the channel's median */
 #define SD_FLAG_SATURATED 0x01u       /* sd_feed flags: = SDR_RD_SATURATED */
+#define SD_HOP_READINGS   2u          /* readings of one capture, at most (= SDR_RX_PER_HOP) */
+#define SD_HOPS_MAX       8u          /* hops of a plan, at most (= SDR_RX_MAX_HOPS) */
+#define SD_HOLD_DOM_DB    15.0f       /* a saturated capture's reading is held this far under its partner */
+#define SD_HOLD_JUMP_DB   20.0f       /* a channel's last 3 readings this far over its average: it jumped */
+#define SD_HOLD_TAIL_US   30000       /* a saturated run: saturated captures this close; a hover's tail */
+#define SD_HOLD_HOVER_US  150000      /* a run this long is a hover (a pass clips ~80 ms at 0.3 m) */
+#define SD_HOLD_LONG_US   500000      /* after a longer hold the channel starts again (pd_resume) */
+#define SD_HOLD_SETTLE_TAUS 5.0f      /* then pd follows the fresh average this many tau before it may ring */
+
+/* One reading of a capture (the fields of sdr_reading_t). */
+typedef struct {
+    int64_t t_us;
+    int16_t level_qdb;
+    uint8_t channel;
+    uint8_t flags;
+} sd_reading_t;
 
 typedef struct {
     int16_t hist[3];                  /* median-of-3 input, level codes */
@@ -62,6 +117,21 @@ typedef struct {
     float tau_us;                     /* time constant from alpha, 0 = no smoothing */
     float cap_db;                     /* median of primed rests + SD_REST_SPREAD_DB; +inf before the first rotation */
     int64_t learn_end_us;             /* 0 = set by the next reading */
+    /* pair guard (sd_feed_hop) */
+    int64_t sat_run_us[SD_HOPS_MAX];  /* per hop: start of its saturated run */
+    int64_t sat_last_us[SD_HOPS_MAX]; /* per hop: its last saturated capture, 0 = none */
+    uint8_t sat_src[SD_HOPS_MAX];     /* per hop: 1 + the reading index a jump showed to be the source, this run */
+    int16_t raw[PD_CHANNELS][3];      /* each channel's last 3 readings into sd_feed_hop, held ones too */
+    uint8_t raw_n[PD_CHANNELS];       /* valid entries of raw, saturates at 3 */
+    uint8_t raw_i[PD_CHANNELS];       /* next write slot of raw, cycles 0..2 */
+    int64_t held_since_us[PD_CHANNELS];
+    float held_rise_db[PD_CHANNELS];  /* pd's smoothed rise as the hold began */
+    uint8_t held_mask;                /* channels whose last reading was held */
+    uint8_t fresh_mask;               /* channels catching up once their median is full again */
+    uint8_t long_mask;                /* channels back from a long hold, restarting once it is full */
+    uint8_t settle_mask;              /* channels restarted from a fresh median whose average still settles */
+    int64_t settle_from_us[PD_CHANNELS];   /* when that median filled, moved on by each shorter hold since */
+    uint32_t held[PD_CHANNELS];       /* per channel, readings held since sd_init (diagnostics) */
 } scan_detector_t;
 
 /* alpha 0.25 per 17.5 ms (tau 60.8 ms), rise over 8 dB is active, 3 dB hysteresis and
@@ -79,6 +149,12 @@ void sd_relearn(scan_detector_t *sd);
  * completes a pass: *event filled, its times in ms of t_us, peak_ms the smoothed peak. */
 bool sd_feed(scan_detector_t *sd, unsigned channel, int16_t level_qdb, uint8_t flags, int64_t t_us,
              pd_event_t *event);
+/* The n (<= SD_HOP_READINGS) readings of one capture of plan hop `hop`, through the pair guard,
+ * then sd_feed. Returns a bit per reading that completed a pass (ev[i] filled); *held (may be
+ * NULL) gets a bit per reading held (not fed). Without SD_FLAG_SATURATED on the capture (and
+ * outside a hover's tail) it is sd_feed of each reading in order. */
+unsigned sd_feed_hop(scan_detector_t *sd, unsigned hop, const sd_reading_t *r, unsigned n, pd_event_t *ev,
+                     unsigned *held);
 /* Once per rotation (every channel read once): the rests' cap from their median, and
  * channels without a reading for pd's stale_ms back to IDLE. */
 void sd_rotation(scan_detector_t *sd, int64_t t_us);

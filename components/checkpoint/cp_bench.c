@@ -4,7 +4,8 @@
  *   x  image rejection between the two channels of an LO: a floor run (VTX off), then VTX on
  *   n  noise of a reading against the capture size, and a borrowed-calibration DC control
  *   p  the SINGLE plan (one LO per channel) against PAIRS, for 1 s
- *   S  scan recording: every channel's level over the last >= 60 s, dumped when stopped
+ *   S  scan recording: every channel's level and every LO's saturated captures over the last
+ *      >= 60 s, dumped when stopped
  * The methods are widscan58's (CapnBry, https://github.com/CapnBry/widscan58, a9fff97, PLAN.md:
  * tune timing, settle, image rejection and noise per FFT size); the recording and the residue
  * trace keep the shape of the fork's C5VRX-era hop bench (hop_bench.c before issue #2).
@@ -47,7 +48,16 @@
 #define Z_QUARTERS       4u
 #define Z_TOL_QDB        4             /* 1 dB */
 #define X_CAPTURES       200u
-#define X_SIGNAL_QDB     40            /* 10 dB over the floor: a VTX is on, so not a floor run */
+/* K x's run decision is hs_x_verdict (hop_stats.h, host-tested): HS_X_SIGNAL_QDB (10 dB over the
+ * floor: a VTX is on, so not a floor run) and HS_X_FLOOR_SPREAD_QDB, the floor margin below.
+ * A floor run with a channel over 6 dB above the median of the 8 is refused: a VTX is on. With
+ * every VTX off the 8 floors spread 1.25 dB at gain 40, under 1 dB from their median ([board] K n,
+ * 2026-11-15: -239..-234 qdb), and each is a median of 200 readings of ~1.06 dB sd ([board] B4),
+ * so ~0.1 dB of noise: 6 dB leaves ~5 dB for another board, antenna or gain. A channel at
+ * HS_X_SIGNAL_QDB over its own floor stands 9 dB or more over that median, so no VTX that would
+ * count as a signal is stored as a floor. Floor runs taken with a 25 mW VTX on R6 had R6 49-57 dB
+ * over the median ([board] 2026-11-15). The median ignores up to 3 raised channels of 8, so a
+ * strong VTX's partner (R5 at +3.75 dB in those runs) does not hide it. */
 #define X_NEED_QDB       200           /* 50 dB over the floor: the image is measurable */
 #define X_FLOOR_DB       0.5f          /* the partner this close to its floor: floor-limited */
 #define X_FLOOR_EXCESS_DB 9.1f         /* hs_excess_db at X_FLOOR_DB: 9.1 dB under the floor */
@@ -61,6 +71,7 @@
 #define R_LIVE_S         10u
 #define R_NOMINAL_HZ_X10 5100u         /* before the engine's first 1 s window (never in practice) */
 #define R_DUMP_PAUSE_MS  200u
+#define R_SAT_HOPS       HS_SAT_HOPS   /* a row's saturated-capture counts: PAIRS's 4 LOs, 4 bits each */
 
 static const uint16_t k_z_delay_us[] = {0, 25, 50, 100, 150, 200, 300, 500, 800, 1000, 2000};
 #define Z_DELAYS (sizeof k_z_delay_us / sizeof k_z_delay_us[0])
@@ -97,19 +108,27 @@ typedef struct {
     uint32_t dsp_us[SDR_RX_MAX_HOPS * N_CAPTURES];
 } n_bench_t;
 
-typedef struct {
+/* Packed: 22 bytes, so the 44 KiB scratch holds 2048 rows, decim 15 at the board's 507.9 rotations
+ * a second ([board] B1); aligned, 24 bytes would hold 1877 rows, decim 17. */
+typedef struct __attribute__((packed)) {
     uint32_t t_us;                                 /* the row's first rotation start, from the recording's */
     int16_t qdb[SDR_RX_CHANNELS];                  /* mean of decim rotations; SDR_LEVEL_NONE */
+    uint16_t sat;                                  /* saturated captures per hop among those rotations,
+                                                    * hs_sat_pack: hop 0 in the top nibble, <= 15 */
 } scan_row_t;
 
 _Static_assert(sizeof(s_bench_t) <= SCRATCH_BYTES && sizeof(z_bench_t) <= SCRATCH_BYTES &&
                sizeof(x_bench_t) <= SCRATCH_BYTES && sizeof(n_bench_t) <= SCRATCH_BYTES, "bench scratch");
-_Static_assert(sizeof(scan_row_t) == 20u, "20-byte recording rows: 2252 in the scratch");
+_Static_assert(sizeof(scan_row_t) == 22u && SCRATCH_BYTES / sizeof(scan_row_t) == 2048u,
+               "22-byte recording rows: 2048 in the scratch");
+_Static_assert(R_SAT_HOPS * 4u <= 16u, "a row's saturated counts fit its 16 bits");
+_Static_assert(SDR_RX_MAX_HOPS <= 8u, "rotation_t.sat_hops is 8 bits");
 _Static_assert(ROT_READINGS >= SDR_RX_CHANNELS, "a rotation reads every channel once");
 
 typedef struct {
     sdr_reading_t r[ROT_READINGS];
     unsigned n, stale;
+    uint8_t sat_hops;                              /* a bit per plan hop whose capture hit an ADC rail */
 } rotation_t;
 
 /* ---- helpers ---- */
@@ -150,13 +169,14 @@ static int hop_of(const sdr_plan_t *p, unsigned ch, unsigned *j)
 }
 
 /* Production steps up to the next rotation end, its readings in o. t (K s): the per-hop
- * timings and, with feed, each reading's sd_feed time; feed: the readings also go to that
+ * timings and, with feed, the detector's time per reading; feed: the readings also go to that
  * detector, as in production. False when no rotation ended within ROT_STEPS_MAX steps. A yield
  * before a step falls in this rotation. */
 static bool next_rotation(cp_yield_t *y, rotation_t *o, hs_hist_t *t, scan_detector_t *feed)
 {
     o->n = 0;
     o->stale = 0;
+    o->sat_hops = 0;
     for (unsigned k = 0; k < ROT_STEPS_MAX; k++) {
         cp_yield(y);
         sdr_hop_t h;
@@ -169,15 +189,17 @@ static bool next_rotation(cp_yield_t *y, rotation_t *o, hs_hist_t *t, scan_detec
             hs_hist_add(&t[T_WAIT], h.t.wait_us);
             if (h.n) hs_hist_add(&t[T_DSP], h.t.dsp_us);
         }
-        for (unsigned i = 0; i < h.n; i++) {
-            if (feed) {
-                pd_event_t e;
-                const int64_t t0 = esp_timer_get_time();
-                (void)sd_feed(feed, h.r[i].channel, h.r[i].level_qdb, h.r[i].flags, h.r[i].t_us, &e);
-                if (t) hs_hist_add(&t[T_DETECTOR], (uint32_t)(esp_timer_get_time() - t0));
-            }
-            if (o->n < ROT_READINGS) o->r[o->n++] = h.r[i];
+        /* One flag per capture, on both of its readings. */
+        if (h.n && (h.r[0].flags & SDR_RD_SATURATED) && h.hop < SDR_RX_MAX_HOPS) o->sat_hops |= (uint8_t)(1u << h.hop);
+        if (feed && h.n) {                         /* as production feeds it; the time per reading */
+            pd_event_t ev[SDR_RX_PER_HOP];
+            unsigned held;
+            const int64_t t0 = esp_timer_get_time();
+            (void)cp_feed_hop(feed, &h, ev, &held);
+            if (t) hs_hist_add(&t[T_DETECTOR], (uint32_t)((esp_timer_get_time() - t0) / h.n));
         }
+        for (unsigned i = 0; i < h.n; i++)
+            if (o->n < ROT_READINGS) o->r[o->n++] = h.r[i];
         if (h.rotation_end) {
             if (feed) sd_rotation(feed, esp_timer_get_time());
             return true;
@@ -436,6 +458,13 @@ static const char *irr_text(char *buf, size_t size, const char *name, float s_db
     return buf;
 }
 
+/* Run 2's VTX is too weak: S stands over_qdb over its stored floor. */
+static void image_weak(unsigned s, int32_t over_qdb)
+{
+    printf("SDRIMAGE weak: bring the VTX closer (need >= 50 dB over the floor) strong=R%u over_db=%.1f\n"
+           "SDRIMAGE done\n", s + 1u, (double)over_qdb / SDR_QDB_PER_DB);
+}
+
 static void bench_image(cp_t *cp, cp_yield_t *y, x_bench_t *b)
 {
     const sdr_plan_t *p = sdr_bench_plan();
@@ -448,13 +477,20 @@ static void bench_image(cp_t *cp, cp_yield_t *y, x_bench_t *b)
         return;
     }
     const bool stored = cp->image_floor_gain && cp->image_floor_gain == gain;
-    bool signal = false;
-    for (unsigned ch = 0; ch < SDR_RX_CHANNELS; ch++) {
-        const bool ok = stored && have[ch] && cp->image_floor_qdb[ch] != SDR_LEVEL_NONE;
-        over[ch] = ok ? med[ch] - cp->image_floor_qdb[ch] : INT32_MIN;
-        if (ok && over[ch] >= X_SIGNAL_QDB) signal = true;
+    int32_t tmp[SDR_RX_CHANNELS];
+    const hs_x_verdict_t v =
+        hs_x_verdict(med, stored ? cp->image_floor_qdb : NULL, SDR_RX_CHANNELS, SDR_LEVEL_NONE, over, tmp);
+    if (v.run == HS_X_WEAK) {                      /* run 2, its VTX under HS_X_SIGNAL_QDB */
+        image_weak((unsigned)v.top, v.excess);
+        return;
     }
-    if (!signal) {                                 /* run 1: VTX off, the floor of every channel */
+    if (v.run == HS_X_REFUSED) {                   /* a VTX is on: keep what was stored */
+        printf("SDRIMAGE refused: R%d is %.1f dB over the channels' median (a floor allows %d dB), a VTX is on, "
+               "nothing stored: switch every VTX off, then K x\nSDRIMAGE done\n", v.top + 1,
+               (double)v.excess / SDR_QDB_PER_DB, HS_X_FLOOR_SPREAD_QDB / SDR_QDB_PER_DB);
+        return;
+    }
+    if (v.run == HS_X_FLOOR) {                     /* run 1: VTX off, the floor of every channel */
         for (unsigned ch = 0; ch < SDR_RX_CHANNELS; ch++) cp->image_floor_qdb[ch] = (int16_t)med[ch];
         cp->image_floor_gain = gain;
         printf("SDRIMAGE floor stored gain=%u floor_qdb=%s\n", (unsigned)gain,
@@ -463,10 +499,9 @@ static void bench_image(cp_t *cp, cp_yield_t *y, x_bench_t *b)
         return;
     }
     /* Run 2: S is the channel highest over its floor, P shares its LO. */
-    const unsigned s = (unsigned)hs_strongest_i32(over, SDR_RX_CHANNELS);
+    const unsigned s = (unsigned)v.top;
     if (over[s] < X_NEED_QDB) {
-        printf("SDRIMAGE weak: bring the VTX closer (need >= 50 dB over the floor) strong=R%u over_db=%.1f\n"
-               "SDRIMAGE done\n", s + 1u, (double)over[s] / SDR_QDB_PER_DB);
+        image_weak(s, over[s]);
         return;
     }
     unsigned js = 0;
@@ -712,6 +747,7 @@ static void bench_record(cp_t *cp, cp_yield_t *y, scan_row_t *ring, size_t cap)
     int64_t rot_start = t0, live_t = t0, next_live = t0 + R_LIVE_S * 1000000ll;
     int32_t sum[SDR_RX_CHANNELS] = {0};
     uint16_t cnt[SDR_RX_CHANNELS] = {0};
+    unsigned sat[R_SAT_HOPS] = {0};
     int16_t peak[SDR_RX_CHANNELS];
     unsigned in_row = 0;
     uint32_t row_t = 0;
@@ -728,6 +764,7 @@ static void bench_record(cp_t *cp, cp_yield_t *y, scan_row_t *ring, size_t cap)
             cnt[ch]++;
             if (l > peak[ch]) peak[ch] = l;
         }
+        for (unsigned j = 0; j < R_SAT_HOPS; j++) sat[j] += (r.sat_hops >> j) & 1u;
         /* A running median of the rotation time (1 us a step from the engine's last average): the
          * in-row channel times of tools/scan_analyze.py need it to ~0.1 ms, and the ring fills the
          * scratch, so the rotation times are not kept. */
@@ -744,6 +781,8 @@ static void bench_record(cp_t *cp, cp_yield_t *y, scan_row_t *ring, size_t cap)
                 sum[ch] = 0;
                 cnt[ch] = 0;
             }
+            e->sat = hs_sat_pack(sat);
+            memset(sat, 0, sizeof sat);
             rows++;
             in_row = 0;
         }
@@ -776,8 +815,8 @@ static void bench_record(cp_t *cp, cp_yield_t *y, scan_row_t *ring, size_t cap)
            (unsigned)gain, rot_med, firmware_id());
     for (size_t i = 0; i < kept; i++) {
         const scan_row_t *e = &ring[(oldest + i) % cap];
-        printf("SCAN,%" PRIu32 ",%d,%d,%d,%d,%d,%d,%d,%d\n", e->t_us, e->qdb[0], e->qdb[1], e->qdb[2], e->qdb[3],
-               e->qdb[4], e->qdb[5], e->qdb[6], e->qdb[7]);
+        printf("SCAN,%" PRIu32 ",%d,%d,%d,%d,%d,%d,%d,%d,%04x\n", e->t_us, e->qdb[0], e->qdb[1], e->qdb[2], e->qdb[3],
+               e->qdb[4], e->qdb[5], e->qdb[6], e->qdb[7], (unsigned)e->sat);
         pace(y, &lines);
     }
     printf("SCANDUMP end rotations=%" PRIu32 " decim=%u format=qdb order=%s gain=%u\n", rotations, decim, order,

@@ -7,7 +7,7 @@
 #   make build-<name>                        build one (e.g. build-detector-xiao-c5)
 #   make flash  [FW=<name>] [PORT=<port>]    flash one (interactive menu if omitted)
 #   make monitor [FW=<name>] [PORT=<port>]   serial monitor (Ctrl-] to quit)
-#   make clean                               remove all build dirs
+#   make clean                               remove every build dir and generated sdkconfig
 #   make web-master / web-node               the web pages on a mock server, no board
 #                                            (tools/web_mock.py; WEB_ARGS="--vtx --latency 300")
 #

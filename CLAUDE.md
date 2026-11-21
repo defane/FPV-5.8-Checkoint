@@ -79,7 +79,7 @@ Every firmware builds only `main`'s dependency closure (`set(COMPONENTS main)`):
   usb_reader 10 (the download key). Benches run in the scan task, never in the console.
 - RAM: static IRAM, data and BSS must end below `0x40820000` (`sram_guard.ld` fails the
   link otherwise) with an 8 KiB margin: `_iram_end`, `_data_end`, `_bss_end` ≤
-  `0x4081E000` (`riscv32-esp-elf-nm`; `_bss_end` is `0x4081a3f8` today). Buffers go on
+  `0x4081E000` (`riscv32-esp-elf-nm`; `_bss_end` is `0x4081b008` today). Buffers go on
   the heap or in the bank's regions (`sdr_bench_scratch()`); checkpoint state is
   heap-allocated (`checkpoint_start()`), so do not add static `.bss` buffers. Nothing but
   the scan task touches `0x40820000`–`0x4083FFFF` (the RF dump bank), never during a
@@ -117,10 +117,18 @@ channel's own rest (`scan_detector.c`, `sd_feed()`). Smoothing is time-based: a 
 of 3, then an average whose `alpha` is the weight per 17.5 ms reference sweep
 (τ = −17.5 ms / ln(1 − α), 61 ms at 0.25); the rests follow the smoothed level and never
 move on a saturated capture; after a gap over 100 ms a channel waits for a full median
-again, then its average resumes (re-primes after a gap over `stale_ms`). The pass time on the
+again, then its average resumes (re-primes after a gap over `stale_ms`). Each hop goes
+through the pair ghost guard (`sd_feed_hop()`, `CONFIG_CHECKPOINT_PAIR_GUARD`, default y): on
+a saturated capture the reading of a channel 15 dB under its partner (smoothed) is held, as
+the rails' products ring ghosts on it; after a jump into the rails (a VTX switched on beside the
+antenna) the source's partner, named by the last 3 readings (docs/detector.md "Pair ghost
+guard"). The pass time on the
 wire is the smoothed peak (the console's `PASS` line adds a delay estimate). States
 `IDLE → RISING → PEAK_PASSED → COOLDOWN`; re-arm needs the refractory period
-elapsed AND the level under `active_db - hysteresis_db`. The glue is
+elapsed AND either the level under `active_db - hysteresis_db` or its 1 s average
+`CONFIG_CHECKPOINT_REARM_DROP_DB` (16 dB, 0 = off) under the highest level since the pass
+(the relative re-arm, for a drone that stays up between laps; the next pass must then rise
+that much over the lowest 1 s average since: docs/detector.md "Relative re-arm"). The glue is
 `components/checkpoint`; the parameters are editable from the console (`K`+key:
 `components/checkpoint/cp_console.c` and `checkpoint.c`) and the C3 web UI (pushed over
 the link as `CONFIG_SET`, echoed as `CONFIG_STATE`), saved in NVS namespace `checkpoint`
@@ -187,9 +195,9 @@ pages from disk against a simulated `/api`, so a page edit needs no build or
 flash; a new `/api/state` field or a changed POST buffer goes in the mock too
 (`test/test_web_mock.py` fails otherwise).
 
-After editing `firmware/detector/sdkconfig*.defaults`, delete the generated
-`firmware/detector/sdkconfig` and its variants' `sdkconfig.<variant>` (never the
-`*.defaults`) and run `tools/fw.sh clean`: ESP-IDF never reapplies the defaults, and
+After editing `firmware/detector/sdkconfig*.defaults`, run `tools/fw.sh clean` (`make
+clean`): it deletes every build dir and generated `sdkconfig`/`sdkconfig.<variant>` of the
+`make variants` list, never a `*.defaults`. ESP-IDF never reapplies the defaults, and
 sdr_rx's CMake stops on a stale one (cert-test archive or `-Og`). The raw commands:
 
 ```sh
@@ -206,6 +214,10 @@ cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/pass_detector/include \
   test_pass_detector.c ../components/pass_detector/pass_detector.c -lm -o /tmp/t && /tmp/t
 cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/pass_detector/include test_scan_detector.c \
   ../components/pass_detector/scan_detector.c ../components/pass_detector/pass_detector.c -lm -o /tmp/t && /tmp/t
+cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/pass_detector/include -I../components/sdr_rx \
+  -I../components/sdr_rx/include test_pair_ghost.c ../components/pass_detector/scan_detector.c \
+  ../components/pass_detector/pass_detector.c ../components/sdr_rx/sdr_psd.c ../components/sdr_rx/sdr_level.c \
+  ../components/sdr_rx/sdr_plan.c -lm -o /tmp/t && /tmp/t
 cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/audio_player/include test_audio_resample.c -lm -o /tmp/t && /tmp/t
 cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/link_proto/include \
   test_link_proto.c ../components/link_proto/link_proto.c -o /tmp/t && /tmp/t

@@ -25,7 +25,15 @@ menu "SDR receive engine (sdr_rx)"
     config SDR_RX_IRR_MIN_DB
         int "Minimum image rejection after a full calibration (dB)"
         range 0 60
-        default 30
+        default 25
+        help
+            The FULL verify (the boot, B, Cal B) calibrates an LO again while its raw image
+            rejection, from idle I/Q moments at the verify gain, reads under this. widscan58
+            measured a bad first calibration at about 20 dB (mostly a gain error, Q about
+            1.2 x I) and a recalibration at 30-40 dB, with a VTX (PLAN.md at a9fff97, "Image
+            rejection vs IQ calibration on the C5"). Our C5-Zero's boots read 26.5-34.9 dB
+            ([board] 2026-11-15), so 30 recalibrated good LOs for nothing; 25 still catches a
+            20 dB one. The scan's IQ correction hides the raw path either way.
     config SDR_RX_VERIFY_GAIN
         int "RX gain index of the full calibration's image-rejection verify"
         range 46 83
