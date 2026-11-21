@@ -44,8 +44,8 @@ passes. It scales to a multi-gate race-timing fleet.
 
 The web has **two roles**: **spectators** watch the live standings and status
 read-only (no login), while **admin** actions — pairing, gate order, reset,
-volume, a gate's calibration or reboot, and (on a degraded C3) detector tuning
-— require the admin password
+volume, the fleet's re-arm drop, a gate's calibration or reboot, and (on a
+degraded C3) detector tuning — require the admin password
 (`CONFIG_*_ADMIN_PASSWORD`, no username): the admin toggle in the
 header opens a password dialog. The password never crosses the Wi-Fi: the page
 signs each admin request (HMAC-SHA256, per-session counter against replays)
@@ -96,9 +96,11 @@ last so it overrides the committed defaults.
 To work on the web pages without a board, `make web-master` (<http://127.0.0.1:8080/>)
 or `make web-node` (port 8081) runs `tools/web_mock.py`: it serves the real pages from
 disk, so a browser reload shows an edit, no build and no flash. `/api/*` answers like
-the firmware on a simulated race, admin actions take effect (password `checkpoint`) and
+the firmware on a simulated race (now and then a drone lingers at a gate, its channel
+framed in cooldown), admin actions take effect (password `checkpoint`) and
 signed requests are checked as on the ESP. `WEB_ARGS` passes its options: `--vtx` (a
-strong carrier on every gate, for the calibration guard), `--latency 300`, `--host
+strong carrier on every gate, for the calibration guard; each gate's channel then stays
+in cooldown after its first pass), `--latency 300`, `--host
 0.0.0.0` (to open it from a phone), `--password ""`. Stopping and restarting it is an
 ESP reboot.
 
@@ -142,6 +144,7 @@ cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/web_auth/include \
 cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/checkpoint \
    test_hop_stats.c -lm -o /tmp/t && /tmp/t
 node test_web_auth.mjs   # the page side (auth.js), Node 18+
+node test_web_bubble.mjs # the pages' info bubbles: one snippet, mouse, touch and keyboard
 python3 test_web_mock.py # tools/web_mock.py against the firmware's /api/state and buffers
 python3 test_pcb.py      # hardware/ boards against the firmware's Kconfig pin defaults
 python3 test_scan_analyze.py   # tools/scan_analyze.py on synthetic recordings

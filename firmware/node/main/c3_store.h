@@ -19,7 +19,7 @@ typedef struct {
 } c3_snapshot_t;
 
 void c3_store_init(void);                   /* mutex + load config from NVS */
-lp_config_t c3_config_default(void);        /* mirrors pass_detector defaults + 60 % volume */
+lp_config_t c3_config_default(void);        /* mirrors the C5's defaults (16 dB re-arm drop) + 60 % volume */
 
 /* Returns false (and leaves *out at defaults) when no config has been set yet. */
 bool c3_store_get_config(lp_config_t *out);

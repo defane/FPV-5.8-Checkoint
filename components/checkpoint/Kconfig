@@ -38,8 +38,8 @@ menu "Checkpoint detector"
             settled (0.3 s of readings at the default alpha, ringing nothing
             meanwhile; a shorter hold pauses it): armed under the release;
             over it, relatively armed there, or in
-            COOLDOWN until it falls under the release with
-            CHECKPOINT_REARM_DROP_DB at 0. Off, every reading is fed as it
+            COOLDOWN until it falls under the release with the re-arm
+            drop at 0 (CHECKPOINT_REARM_DROP_DB, K e/E). Off, every reading is fed as it
             comes, the phantoms included. The rules:
             docs/detector.md, "Pair ghost guard", and scan_detector.h.
 
@@ -74,10 +74,17 @@ menu "Checkpoint detector"
               its default after bench B9 measures the IPEX link.
 
     config CHECKPOINT_REARM_DROP_DB
-        int "Relative re-arm: drop under the last pass, dB (0 = off)"
+        int "Relative re-arm: default drop under the last pass, dB (0 = off)"
         range 0 40
         default 16
         help
+            The first boot's value of the drop D, a detector parameter like the
+            others: the console (K e/E, 1 dB steps, 0 to 40) and the bridges'
+            CONFIG_SET (link_proto's rearm_db_x10) change it, and the C5 saves it
+            in NVS with them. A record saved before D was (prefs version 3) and
+            K 0 (defaults) take this value too. The boot line (SDR ready ...
+            rearm_db=) and T show the value in effect.
+
             A channel re-arms after a pass once the refractory period is over and
             its level is back under active_db - hysteresis_db. A drone that stays
             well up between laps never gets there: a 25 mW VTX held 3 m away
@@ -109,9 +116,6 @@ menu "Checkpoint detector"
             - A track that comes back within a few metres of the gate can ring
               there too, as the old re-arm would if the drone fell under the
               release.
-            Not saved in NVS and not on the link: a different D is a different
-            build (sdkconfig.local.defaults), and the boot line shows it
-            (rearm_db=).
 
 endmenu
 

@@ -41,8 +41,12 @@ when it changes: from its web page in degraded mode, or when the C6 master
 assigns it (a fleet `CONFIG`). The C5 applies it, saves it in its own NVS and
 echoes it (`CONFIG_STATE`); the C3 adopts that echo as the current config, so its
 page and its calibration guard follow the C5's real values, and asks for it
-(`CONFIG_REQ`) whenever the C5 says `HELLO`, e.g. after a C5 reboot. The C5 emits
-one `EVENT_PASS` per pass and periodic `STATS` carrying its health; the bridge can
+(`CONFIG_REQ`) every second, so a console edit shows, and whenever the C5 says
+`HELLO`, e.g. after a C5 reboot. On that `HELLO` a relay node pushes the master's
+last `CONFIG` instead, so a C5 that booted after it, or was swapped, runs the
+fleet's settings. The C5 emits one `EVENT_PASS` per pass and periodic `STATS`
+carrying each channel's level and detector state (the pages frame a channel that waits
+to re-arm: [fleet.md](fleet.md)) and its health; the bridge can
 send it `COMMAND`s (calibrate, reboot): see [fleet.md](fleet.md#gate-health-and-remote-commands-no-console-in-production).
 
 Wiring diagram: [`wiring-node.svg`](wiring-node.svg) (C3 + C5). Consolidated

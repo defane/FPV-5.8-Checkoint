@@ -44,34 +44,45 @@ static void put_levels(char *b, size_t cap, const int8_t *levels)
     }
 }
 
+/* Each channel's detector state (pd_state_t, 0..3), R1 first: "0,3,..." (15 B). */
+static void put_states(char *b, size_t cap, uint16_t states)
+{
+    int o = 0;
+    for (unsigned ch = 0; ch < LP_LEVELS; ch++)
+        o += snprintf(b + o, cap - o, "%s%u", ch ? "," : "", lp_state_of(states, ch));
+}
+
 static esp_err_t get_state(httpd_req_t *req)
 {
     c3_snapshot_t s;
     c3_store_snapshot(&s);
-    char fw[LP_FW_LEN], levels[48];
+    char fw[LP_FW_LEN], levels[48], states[16];   /* levels 8 x "-1270" + 7 commas = 47 B */
     json_safe(fw, s.stats.fw, sizeof fw);
-    put_levels(levels, sizeof levels, s.has_stats ? s.stats.levels : NULL);
+    /* A silent C5's last levels and states are stale: unknown and IDLE, as the C6 shows one. */
+    const bool alive = c3_link_c5_alive(), live = s.has_stats && alive;
+    put_levels(levels, sizeof levels, live ? s.stats.levels : NULL);
+    put_states(states, sizeof states, live ? s.stats.states : 0u);
 
-    char body[2048];   /* worst case (16 events, every field at its widest): 1586 B */
+    char body[2048];   /* worst case (16 events, every field at its widest): 1620 B */
     int o = 0;
     o += snprintf(body + o, sizeof body - o,
                   "{\"has_config\":%s,\"config\":{\"alpha_milli\":%ld,\"active_db_x10\":%ld,"
                   "\"hysteresis_db_x10\":%ld,\"drop_db_x10\":%ld,\"min_peak_db_x10\":%ld,"
-                  "\"refractory_ms\":%lu,\"stale_ms\":%lu,\"volume_pct\":%u,\"muted\":%u},",
+                  "\"refractory_ms\":%lu,\"stale_ms\":%lu,\"rearm_db_x10\":%ld,\"volume_pct\":%u,\"muted\":%u},",
                   s.has_config ? "true" : "false",
                   (long)s.config.alpha_milli, (long)s.config.active_db_x10,
                   (long)s.config.hysteresis_db_x10, (long)s.config.drop_db_x10,
                   (long)s.config.min_peak_db_x10, (unsigned long)s.config.refractory_ms,
-                  (unsigned long)s.config.stale_ms, s.config.volume_pct, s.config.muted);
+                  (unsigned long)s.config.stale_ms, (long)s.config.rearm_db_x10, s.config.volume_pct,
+                  s.config.muted);
     o += snprintf(body + o, sizeof body - o,
                   "\"c5_alive\":%s,"
-                  "\"has_stats\":%s,\"stats\":{\"cn_x10\":%ld,\"channel\":%u,\"state\":%u,"
+                  "\"has_stats\":%s,\"stats\":{\"cn_x10\":%ld,\"states\":[%s],"
                   "\"flags\":%u,\"cal_needed\":%s,\"calibrating\":%s,\"gain\":%u,\"passes\":%lu,"
                   "\"uptime_s\":%lu,\"heap_min\":%lu,\"faults\":%lu,\"fw\":\"%s\",\"levels\":[%s]},"
                   "\"total_events\":%lu,\"events\":[",
-                  c3_link_c5_alive() ? "true" : "false",
-                  s.has_stats ? "true" : "false", (long)s.stats.cn_x10, s.stats.channel,
-                  s.stats.state, s.stats.flags,
+                  alive ? "true" : "false",
+                  s.has_stats ? "true" : "false", (long)s.stats.cn_x10, states, s.stats.flags,
                   (s.stats.flags & LP_HEALTH_CAL_NEEDED) ? "true" : "false",
                   (s.stats.flags & LP_HEALTH_CALIBRATING) ? "true" : "false", s.stats.gain,
                   (unsigned long)s.stats.passes, (unsigned long)s.stats.uptime_s,
@@ -140,6 +151,10 @@ static esp_err_t get_auth(httpd_req_t *req)
     return httpd_resp_sendstr(req, "{\"admin\":true}");
 }
 
+/* The page posts every detector field: 8 of them, about 330 B with every number at its widest
+ * JSON form (test/test_web_mock.py checks it against this buffer). A value the C5 refuses (out of
+ * range, the re-arm drop's 0..LP_REARM_MAX_X10 included) leaves it on its settings: its echo
+ * (CONFIG_STATE) replaces the stored copy, and the page shows it. */
 static esp_err_t post_config(httpd_req_t *req)
 {
     char buf[512];
@@ -154,6 +169,7 @@ static esp_err_t post_config(httpd_req_t *req)
     cur.min_peak_db_x10   = json_i(buf, "min_peak_db_x10", cur.min_peak_db_x10);
     cur.refractory_ms     = (uint32_t)json_i(buf, "refractory_ms", (int32_t)cur.refractory_ms);
     cur.stale_ms          = (uint32_t)json_i(buf, "stale_ms", (int32_t)cur.stale_ms);
+    cur.rearm_db_x10      = json_i(buf, "rearm_db_x10", cur.rearm_db_x10);
     cur.volume_pct        = (uint8_t)json_i(buf, "volume_pct", cur.volume_pct);
     cur.muted             = (uint8_t)json_i(buf, "muted", cur.muted);
 

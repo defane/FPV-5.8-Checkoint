@@ -17,7 +17,7 @@ typedef struct {
     uint8_t  channel;        /* assigned FPV channel code */
     int32_t  cn_x10;         /* last reported; LP_CN_UNKNOWN if none */
     int8_t   levels[LP_LEVELS];   /* last reported */
-    uint8_t  state;          /* pd_state_t of the node's detector */
+    uint16_t states;         /* each channel's detector state, lp_state_of() (all IDLE until told) */
     uint32_t last_seen_ms;
     bool     online;         /* seen within the liveness window */
     int8_t   rssi;           /* last ESP-NOW RSSI dBm; 0 = none yet */
@@ -32,7 +32,9 @@ typedef struct {
     uint8_t  gain;           /* RX gain index */
     uint32_t c5_uptime_s;
     uint32_t heap_min;       /* lowest free internal heap since boot, bytes */
-    uint32_t faults;         /* transport fault counters */
+    uint32_t faults;         /* capture faults (timeouts, short/overrun dumps, DSP errors)
+                              * + scan stalls, since its boot */
+    uint16_t rearm_x10;      /* the re-arm drop its C5 echoed *10, FP_REARM_UNKNOWN until told */
     char     fw[LP_FW_LEN];  /* firmware id */
 } c6_node_t;
 
@@ -60,6 +62,10 @@ void c6_hub_start(void);                       /* after Wi-Fi AP is up */
 void c6_hub_local_pass(uint8_t channel, int32_t peak_db_x10, uint32_t at_ms);
 void c6_hub_set_pairing(bool open);
 void c6_hub_set_volume(uint8_t pct);           /* 0..100 %, applied + saved in NVS */
+/* The fleet's relative re-arm drop *10 (0..LP_REARM_MAX_X10, else false): saved (c6_store), sent
+ * now to every online remote gate in its CONFIG (and from then on at pairing, a gate's save and
+ * back online) and to gate 0 (c6_link_sync_rearm). */
+bool c6_hub_set_rearm(int32_t x10);
 bool c6_hub_set_node(uint8_t node_id, uint8_t gate_index, uint8_t channel);  /* reassign */
 bool c6_hub_remove_node(uint8_t node_id);
 void c6_hub_reset_race(void);

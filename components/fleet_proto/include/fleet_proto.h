@@ -4,7 +4,7 @@
  * integer-only little-endian payloads, guarded by a version byte and a CRC16 so
  * a mismatched firmware or a stray frame is rejected.
  *
- * Frame: [VER=1][TYPE][payload...][CRC16_lo][CRC16_hi], CRC16-CCITT over
+ * Frame: [VER=4][TYPE][payload...][CRC16_lo][CRC16_hi], CRC16-CCITT over
  * VER,TYPE,payload (reuses link_proto's lp_crc16). Detector/audio tunables ride
  * as link_proto's lp_config_t so the C6 forwards them to a C5 over UART
  * unchanged.
@@ -22,7 +22,9 @@
 extern "C" {
 #endif
 
-#define FP_VERSION      3u   /* 3: NODE_STATUS levels, the C5 scans; 2: seq + health, COMMAND */
+#define FP_VERSION      4u   /* 4: CONFIG's lp_config_t and NODE_STATUS carry the re-arm drop,
+                              * NODE_STATUS each channel's detector state;
+                              * 3: NODE_STATUS levels, the C5 scans; 2: seq + health, COMMAND */
 #define FP_MAX_PAYLOAD  64u
 #define FP_MAX_FRAME    (4u + FP_MAX_PAYLOAD)   /* VER+TYPE + payload + CRC16(2) */
 
@@ -32,8 +34,8 @@ typedef enum {
     FP_MSG_TIME_BEACON  = 3,  /* master -> all:   fleet time for offset estimation */
     FP_MSG_CONFIG       = 4,  /* master -> node:  gate/channel/enable + detector cfg */
     FP_MSG_GATE_PASS    = 5,  /* node  -> master: a pass at this gate (fleet-timed) */
-    FP_MSG_NODE_STATUS  = 6,  /* node  -> master: periodic C/N, state, counters, C5 health */
-    FP_MSG_HEARTBEAT    = 7,  /* either:          keepalive */
+    FP_MSG_NODE_STATUS  = 6,  /* node  -> master: periodic C/N, states, counters, C5 health */
+    FP_MSG_HEARTBEAT    = 7,  /* node  -> master: boot probe, until it hears us; answered with CONFIG */
     FP_MSG_COMMAND      = 8,  /* master -> node:  forward an lp_cmd_t to the node's C5 */
 } fp_type_t;
 
@@ -73,22 +75,27 @@ typedef struct {
 } fp_gate_pass_t;
 
 /* The node's C5 STATS (link_proto lp_stats_t) relayed, plus the fleet's own
- * gate/seq. */
+ * gate/seq and the re-arm drop its C5 echoed. Its 64-byte payload fills FP_MAX_PAYLOAD. */
 typedef struct {
     uint8_t  gate_index;
-    uint8_t  channel;
-    int32_t  cn_x10;          /* LP_CN_UNKNOWN when none */
-    uint8_t  state;           /* pd_state_t */
+    uint8_t  channel;         /* the node's assigned channel code */
+    int32_t  cn_x10;          /* the C5's strongest rise *10, LP_CN_UNKNOWN when none */
+    uint16_t states;          /* each channel's detector state as lp_stats_t carries it (lp_state_of) */
     uint32_t passes;          /* passes the C5 detected since its boot */
     uint8_t  flags;           /* LP_HEALTH_* of the C5 */
     uint32_t seq;             /* per-node status counter; master infers loss from gaps */
     uint8_t  gain;            /* C5 RX gain index */
     uint32_t uptime_s;        /* C5 uptime */
     uint32_t heap_min;        /* C5 lowest free internal heap since boot, bytes */
-    uint32_t faults;          /* C5 transport fault counters */
+    uint32_t faults;          /* C5 capture faults (timeouts, short/overrun dumps, DSP errors)
+                               * + scan stalls, since its boot */
     int8_t   levels[LP_LEVELS];   /* C5 dB above each channel's rest, LP_LEVEL_UNKNOWN when none */
+    uint16_t rearm_db_x10;    /* the C5's re-arm drop *10 from its last CONFIG_STATE echo,
+                               * FP_REARM_UNKNOWN before the first one */
     char     fw[LP_FW_LEN];   /* C5 firmware id; always NUL-terminated after a decode */
 } fp_node_status_t;
+
+#define FP_REARM_UNKNOWN 0xFFFFu
 
 typedef struct {
     uint8_t  gate_index;      /* the gate it is meant for (a node ignores another's) */

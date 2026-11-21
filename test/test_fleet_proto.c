@@ -45,13 +45,32 @@ int main(void) {
         fp_config_t s = { .gate_index = 1, .channel = 36, .enable = 1,
             .det = { .alpha_milli = 300, .active_db_x10 = 150, .hysteresis_db_x10 = 30,
                      .drop_db_x10 = 30, .min_peak_db_x10 = 250, .refractory_ms = 1500,
-                     .stale_ms = 1000, .volume_pct = 60, .muted = 0 } };
+                     .stale_ms = 1000, .rearm_db_x10 = LP_REARM_DEFAULT_X10, .volume_pct = 60, .muted = 0 } };
         size_t n = fp_encode_config(buf, sizeof buf, &s);
         bool ok = n && fp_decode(buf, n, &m) && m.type == FP_MSG_CONFIG &&
                   m.config.gate_index == 1 && m.config.channel == 36 && m.config.enable == 1 &&
                   m.config.det.active_db_x10 == 150 && m.config.det.refractory_ms == 1500u &&
+                  m.config.det.stale_ms == 1000u && m.config.det.rearm_db_x10 == LP_REARM_DEFAULT_X10 &&
                   m.config.det.volume_pct == 60;
-        CHECK(ok, "config roundtrip (embeds lp_config_t)");
+        CHECK(ok, "config roundtrip (embeds lp_config_t, the re-arm drop included)");
+        CHECK(n == 4u + 3u + 34u, "config frame: 3 bytes + the 34-byte lp_config_t");
+        s.det.rearm_db_x10 = 0;
+        n = fp_encode_config(buf, sizeof buf, &s);
+        ok = n && fp_decode(buf, n, &m) && m.config.det.rearm_db_x10 == 0 && m.config.det.volume_pct == 60;
+        s.det.rearm_db_x10 = LP_REARM_MAX_X10;
+        n = fp_encode_config(buf, sizeof buf, &s);
+        ok = ok && n && fp_decode(buf, n, &m) && m.config.det.rearm_db_x10 == LP_REARM_MAX_X10;
+        CHECK(ok, "config: a re-arm drop of 0 (off) and 40 dB round-trip");
+        /* link_proto's CONFIG_SET takes the same lp_config_t: what the node forwards is what came. */
+        uint8_t lb[LP_MAX_FRAME];
+        lp_decoder_t d;
+        lp_decoder_init(&d);
+        const size_t ln = lp_encode_config(lb, sizeof lb, LP_MSG_CONFIG_SET, &m.config.det);
+        lp_msg_t lm = {0};
+        bool got = false;
+        for (size_t i = 0; i < ln; i++) got = lp_decoder_push(&d, lb[i], &lm) || got;
+        CHECK(got && lm.config.rearm_db_x10 == LP_REARM_MAX_X10 && lm.config.stale_ms == 1000u,
+              "config: forwarded over link_proto unchanged");
     }
     {
         fp_gate_pass_t s = { .gate_index = 4, .channel = 40, .peak_db_x10 = 352,
@@ -64,19 +83,43 @@ int main(void) {
         CHECK(ok, "gate_pass roundtrip");
     }
     {
-        fp_node_status_t s = { .gate_index = 0, .channel = 36, .cn_x10 = LP_CN_UNKNOWN,
-                               .state = 2, .passes = 9, .flags = LP_HEALTH_CAL_NEEDED,
+        /* R1..R8: every state twice, R1 and R8 COOLDOWN so both ends of the 16 bits are set. */
+        const unsigned want[LP_LEVELS] = { LP_STATE_COOLDOWN, LP_STATE_IDLE, LP_STATE_RISING,
+                                           LP_STATE_PEAK_PASSED, LP_STATE_PEAK_PASSED, LP_STATE_RISING,
+                                           LP_STATE_IDLE, LP_STATE_COOLDOWN };
+        uint16_t states = 0;
+        for (unsigned ch = 0; ch < LP_LEVELS; ch++) states = lp_state_set(states, ch, want[ch]);
+        fp_node_status_t s = { .gate_index = 2, .channel = 36, .cn_x10 = LP_CN_UNKNOWN,
+                               .states = states, .passes = 9, .flags = LP_HEALTH_CAL_NEEDED,
                                .seq = 0xDEADBEEF, .gain = 76, .uptime_s = 3600,
                                .heap_min = 131072, .faults = 3, .levels = {1, -2, 3, LP_LEVEL_UNKNOWN, 5, 6, 127, -127},
-                               .fw = "5.0.12+abcdef123456" };
+                               .rearm_db_x10 = 140, .fw = "5.0.12+abcdef123456" };
         size_t n = fp_encode_node_status(buf, sizeof buf, &s);
         const fp_node_status_t *r = &m.node_status;
         bool ok = n && n <= FP_MAX_FRAME && fp_decode(buf, n, &m) && m.type == FP_MSG_NODE_STATUS &&
-                  r->cn_x10 == LP_CN_UNKNOWN && r->passes == 9 && r->state == 2 &&
+                  r->gate_index == 2 && r->channel == 36 &&
+                  r->cn_x10 == LP_CN_UNKNOWN && r->passes == 9 && r->states == states &&
                   r->flags == LP_HEALTH_CAL_NEEDED && r->seq == 0xDEADBEEF && r->gain == 76 &&
                   r->uptime_s == 3600 && r->heap_min == 131072 && r->faults == 3 &&
-                  memcmp(r->levels, s.levels, LP_LEVELS) == 0 && strcmp(r->fw, "5.0.12+abcdef123456") == 0;
-        CHECK(ok, "node_status roundtrip (negative cn, seq, C5 health, fw id)");
+                  memcmp(r->levels, s.levels, LP_LEVELS) == 0 && r->rearm_db_x10 == 140 &&
+                  strcmp(r->fw, "5.0.12+abcdef123456") == 0;
+        for (unsigned ch = 0; ch < LP_LEVELS; ch++) ok = ok && lp_state_of(r->states, ch) == want[ch];
+        CHECK(ok, "node_status roundtrip (each channel's state, negative cn, seq, C5 health, re-arm drop, fw id)");
+        CHECK(n == 4u + 64u && n == FP_MAX_FRAME, "node_status: 64-byte payload, a full FP_MAX_FRAME");
+        CHECK(states == 0xC693u && buf[2 + 6] == 0x93u && buf[2 + 7] == 0xC6u,
+              "node_status states: as STATS packs them, little-endian at payload 6..7");
+
+        /* The 63-byte payload of a NODE_STATUS with one state byte is the wrong length now. */
+        n = fp_encode_node_status(buf, sizeof buf, &s) - 1u;   /* drop the last payload byte */
+        const uint16_t crc = lp_crc16(buf, n - 2u);
+        buf[n - 2] = (uint8_t)(crc & 0xFFu);
+        buf[n - 1] = (uint8_t)(crc >> 8);
+        CHECK(!fp_decode(buf, n, &m), "a 63-byte node_status payload rejected");
+        s.rearm_db_x10 = FP_REARM_UNKNOWN;
+        n = fp_encode_node_status(buf, sizeof buf, &s);
+        ok = n && fp_decode(buf, n, &m) && r->rearm_db_x10 == FP_REARM_UNKNOWN &&
+             memcmp(r->levels, s.levels, LP_LEVELS) == 0 && strcmp(r->fw, "5.0.12+abcdef123456") == 0;
+        CHECK(ok, "node_status: an unknown re-arm drop (no echo yet) round-trips");
 
         memset(s.fw, 'x', sizeof s.fw);
         n = fp_encode_node_status(buf, sizeof buf, &s);
@@ -116,6 +159,22 @@ int main(void) {
         size_t n = fp_encode_heartbeat(buf, sizeof buf, &s);
         buf[0] = 0x99;
         CHECK(!fp_decode(buf, n, &m), "wrong version rejected");
+    }
+    /* A version-3 board (no re-arm drop) is refused, not misread, even with a valid CRC. */
+    {
+        fp_config_t s = { .gate_index = 1, .enable = 1, .det = { .alpha_milli = 250, .stale_ms = 1000 } };
+        size_t n = fp_encode_config(buf, sizeof buf, &s);
+        buf[0] = 3;
+        const uint16_t crc = lp_crc16(buf, n - 2u);
+        buf[n - 2] = (uint8_t)(crc & 0xFFu);
+        buf[n - 1] = (uint8_t)(crc >> 8);
+        CHECK(FP_VERSION == 4u && !fp_decode(buf, n, &m), "version-3 frame rejected (valid CRC)");
+        /* Its 33-byte CONFIG payload under version 4 is the wrong length. */
+        n = fp_encode_config(buf, sizeof buf, &s) - 4u;   /* drop the last 4 payload bytes */
+        const uint16_t c2 = lp_crc16(buf, n - 2u);
+        buf[n - 2] = (uint8_t)(c2 & 0xFFu);
+        buf[n - 1] = (uint8_t)(c2 >> 8);
+        CHECK(!fp_decode(buf, n, &m), "a v3-length config payload rejected at version 4");
     }
     /* A truncated frame (wrong length for the type) is rejected. */
     {

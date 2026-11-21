@@ -1,11 +1,11 @@
 /* checkpoint_link: the C5 side of the C5<->bridge UART link (link_proto).
  *
  * A single priority-1 task owns the UART. It announces itself (HELLO), sends
- * STATS (the channels' levels and health) periodically and an EVENT_PASS for
- * every detected pass, and serves the bridge (a C3 node, or the C6 master for its
- * own gate): applies CONFIG_SET / answers CONFIG_REQ and runs a COMMAND
- * (a calibration like the console's B/F, or a reboot), as nobody opens the
- * C5's USB console in production. Pass events reach it through a small queue
+ * STATS (the channels' levels and detector states, the health) periodically and
+ * an EVENT_PASS for every detected pass, and serves the bridge (a C3 node, or
+ * the C6 master for its own gate): applies CONFIG_SET / answers CONFIG_REQ and
+ * runs a COMMAND (a calibration like the console's B/F, or a reboot), as nobody
+ * opens the C5's USB console in production. Pass events reach it through a small queue
  * (checkpoint_link_report_pass, called from the scan task), so every UART
  * write happens from this one task and never races. It reads the UART for
  * LINK_READ_MS at a time, so a queued pass leaves within about that. */

@@ -58,7 +58,7 @@ jobs:
           else
             echo "version=5.0.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
           fi
-      - uses: actions/setup-node@v4   # test/test_web_auth.mjs (the idf image has no node)
+      - uses: actions/setup-node@v4   # test/*.mjs (the idf image has no node)
         with:
           node-version: 20
       - name: Host tests
@@ -114,6 +114,7 @@ jobs:
             ../components/web_auth/web_auth.c -o /tmp/test_web_auth
           /tmp/test_web_auth | tail -1
           node test_web_auth.mjs
+          node test_web_bubble.mjs   # the C3/C6 pages' info bubbles
       - name: Diagnostic log semantics
         run: |
           python3 test/test_web_mock.py
