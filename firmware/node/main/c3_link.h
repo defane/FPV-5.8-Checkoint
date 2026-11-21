@@ -23,7 +23,7 @@ bool c3_link_c5_alive(void);
 int32_t c3_link_c5_rearm_x10(void);
 
 /* Debug mode (web): the C5's console text and typed keys. The text of its LOG frames is kept in
- * a ring (sanitized: no quote, backslash or control other than newline, so it can sit in JSON);
+ * a ring (lp_logring: sanitized, no quote, backslash or control other than newline, so it can sit in JSON);
  * positions count bytes since boot. */
 #define C3_LOG_CHUNK 700u
 /* Copies up to max bytes from position `since`. *next is where to continue; *lost is set when the

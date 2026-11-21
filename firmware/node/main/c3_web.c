@@ -262,23 +262,6 @@ static esp_err_t post_debug(httpd_req_t *req)
     return httpd_resp_sendstr(req, r);
 }
 
-/* Would these keystrokes, typed on the C5's console, blind the gate (no detection for a few
- * seconds or the length of a bench)? F and B recalibrate; after K, the benches (s z x n p S),
- * the gain (g G) and the antenna (i) do. K stays open until q (the C5's own window is 5 s per
- * key, and the keys of one request arrive together). */
-static bool keys_blind(const char *keys)
-{
-    bool in_k = false;
-    for (const char *k = keys; *k; k++) {
-        if (in_k) {
-            if (*k == 'q') in_k = false;
-            else if (strchr("szxnpSgGi", *k)) return true;
-        } else if (*k == 'K') in_k = true;
-        else if (*k == 'F' || *k == 'B') return true;
-    }
-    return false;
-}
-
 /* {"keys":"Ka","force":0|1}: typed on the C5's console as on its USB ("K" opens the settings
  * menu, "T" is the status, "F"/"B" calibrate). The keys that blind the gate follow
  * post_command's rule: refused with {"blind":true}, or {"vtx":true} while a carrier is seen,
@@ -292,11 +275,10 @@ static esp_err_t post_key(httpd_req_t *req)
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "no keys");
         return ESP_FAIL;
     }
-    for (const char *k = keys; *k; k++)
-        if (*k < ' ' || *k > '~' || *k == '`') {      /* ` is the C5's download key */
-            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad key");
-            return ESP_FAIL;
-        }
+    if (!lp_keys_valid(keys)) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad key");
+        return ESP_FAIL;
+    }
     const bool force = json_i(buf, "force", 0) != 0;
 
     httpd_resp_set_type(req, "application/json");
@@ -304,7 +286,7 @@ static esp_err_t post_key(httpd_req_t *req)
         return httpd_resp_sendstr(req, "{\"ok\":false,\"msg\":\"debug mode is off\"}");
     if (!c3_link_c5_alive())
         return httpd_resp_sendstr(req, "{\"ok\":false,\"msg\":\"no C5 linked\"}");
-    if (keys_blind(keys) && !force) {
+    if (lp_keys_blind(keys) && !force) {
         c3_snapshot_t s;
         c3_store_snapshot(&s);
         char r[72];

@@ -1,5 +1,6 @@
 /* link_proto: C5 <-> C3 UART framing and messages. See link_proto.h. */
 #include "link_proto.h"
+#include <string.h>
 
 /* ---- little-endian field helpers ---- */
 
@@ -157,6 +158,59 @@ size_t lp_encode_debug(uint8_t *buf, size_t cap, bool on) {
 size_t lp_encode_key(uint8_t *buf, size_t cap, const char *keys, size_t len) {
     if (!keys || len == 0 || len > LP_KEY_MAX) return 0;
     return frame(buf, cap, LP_MSG_KEY, (const uint8_t *)keys, (uint8_t)len);
+}
+
+/* ---- debug mode, bridge side ---- */
+
+void lp_logring_init(lp_logring_t *r, char *buf, uint32_t cap) {
+    r->buf = buf;
+    r->cap = cap;
+    r->total = 0;
+}
+
+void lp_logring_reset(lp_logring_t *r) { r->total = 0; }
+
+void lp_logring_put(lp_logring_t *r, const lp_text_t *t) {
+    for (uint8_t i = 0; i < t->len; i++) {
+        char ch = t->text[i];
+        if (ch == '\r') continue;
+        if (ch == '"') ch = '\'';
+        else if (ch == '\\') ch = '/';
+        else if (ch != '\n' && (ch < ' ' || ch > '~')) ch = '?';
+        r->buf[r->total % r->cap] = ch;
+        r->total++;
+    }
+}
+
+size_t lp_logring_read(const lp_logring_t *r, uint32_t since, char *out, size_t max,
+                       uint32_t *next, bool *lost) {
+    const uint32_t oldest = r->total > r->cap ? r->total - r->cap : 0;
+    *lost = false;
+    if (since > r->total) since = oldest;
+    else if (since < oldest) { since = oldest; *lost = true; }
+    const size_t n = r->total - since < max ? r->total - since : max;
+    for (size_t i = 0; i < n; i++) out[i] = r->buf[(since + i) % r->cap];
+    *next = since + (uint32_t)n;
+    return n;
+}
+
+bool lp_keys_valid(const char *keys) {
+    size_t n = 0;
+    for (; keys && keys[n]; n++)
+        if (keys[n] < ' ' || keys[n] > '~' || keys[n] == '`') return false;
+    return n >= 1u && n <= LP_KEY_MAX;
+}
+
+bool lp_keys_blind(const char *keys) {
+    bool in_k = false;
+    for (const char *k = keys; k && *k; k++) {
+        if (in_k) {
+            if (*k == 'q') in_k = false;
+            else if (strchr("szxnpSgGi", *k)) return true;
+        } else if (*k == 'K') in_k = true;
+        else if (*k == 'F' || *k == 'B') return true;
+    }
+    return false;
 }
 
 /* ---- streaming decoder ----

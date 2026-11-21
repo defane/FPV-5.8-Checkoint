@@ -321,6 +321,46 @@ int main(void) {
         CHECK(run(f, sizeof f, got, 4) == 0, "debug value out of range dropped");
     }
 
+    {   /* the bridge's log ring and the keys a page may type */
+        char store[16];
+        lp_logring_t r;
+        lp_logring_init(&r, store, sizeof store);
+        lp_text_t t = { .len = 8 };
+        memcpy(t.text, "a\"b\\c\r\n\x01", 8);
+        lp_logring_put(&r, &t);
+        char out[32];
+        uint32_t next;
+        bool lost;
+        size_t n = lp_logring_read(&r, 0, out, sizeof out, &next, &lost);
+        CHECK(n == 7 && memcmp(out, "a'b/c\n?", 7) == 0 && next == 7 && !lost,
+              "log text made JSON-safe: no quote, backslash or CR, controls as ?");
+        n = lp_logring_read(&r, 3, out, 2, &next, &lost);
+        CHECK(n == 2 && next == 5 && !lost, "a read stops at max and continues from next");
+        t.len = 14;
+        memset(t.text, 'x', 14);
+        lp_logring_put(&r, &t);                      /* 21 bytes in a 16-byte ring */
+        n = lp_logring_read(&r, 0, out, sizeof out, &next, &lost);
+        CHECK(n == 16 && lost && next == 21, "bytes the ring dropped are skipped and flagged");
+        n = lp_logring_read(&r, 99, out, sizeof out, &next, &lost);
+        CHECK(n == 16 && !lost && next == 21, "a position past the end restarts at the oldest byte (reboot)");
+        n = lp_logring_read(&r, 21, out, sizeof out, &next, &lost);
+        CHECK(n == 0 && next == 21 && !lost, "nothing new");
+        lp_logring_reset(&r);
+        n = lp_logring_read(&r, 0, out, sizeof out, &next, &lost);
+        CHECK(n == 0 && next == 0, "reset restarts the positions");
+
+        CHECK(lp_keys_valid("Ka") && lp_keys_valid("T") && lp_keys_valid("0123456789abcdef"), "valid keys");
+        CHECK(!lp_keys_valid("") && !lp_keys_valid("0123456789abcdefg") && !lp_keys_valid("a`b") &&
+              !lp_keys_valid("a\nb") && !lp_keys_valid("\x7f") && !lp_keys_valid(NULL),
+              "empty, too long, backtick, control and non-ASCII keys refused");
+        CHECK(lp_keys_blind("F") && lp_keys_blind("B") && lp_keys_blind("Ks") && lp_keys_blind("Kg") &&
+              lp_keys_blind("Ki") && lp_keys_blind("KaS"), "calibrations, benches, gain and antenna blind");
+        CHECK(!lp_keys_blind("T") && !lp_keys_blind("Ka") && !lp_keys_blind("Kk") && !lp_keys_blind("Kq") &&
+              !lp_keys_blind(""), "status and the settings do not");
+        CHECK(!lp_keys_blind("Kqs") && lp_keys_blind("Kqx") == false && lp_keys_blind("KqF"),
+              "after q the menu is closed: s is not a bench, F still calibrates");
+    }
+
     printf("%d/%d link_proto checks passed\n", g_pass, g_pass + g_fail);
     return g_fail ? 1 : 0;
 }

@@ -180,6 +180,34 @@ typedef struct {
 void lp_decoder_init(lp_decoder_t *d);
 bool lp_decoder_push(lp_decoder_t *d, uint8_t byte, lp_msg_t *out);
 
+/* ---- debug mode, bridge side (the C3 and the C6 share it) ----
+ * The C5's console text, kept by the bridge for its web page. A ring of `cap` bytes the caller
+ * provides; positions count bytes since the last reset. No locking: the caller serialises. */
+typedef struct {
+    char    *buf;
+    uint32_t cap;
+    uint32_t total;             /* bytes ever stored: the position of the next one */
+} lp_logring_t;
+
+void lp_logring_init(lp_logring_t *r, char *buf, uint32_t cap);
+void lp_logring_reset(lp_logring_t *r);                  /* a fresh log: positions restart at 0 */
+/* Stores a LOG chunk made safe for JSON: no CR, no quote (-> '), no backslash (-> /), no control
+ * other than the newline, nothing over '~' (-> '?'). */
+void lp_logring_put(lp_logring_t *r, const lp_text_t *t);
+/* Copies up to max bytes from position `since`. *next is where to continue; *lost is set when the
+ * ring had already dropped bytes after `since` (they are skipped). `since` past the end (the
+ * bridge rebooted since the page asked) restarts at the oldest byte kept. */
+size_t lp_logring_read(const lp_logring_t *r, uint32_t since, char *out, size_t max,
+                       uint32_t *next, bool *lost);
+
+/* Keystrokes a page may type on the C5's console: 1..LP_KEY_MAX printable ASCII, no backtick (the
+ * C5's download key). */
+bool lp_keys_valid(const char *keys);
+/* Would these keystrokes blind the gate (no detection for a few seconds or the length of a bench)?
+ * F and B recalibrate; after K, the benches (s z x n p S), the gain (g G) and the antenna (i) do.
+ * K stays open until q (the C5's own window is 5 s per key, and a request's keys arrive together). */
+bool lp_keys_blind(const char *keys);
+
 /* CRC16-CCITT over len bytes (exposed for tests). */
 uint16_t lp_crc16(const uint8_t *data, size_t len);
 
