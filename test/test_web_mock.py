@@ -71,8 +71,12 @@ def page_posts(page):
     return out
 
 
-def c_reads(fn):
-    return set(re.findall(r'json_[is]\(buf, "(\w+)"', fn))
+def c_reads(fn, src=""):
+    """The body keys a C handler parses (json_i/json_s), with the helpers it hands buf to (body_gate(buf))."""
+    keys = set(re.findall(r'json_[is]\(buf, "(\w+)"', fn))
+    for helper in set(re.findall(r"\b(\w+)\(buf\)", fn)):
+        keys |= set(re.findall(r'json_[is]\(buf, "(\w+)"', c_function(src, helper)))
+    return keys
 
 
 def mock_reads(cls, method):
@@ -363,12 +367,13 @@ class DebugCases:
         for uri, args in re.findall(r'AdminAuth\.request\("POST", "(/api/(?:log|key|debug))", (.*?)\);?\n', page):
             for obj in re.findall(r"\{([^{}]*)\}", args):
                 sent.setdefault(uri, set()).update(re.findall(r"(?:^|,)\s*(\w+)\s*(?=[:,]|$)", obj.strip()))
-        self.assertEqual(sent, {"/api/log": {"since"}, "/api/debug": {"on"}, "/api/key": {"keys", "force"}})
+        self.assertEqual(sent, {"/api/log": {"since"} | self.gate_key, "/api/debug": {"on"} | self.gate_key,
+                                "/api/key": {"keys", "force"} | self.gate_key})
         for uri, keys in sent.items():
             self.assertIn(uri, routes, "a POST the firmware does not route")
-            self.assertLessEqual(keys, c_reads(c_function(src, routes[uri])), f"{uri}: a field the firmware would not read")
+            self.assertLessEqual(keys, c_reads(c_function(src, routes[uri]), src), f"{uri}: a field the firmware would not read")
             self.assertLessEqual(keys, mock_reads(self.cls, self.cls.ADMIN[uri][0]), f"{uri}: a field the mock would not read")
-        widest = '{"keys":"' + "\\\\" * 16 + '","force":1}'          # 16 keys, each escaped by JSON.stringify
+        widest = '{"keys":"' + "\\\\" * 16 + '","force":1' + (',"gate":15' if self.gate_key else "") + "}"   # 16 keys, each escaped by JSON.stringify
         self.assertLess(len(widest), self.cls.ADMIN["/api/key"][1])
 
     def test_every_route_calls_a_method(self):
@@ -377,11 +382,54 @@ class DebugCases:
 
 
 class NodeDebug(DebugCases, unittest.TestCase):
-    cls, page = web_mock.Node, "firmware/node/main/www/index.html"
+    cls, page, gate_key = web_mock.Node, "firmware/node/main/www/index.html", set()
 
 
 class MasterDebug(DebugCases, unittest.TestCase):
-    cls, page = web_mock.Master, "firmware/master/main/www/index.html"
+    cls, page, gate_key = web_mock.Master, "firmware/master/main/www/index.html", {"gate"}
+
+    def test_a_remote_gate_is_debugged_through_its_node(self):
+        t = 60.0
+        self.sim.state(t)
+        node = self.sim.nodes[0]                                  # gate 1, online
+        self.assertEqual(self.sim.set_debug({"on": 1, "gate": 9}, t), {"ok": False, "debug": 0}, "no node on gate 9")
+        self.assertEqual(self.sim.set_debug({"on": 1, "gate": self.sim.nodes[2].gate}, t)["ok"], False, "its node is offline")
+        self.assertIsNone(self.sim.set_debug({"on": 1, "gate": 16}, t), "gate out of range")
+        self.assertEqual(self.sim.key({"keys": "T", "gate": node.gate}, t), {"ok": False, "msg": "debug mode is off"})
+        self.assertEqual(self.sim.set_debug({"on": 1, "gate": node.gate}, t), {"ok": True, "debug": 1})
+        out = self.sim.log({"since": 0, "gate": node.gate}, t)
+        self.assertEqual((out["gate"], out["debug"], out["c5_alive"]), (node.gate, 1, 1))
+        self.assertEqual(self.sim.key({"keys": "T", "gate": node.gate}, t), {"ok": True})
+        self.assertIn("STATUS", self.sim.log({"since": 0, "gate": node.gate}, t)["text"])
+        self.assertEqual(self.sim.log({"since": 0}, t)["debug"], 0, "gate 0 is not the one in debug mode")
+        self.assertEqual(self.sim.log({"since": 0}, t)["text"], "")
+        self.assertEqual(self.sim.set_debug({"gate": node.gate}, t)["debug"], 1, "no \"on\" only asks")
+        # One gate at a time: switching gate 0 on switches the remote one off, and its log restarts.
+        self.assertEqual(self.sim.set_debug({"on": 1, "gate": 0}, t), {"ok": True, "debug": 1})
+        self.assertEqual(self.sim.set_debug({"gate": node.gate}, t)["debug"], 0)
+        self.assertEqual(self.sim.log({"since": 0, "gate": 0}, t)["text"], "", "a fresh log")
+        self.assertEqual(self.sim.set_debug({"on": 0, "gate": node.gate}, t)["debug"], 0, "off for a gate not in debug is a no-op")
+        self.assertEqual(self.sim.set_debug({"gate": 0}, t)["debug"], 1)
+
+    def test_a_remote_gates_blind_keys_ask_first(self):
+        t = 60.0
+        sim = web_mock.Master(vtx=True)
+        sim.state(t)
+        g = sim.nodes[0].gate
+        sim.set_debug({"on": 1, "gate": g}, t)
+        out = sim.key({"keys": "B", "gate": g}, t)
+        self.assertTrue(out.get("vtx") and out["cn_x10"] > web_mock.ACTIVE_X10, out)
+        self.assertEqual(sim.key({"keys": "B", "gate": g, "force": 1}, t), {"ok": True})
+        sim.nodes[0].online = False
+        self.assertEqual(sim.key({"keys": "T", "gate": g}, t), {"ok": False, "msg": "no C5 linked"}, "its node left")
+
+    def test_the_remote_gates_passes_reach_its_log_only(self):
+        sim = web_mock.Master()
+        sim.set_debug({"on": 1, "gate": 1}, 0.0)
+        sim.state(120.0)
+        text = sim.log({"since": 0, "gate": 1}, 120.0)["text"]
+        self.assertIn("PASS channel=R2", text)
+        self.assertNotIn("PASS channel=R1", text, "gate 0's prints are not in a remote gate's log")
 
     def test_the_local_gates_passes_reach_the_log(self):
         self.sim.set_debug({"on": 1}, 0.0)

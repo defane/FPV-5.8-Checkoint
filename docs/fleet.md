@@ -24,13 +24,14 @@ with no change on the gate side.
   detector settings, the relative re-arm drop included, `EVENT_PASS` with the pass's age,
   `STATS` with the 8 channels' levels, each channel's detector state, the strongest rise
   (the calibration guard's) and the C5's health, `COMMAND`, `LOG` console text, `KEY` console keystrokes, `DEBUG`);
-  `components/fleet_proto` v4 (C6↔C3 ESP-NOW: pairing, time beacons, `CONFIG` (the gate
+  `components/fleet_proto` v5 (C6↔C3 ESP-NOW: pairing, time beacons, `CONFIG` (the gate
   and its detector settings, link_proto's `lp_config_t` as it goes to the C5, re-arm drop
   included), `GATE_PASS`, `NODE_STATUS` relaying the C5's `STATS` and the re-arm drop its
-  last `CONFIG_STATE` echoed, `COMMAND`); `components/espnow_link` (transport);
+  last `CONFIG_STATE` echoed, `COMMAND`, and `DEBUG`/`KEY`/`LOG_REQ`/`LOG_CHUNK` for a remote gate's debug mode); `components/espnow_link` (transport);
   `components/race_timing` (laps/sectors per channel). A board left on an older
   firmware is not misread, it simply does not talk (v4 added the re-arm drop and the
-  channels' states): **reflash every C5, C3 and the C6 together** after a protocol change.
+  channels' states, v5 the remote gate's debug mode: a C3 left on v4 drops off the race, not only
+  the debug): **reflash every C5, C3 and the C6 together** after a protocol change.
 - **Detector states:** the C5 reports each channel's detector state in `STATS`, 2 bits per
   channel (`states`, R1 in bits 1..0, R8 in bits 15..14: 0 idle, 1 rising, 2 peak passed,
   3 cooldown; `lp_state_of()` in `link_proto.h`), and `NODE_STATUS` relays them as they are.
@@ -223,9 +224,24 @@ Not mirrored: the `K S` scan-recording rows and what the engine (`sdr_rx`) and t
 print. Logging out of the page leaves debug mode on until the board reboots.
 
 **The C6 master's page** has the same panel (advanced view, admin, *Debug* under "Master & local
-gate (0)"), with the same three routes (`/api/debug`, `/api/log`, `/api/key`), for **gate 0's C5
-only**: the C6 is the UART master of that C5 as the C3 is of its own. The VTX guard of a blind key
-uses gate 0's C/N and its `active_db`. A **remote gate's console** is not reachable from the C6: it
-would need `LOG`/`KEY`/`DEBUG` relayed over `fleet_proto` (ESP-NOW frames of 250 B, a log stream
-per gate to budget against the passes). Until then a remote gate is debugged over USB, or with its
-C3 out of the master's reach (a C3 that finds no master shows its degraded page, debug included).
+gate (0)"), with the same three routes (`/api/debug`, `/api/log`, `/api/key`) and a **gate**
+selector (gate 0 and each online remote gate); every body carries `"gate"` (default 0). **One gate
+is in debug mode at a time**: switching one on switches the previous one off, and the page's choice
+of gate moves the debug mode along if it was on. A blind key's VTX guard uses that gate's C/N: gate
+0's against its `active_db`, a remote gate's against the one the hub pushes.
+
+*Gate 0* is the C6's own C5 over its UART, as on the C3 (`c6_link.c`). A *remote gate* goes through
+its node, **pulled by the master** (a node pushing its C5's console would load the air for every
+gate): `DEBUG` (on/off), `KEY` (the keys, 1..16 bytes), `LOG_REQ` (`since`) answered by `LOG_CHUNK`
+(`from`, flags, up to 56 bytes). All four count only between a node and its own master (MAC). The
+node's C3 keeps its C5's console in the same 4 KiB ring and answers each request with the next
+bytes; the C6 polls **stop-and-wait** (one request in flight, a new one at once after a full
+chunk, else every 100 ms, so at most 20 per second; re-asked after 300 ms) and keeps the text in a
+ring of its own (`c6_hub.c`) for the page. Duplicates are dropped and gaps counted
+(`fp_log_take`, host-tested). **Leases** keep nothing on unattended: the master switches the node off
+when no page polled `/api/log` for 10 s, and the node switches itself off when no `LOG_REQ` came for
+`FP_DEBUG_LEASE_MS` (30 s: a C6 that rebooted). A node that rebooted answers `LOG_CHUNK` with
+debug off, and the master releases it (the page shows it off again). Throughput is about 0.5 to 1
+KB/s per gate: enough for `PASS`, `T` and the `K` menus, while a busy trace (`K l`) shows
+`[log: N bytes lost]` gaps. Keys type on the node's C5 like on USB, so a blind one asks first, as
+for gate 0; a node out of reach answers `no C5 linked`.

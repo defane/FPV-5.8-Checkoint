@@ -462,7 +462,11 @@ Debug mode (off at boot): on the C3's page, unlock as admin, open *Debug*, switc
 the `PASS` and `CHECKPOINT` lines appear within about 1 s; `T` prints the status, `K` the menu,
 `Ka` lowers the smoothing (the log shows the new `set alpha=`); `F` asks before it blinds the gate.
 Switched off (or after a C3 reboot): no log, and a key is refused. Same on the C6's page (advanced
-view, admin, *Debug* under "Master & local gate (0)"), for its own C5 (gate 0).
+view, admin, *Debug* under "Master & local gate (0)"): gate 0 first, then pick a remote gate (it must be
+online) in the *Gate* selector: the log and the keys are that gate's C5's, one gate at a time (choosing
+another moves the debug mode). Pass: a pass of that gate prints within about 1 s, `T` answers within
+about 1 s (ESP-NOW round trip), `F` asks first. Close the panel or leave the page: 10 s later the node's
+debug is off (no `LOG` traffic; `K` keys refused). Reboot the node: the panel shows off again.
 - Pass: the *calibrating* badge for 4 s at most (F) or 5 s (B), then OK; the VTX guard
   refuses with a VTX on; *Reboot* prints `SDR reboot=requested` and `STATS` come back within
   5 s; the download key enters the ROM loader every time (`enter_download.py` sees the

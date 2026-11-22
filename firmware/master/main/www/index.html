@@ -57,6 +57,7 @@
   #dbg_log { height: 260px; overflow: auto; margin: 0; padding: 8px; background: #0f1216; border-radius: 6px;
              font: .75rem/1.35 ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; word-break: break-all; }
   details > summary { cursor: pointer; }
+  select { background: #0f1216; color: #e7ebf0; border: 1px solid #2a313a; border-radius: 6px; padding: 5px; }
   .tip { position: relative; display: inline-block; cursor: pointer; }
   .bubble { display: none; position: absolute; z-index: 1; left: 0; bottom: calc(100% + 6px); padding: 4px 8px;
             border: 1px solid #3a4350; border-radius: 6px; background: #0e1014; font-size: .78rem; white-space: nowrap; }
@@ -179,10 +180,11 @@
   </div>
   <h2 class="adv admin-only">Debug (admin)</h2>
   <details id="dbg" class="card adv admin-only">
-    <summary>Gate 0 C5 console: log and keys</summary>
+    <summary>Gate C5 console: log and keys</summary>
     <div class="bar">
+      <label class="muted" style="font-size:.8rem">Gate <select id="dbg_gate"><option value="0">0 · master</option></select></label>
       <button id="dbg_on" class="switch" role="switch" aria-checked="false"><i></i><span>debug mode</span></button>
-      <span class="muted" style="font-size:.8rem">off at every boot; while off the C5 sends no log and ignores keys</span>
+      <span class="muted" style="font-size:.8rem">off at every boot; one gate at a time; while off its C5 sends no log and ignores keys</span>
     </div>
     <div id="dbg_body" hidden>
     <pre id="dbg_log"></pre>
@@ -207,7 +209,7 @@
     </div>
     </div>
     <span id="dbg_msg" class="muted"></span>
-    <div class="muted" style="margin-top:8px;font-size:.8rem">Keys are typed on the C5's console in order. Calibrations, benches, gain and antenna blind the gate: they ask first. Benches' scan recording (K S) and the engine's own prints stay on USB. The remote gates' consoles are on their own C3's page.</div>
+    <div class="muted" style="margin-top:8px;font-size:.8rem">Keys are typed on the C5's console in order. Calibrations, benches, gain and antenna blind the gate: they ask first. Benches' scan recording (K S) and the engine's own prints stay on USB. A remote gate's log comes by ESP-NOW about 50 bytes at a time: a busy trace (K l) skips lines.</div>
   </details>
 
 </main>
@@ -291,7 +293,7 @@ async function post(url, obj) {     // signed (auth.js): the password never goes
 
 function setAdmin(on) {             // back to spectator forgets the key
   admin = on; editing = false;
-  if (!on) { AdminAuth.logout(); rearmDirty = false; infoClose(); dbgText = ""; dbgNext = 0; $("dbg").open = false; dbgShow(false); dbgRender(); }
+  if (!on) { AdminAuth.logout(); rearmDirty = false; infoClose(); dbgText = ""; dbgNext = 0; dbgGate = 0; $("dbg").open = false; dbgShow(false); dbgRender(); }
   document.body.classList.toggle("is-admin", on);
   $("role").setAttribute("aria-checked", on);
 }
@@ -463,6 +465,7 @@ async function poll() {
   try {
     const s = await (await fetch("/api/state")).json();
     fillChannels(s);
+    dbgGates(s);
     $("conn").hidden = true;
     $("pair_state").textContent = s.pairing ? "OPEN" : "closed";
     $("pair_state").className = s.pairing ? "on" : "off";
@@ -595,18 +598,40 @@ $("nodes").addEventListener("click", async e => {
 });
 // Debug: the C5's console text (POST /api/log from the position we have) and its keys.
 const DBG_MAX = 60000;
-let dbgNext = 0, dbgText = "", dbgPaused = false, dbgBusy = false, dbgOn = false;
+let dbgNext = 0, dbgText = "", dbgPaused = false, dbgBusy = false, dbgOn = false, dbgGate = 0;
 function dbgShow(on) {
   dbgOn = on; $("dbg_on").setAttribute("aria-checked", on); $("dbg_body").hidden = !on;
 }
+// The gate the panel talks to; its log, position and switch are that gate's (one is in debug mode at a time).
+function dbgReset() { dbgText = ""; dbgNext = 0; dbgRender(); }
 async function dbgSwitch(on) {   // on: true/false to set it, undefined to ask
-  const r = await AdminAuth.request("POST", "/api/debug", JSON.stringify(on === undefined ? {} : { on: on ? 1 : 0 }));
+  const gate = dbgGate;
+  const r = await AdminAuth.request("POST", "/api/debug", JSON.stringify(on === undefined ? { gate } : { on: on ? 1 : 0, gate }));
   if (r.status === 401) { setAdmin(false); return; }
-  if (!r.ok) return;
+  if (!r.ok || gate !== dbgGate) return;
   const j = await r.json();
-  if (!!j.debug !== dbgOn) { dbgText = ""; dbgNext = 0; dbgRender(); }
+  if (!!j.debug !== dbgOn) dbgReset();
   dbgShow(!!j.debug);
+  if (on && !j.ok) $("dbg_msg").textContent = "gate offline";
 }
+// The selector lists gate 0 and each online remote gate (state's nodes); the choice stays while it can.
+function dbgGates(s) {
+  const gates = [0, ...[...new Set((s.nodes || []).filter(n => n.online).map(n => n.gate))].sort((a, b) => a - b)];
+  const sel = $("dbg_gate");
+  if (!gates.includes(dbgGate)) gates.push(dbgGate);   // a gate that dropped keeps its entry while selected
+  const want = gates.map(g => `<option value="${g}">${g === 0 ? "0 · master" : g}</option>`).join("");
+  if (sel.innerHTML !== want) sel.innerHTML = want;
+  if (sel.value !== String(dbgGate)) sel.value = dbgGate;
+}
+$("dbg_gate").addEventListener("change", () => {
+  const was = dbgOn;
+  dbgGate = +$("dbg_gate").value;
+  dbgShow(false); dbgReset();
+  $("dbg_msg").textContent = "";
+  // A debug mode that was on follows to the new gate (the old one goes off); otherwise it is only asked,
+  // so a mere choice never starts one.
+  dbgSwitch(was ? true : undefined).catch(() => { $("dbg_msg").textContent = "failed"; });
+});
 $("dbg_on").addEventListener("click", () => { dbgSwitch(!dbgOn).catch(() => { $("dbg_msg").textContent = "failed"; }); });
 function dbgRender() {
   const f = $("dbg_filter").value.toLowerCase();
@@ -620,11 +645,13 @@ async function dbgPoll() {
   if (!admin || document.body.classList.contains("simple") || !$("dbg").open || !dbgOn || dbgPaused || dbgBusy) return;
   dbgBusy = true;
   try {
-    const r = await AdminAuth.request("POST", "/api/log", JSON.stringify({ since: dbgNext }));
+    const gate = dbgGate;
+    const r = await AdminAuth.request("POST", "/api/log", JSON.stringify({ since: dbgNext, gate }));
     if (r.status === 401) { setAdmin(false); return; }
     if (!r.ok) return;
     const j = await r.json();
-    if (!j.debug) { dbgShow(false); return; }   // the C6 rebooted: off again
+    if (j.gate !== dbgGate) return;   // the selector moved while this was in flight
+    if (!j.debug) { dbgShow(false); return; }   // the C6 rebooted, or the gate's node left debug mode: off again
     if (j.next < dbgNext) dbgText += "\n[C6 restarted]\n";
     if (j.lost) dbgText += "\n[log: older lines were lost]\n";
     dbgNext = j.next;
@@ -637,7 +664,7 @@ async function dbgPoll() {
   finally { dbgBusy = false; }
 }
 async function dbgKeys(keys, force) {
-  const r = await AdminAuth.request("POST", "/api/key", JSON.stringify({ keys, force }));
+  const r = await AdminAuth.request("POST", "/api/key", JSON.stringify({ keys, force, gate: dbgGate }));
   if (r.status === 401) { setAdmin(false); return { ok: false, msg: "password required" }; }
   return r.ok ? r.json() : { ok: false, msg: "failed (" + r.status + ")" };
 }

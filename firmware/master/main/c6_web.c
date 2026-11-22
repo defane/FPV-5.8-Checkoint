@@ -374,21 +374,49 @@ static esp_err_t post_command(httpd_req_t *req) {
     return httpd_resp_send(req, out, o);
 }
 
-/* Debug mode (admin): the local C5's console text and typed keys. The remote gates' consoles stay
- * on their own C3's page. POST {"since":N} answers {"debug","next","lost","c5_alive","text"}: the
- * bytes after position N (c6_link_log_read; the text holds no quote, backslash or control other
- * than the newline, which is escaped here). The page asks again from "next". */
+/* Debug mode (admin): a gate's C5 console text and typed keys. Every body may carry "gate" (default
+ * 0, the master's own C5 over its UART; 1.. a remote gate, over its node: c6_hub_debug_*). One gate
+ * at a time is in debug mode: switching one on switches the previous off. */
+static int32_t body_gate(const char *buf) {
+    const int32_t g = json_i(buf, "gate", 0);
+    return g >= 0 && g < (int32_t)RT_MAX_GATES ? g : -1;
+}
+
+/* Is gate g in debug mode now? */
+static bool dbg_on(int32_t g) { return g == 0 ? c6_link_debug() : c6_hub_debug_gate() == g; }
+
+/* Is gate g's C5 reachable (the local one heard, a node of that gate online)? s_fleet is refreshed. */
+static bool dbg_reachable(int32_t g) {
+    if (g == 0) return c6_store_has_local();
+    c6_hub_snapshot(&s_fleet);
+    for (unsigned i = 0; i < s_fleet.num_nodes; i++)
+        if (s_fleet.nodes[i].gate_index == g && s_fleet.nodes[i].online) return true;
+    return false;
+}
+
+/* POST {"since":N,"gate":G} answers {"gate","debug","next","lost","c5_alive","text"}: the bytes after
+ * position N of the debug log (the text holds no quote, backslash or control other than the
+ * newline, which is escaped here). The page asks again from "next"; "gate" tells it which gate the
+ * answer is for (it may have changed the selector meanwhile). A gate that is not the one in debug
+ * mode answers debug 0 and no text; a remote gate's poll keeps its debug mode alive. */
 static esp_err_t post_log(httpd_req_t *req) {
     char buf[64];
     if (!web_auth_request(req, buf, sizeof buf)) return ESP_OK;
     static char raw[C6_LOG_CHUNK];                  /* larger than the stack; httpd runs one handler at a time */
     static char body[2 * C6_LOG_CHUNK + 96];
-    uint32_t next;
-    bool lost;
-    const size_t n = c6_link_log_read((uint32_t)json_i(buf, "since", 0), raw, sizeof raw, &next, &lost);
-    int o = snprintf(body, sizeof body, "{\"debug\":%u,\"next\":%lu,\"lost\":%u,\"c5_alive\":%u,\"text\":\"",
-                     c6_link_debug() ? 1u : 0u, (unsigned long)next, lost ? 1u : 0u,
-                     c6_store_has_local() ? 1u : 0u);
+    const int32_t gate = body_gate(buf);
+    const bool on = gate >= 0 && dbg_on(gate);
+    uint32_t next = 0;
+    bool lost = false;
+    size_t n = 0;
+    if (on) {
+        const uint32_t since = (uint32_t)json_i(buf, "since", 0);
+        n = gate == 0 ? c6_link_log_read(since, raw, sizeof raw, &next, &lost)
+                      : c6_hub_log_read(since, raw, sizeof raw, &next, &lost);
+    }
+    int o = snprintf(body, sizeof body, "{\"gate\":%ld,\"debug\":%u,\"next\":%lu,\"lost\":%u,\"c5_alive\":%u,\"text\":\"",
+                     (long)gate, on ? 1u : 0u, (unsigned long)next, lost ? 1u : 0u,
+                     gate >= 0 && dbg_reachable(gate) ? 1u : 0u);
     for (size_t i = 0; i < n; i++) {
         if (raw[i] == '\n') { body[o++] = '\\'; body[o++] = 'n'; }
         else body[o++] = raw[i];
@@ -398,30 +426,45 @@ static esp_err_t post_log(httpd_req_t *req) {
     return httpd_resp_send(req, body, o);
 }
 
-/* Debug mode on or off ({"on":0|1}; no "on" only asks). Off at every boot: nothing is mirrored from
- * the C5, and /api/key sends nothing, until an admin switches it on. */
+/* Debug mode of a gate on or off ({"on":0|1,"gate":G}; no "on" only asks). Off at every boot: nothing
+ * is mirrored from any C5, and /api/key sends nothing, until an admin switches a gate on. A remote
+ * gate with no online node answers {"ok":false}. */
 static esp_err_t post_debug(httpd_req_t *req) {
     char buf[32];
     if (!web_auth_request(req, buf, sizeof buf)) return ESP_OK;
-    const int32_t on = json_i(buf, "on", -1);
-    if (on >= 0) {
-        c6_link_debug_set(on != 0);
-        ESP_LOGW(TAG, "debug mode %s from web", on ? "ON" : "off");
+    const int32_t on = json_i(buf, "on", -1), gate = body_gate(buf);
+    if (gate < 0) { httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "gate"); return ESP_FAIL; }
+    bool ok = true;
+    if (on > 0) {
+        const int remote = c6_hub_debug_gate();
+        if (gate == 0) {
+            if (remote > 0) c6_hub_debug_set((uint8_t)remote, false);   /* one gate at a time */
+            c6_link_debug_set(true);
+        } else {
+            if (c6_link_debug()) c6_link_debug_set(false);
+            ok = c6_hub_debug_set((uint8_t)gate, true);
+        }
+    } else if (on == 0) {
+        if (gate == 0) c6_link_debug_set(false);
+        else c6_hub_debug_set((uint8_t)gate, false);
     }
-    char r[32];
-    snprintf(r, sizeof r, "{\"ok\":true,\"debug\":%u}", c6_link_debug() ? 1u : 0u);
+    if (on >= 0) ESP_LOGW(TAG, "debug mode gate %ld %s from web%s", (long)gate, on ? "ON" : "off", ok ? "" : " (refused)");
+    char r[48];
+    snprintf(r, sizeof r, "{\"ok\":%s,\"debug\":%u}", ok ? "true" : "false", dbg_on(gate) ? 1u : 0u);
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_sendstr(req, r);
 }
 
-/* {"keys":"Ka","force":0|1}: typed on the local C5's console as on its USB ("K" opens the settings
- * menu, "T" is the status, "F"/"B" calibrate). The keys that blind the gate follow post_command's
- * rule: refused with {"blind":true}, or {"vtx":true} while a carrier is seen, until the page asks
- * the admin and retries with force. The C5's answer comes back through /api/log. */
+/* {"keys":"Ka","force":0|1,"gate":G}: typed on the gate's C5 console as on its USB ("K" opens the
+ * settings menu, "T" is the status, "F"/"B" calibrate). The keys that blind the gate follow
+ * post_command's rule: refused with {"blind":true}, or {"vtx":true} while a carrier is seen
+ * (gate 0's C/N against its active_db, a remote gate's against the one the hub pushes), until the
+ * page asks the admin and retries with force. The C5's answer comes back through /api/log. */
 static esp_err_t post_key(httpd_req_t *req) {
     char buf[96], keys[LP_KEY_MAX + 1];
     if (!web_auth_request(req, buf, sizeof buf)) return ESP_OK;
-    if (!json_s(buf, "keys", keys, sizeof keys) || !keys[0]) {
+    const int32_t gate = body_gate(buf);
+    if (gate < 0 || !json_s(buf, "keys", keys, sizeof keys) || !keys[0]) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "no keys");
         return ESP_FAIL;
     }
@@ -432,22 +475,33 @@ static esp_err_t post_key(httpd_req_t *req) {
     const bool force = json_i(buf, "force", 0) != 0;
 
     httpd_resp_set_type(req, "application/json");
-    if (!c6_link_debug())
+    if (!dbg_on(gate))
         return httpd_resp_sendstr(req, "{\"ok\":false,\"msg\":\"debug mode is off\"}");
-    if (!c6_store_has_local())
+    if (!dbg_reachable(gate))
         return httpd_resp_sendstr(req, "{\"ok\":false,\"msg\":\"no C5 linked\"}");
     if (lp_keys_blind(keys) && !force) {
         c6_store_snapshot(&s_snap);
-        const int32_t active = s_snap.has_local_cfg ? s_snap.local_cfg.active_db_x10 : c6_hub_vtx_threshold_x10();
+        c6_hub_snapshot(&s_fleet);
+        int32_t cn = LP_CN_UNKNOWN, active = c6_hub_vtx_threshold_x10();
+        if (gate == 0) {
+            cn = s_snap.local.cn_x10;
+            if (s_snap.has_local_cfg) active = s_snap.local_cfg.active_db_x10;
+        } else {
+            for (unsigned i = 0; i < s_fleet.num_nodes; i++)
+                if (s_fleet.nodes[i].gate_index == gate && s_fleet.nodes[i].online && s_fleet.nodes[i].cn_x10 > cn)
+                    cn = s_fleet.nodes[i].cn_x10;
+        }
         char r[72];
-        if (s_snap.local.cn_x10 != LP_CN_UNKNOWN && s_snap.local.cn_x10 > active)
-            snprintf(r, sizeof r, "{\"ok\":false,\"vtx\":true,\"cn_x10\":%ld}", (long)s_snap.local.cn_x10);
+        if (cn != LP_CN_UNKNOWN && cn > active)
+            snprintf(r, sizeof r, "{\"ok\":false,\"vtx\":true,\"cn_x10\":%ld}", (long)cn);
         else
             snprintf(r, sizeof r, "{\"ok\":false,\"blind\":true}");
         return httpd_resp_sendstr(req, r);
     }
-    c6_link_send_keys(keys, strlen(keys));
-    ESP_LOGW(TAG, "keys \"%s\" from web%s", keys, force ? " (forced)" : "");
+    if (gate == 0) c6_link_send_keys(keys, strlen(keys));
+    else if (!c6_hub_send_keys((uint8_t)gate, keys, strlen(keys)))
+        return httpd_resp_sendstr(req, "{\"ok\":false,\"msg\":\"not sent\"}");
+    ESP_LOGW(TAG, "keys \"%s\" to gate %ld from web%s", keys, (long)gate, force ? " (forced)" : "");
     return httpd_resp_sendstr(req, "{\"ok\":true}");
 }
 

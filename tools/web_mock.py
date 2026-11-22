@@ -180,51 +180,76 @@ class Gate:
 
 
 class ConsoleDebug:
-    """Debug mode of a page with a local C5: c3_web.c / c6_web.c post_log, post_debug, post_key over
-    c3_link.c / c6_link.c's ring (link_proto's lp_logring, lp_keys_valid, lp_keys_blind)."""
-    LOG_RING, LOG_CHUNK = 4096, 700       # LOG_RING in c3_link.c and c6_link.c, C3_LOG_CHUNK / C6_LOG_CHUNK
+    """Debug mode: c3_web.c / c6_web.c post_log, post_debug, post_key over the bridge's ring (link_proto's
+    lp_logring, lp_keys_valid, lp_keys_blind). Every body may carry "gate" (default 0): one gate at a
+    time is in debug mode (switching one on switches the previous off); the C3 has only gate 0, the C6
+    gate 0 over its UART and the remote gates through their nodes (c6_hub_debug_*)."""
+    LOG_RING, LOG_CHUNK = 4096, 700       # LOG_RING in c3_link.c, c6_link.c, c6_hub.c; C3_LOG_CHUNK / C6_LOG_CHUNK
     BLIND = "szxnpSgGi"                   # lp_keys_blind(): after K
 
     def init_debug(self):
-        self.text, self.log_total, self.debug = "", 0, False   # the C5's console text as the bridge keeps it; off at boot
+        self.text, self.log_total, self.debug_gate = "", 0, None   # the C5's console text as the bridge keeps it; off at boot
+
+    @property
+    def debug(self):
+        return self.debug_gate is not None
 
     def local_c5(self):
-        """The Gate the page's local C5 is."""
+        """The Gate the page's own C5 (gate 0) is."""
         raise NotImplementedError
+
+    def c5_of(self, gate):
+        """The Gate a debug request can reach, None for a gate with no C5 (online node) behind it."""
+        return self.local_c5() if gate == 0 else None
 
     def active_x10(self):
         """The VTX guard's threshold, the C5's active_db."""
         return ACTIVE_X10
 
-    def say(self, text):
-        """The C5 prints: the bridge stores it sanitized (lp_logring_put)."""
+    @staticmethod
+    def gate_of(b):
+        """body_gate() in c6_web.c: None out of range (the firmware's 400, or a log with no debug)."""
+        g = b.get("gate", 0)
+        return g if isinstance(g, int) and 0 <= g < 16 else None
+
+    def say(self, text, gate=0):
+        """A C5 prints: the bridge stores it sanitized (lp_logring_put), when that gate is the one in debug mode."""
         text = "".join(c if c == "\n" else "" if c == "\r" else "'" if c == '"' else "/" if c == "\\"
                        else c if " " <= c <= "~" else "?" for c in text)
-        if not self.debug:
+        if self.debug_gate != gate:
             return
         self.text = (self.text + text)[-self.LOG_RING:]
         self.log_total += len(text)
 
     def set_debug(self, b, t):
-        """post_debug()."""
-        on = b.get("on", -1)
-        if on >= 0:
-            if on and not self.debug:
-                self.text, self.log_total = "", 0
-            self.debug = bool(on)
-        return {"ok": True, "debug": int(self.debug)}
+        """post_debug(): None for its 400."""
+        gate, on = self.gate_of(b), b.get("on", -1)
+        if gate is None:
+            return None
+        ok = True
+        if on > 0:
+            ok = self.c5_of(gate) is not None
+            if ok and self.debug_gate != gate:
+                self.text, self.log_total, self.debug_gate = "", 0, gate
+        elif on == 0 and self.debug_gate == gate:
+            self.debug_gate = None
+        return {"ok": ok, "debug": int(self.debug_gate == gate)}
 
     def log(self, b, t):
-        """post_log(): the text after b["since"], 700 bytes at most."""
-        g, since = self.local_c5(), b.get("since", 0)
+        """post_log(): the text after b["since"], 700 bytes at most, for b["gate"]."""
+        gate, since = self.gate_of(b), b.get("since", 0)
+        g = self.c5_of(gate) if gate is not None else None
+        out = {"gate": -1 if gate is None else gate, "debug": 0, "next": 0, "lost": 0,
+               "c5_alive": int(bool(g and g.up(t))), "text": ""}
+        if gate is None or self.debug_gate != gate:
+            return out
         oldest = max(0, self.log_total - self.LOG_RING)
-        lost = False
         if since > self.log_total:
             since = oldest
         elif since < oldest:
-            since, lost = oldest, True
+            since, out["lost"] = oldest, 1
         chunk = self.text[since - oldest:][:self.LOG_CHUNK]
-        return {"debug": int(self.debug), "next": since + len(chunk), "lost": int(lost), "c5_alive": int(g.up(t)), "text": chunk}
+        return {**out, "debug": 1, "next": since + len(chunk), "text": chunk}
 
     @classmethod
     def blinds(cls, keys):
@@ -244,23 +269,24 @@ class ConsoleDebug:
 
     def key(self, b, t):
         """post_key(): None for its 400. The C5 answers on the console."""
-        keys, g = b.get("keys", ""), self.local_c5()
-        if not keys or len(keys) > 16 or any(not " " <= c <= "~" or c == "`" for c in keys):
+        keys, gate = b.get("keys", ""), self.gate_of(b)
+        if gate is None or not keys or len(keys) > 16 or any(not " " <= c <= "~" or c == "`" for c in keys):
             return None
-        if not self.debug:
+        if self.debug_gate != gate:
             return {"ok": False, "msg": "debug mode is off"}
-        if not g.up(t):
+        g = self.c5_of(gate)
+        if g is None or not g.up(t):
             return {"ok": False, "msg": "no C5 linked"}
         if self.blinds(keys) and not b.get("force"):
             cn = g.cn_x10(t)
             if cn > self.active_x10():
                 return {"ok": False, "vtx": True, "cn_x10": cn}
             return {"ok": False, "blind": True}
-        self.say(f"> {keys}\n")
+        self.say(f"> {keys}\n", gate)
         if keys[0] == "K":
-            self.say("CHECKPOINT K + key (lower = down, upper = up; K stays open 5 s after each key, q closes):\n")
+            self.say("CHECKPOINT K + key (lower = down, upper = up; K stays open 5 s after each key, q closes):\n", gate)
         elif keys == "T":
-            self.say(f"STATUS uptime_s={int(t)} heap_internal=118000 fw={g.health(t)['fw']}\n")
+            self.say(f"STATUS uptime_s={int(t)} heap_internal=118000 fw={g.health(t)['fw']}\n", gate)
         elif keys in ("F", "B"):
             g.run("cal_quick" if keys == "F" else "cal_full", t)
         return {"ok": True}
@@ -308,9 +334,13 @@ class Master(ConsoleDebug):
     def local_c5(self):
         return self.local
 
+    def c5_of(self, gate):
+        if gate == 0:
+            return self.local
+        return next((n for n in self.nodes if n.gate == gate and n.online), None)   # dbg_find() in c6_hub.c
+
     def pass_at(self, g, at, peak):
-        if g is self.local:
-            self.say(f"PASS channel=R{g.channel + 1} peak_db={peak / 10:.1f} at_ms={int(at * 1000)}\n")
+        self.say(f"PASS channel=R{g.channel + 1} peak_db={peak / 10:.1f} at_ms={int(at * 1000)}\n", g.gate)
         self.total += 1
         self.events = [{"gate": g.gate, "channel": g.channel, "peak_db_x10": peak,
                         "at_ms": int(at * 1000)}] + self.events[:PASSES_KEPT["master"] - 1]
