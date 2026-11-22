@@ -128,11 +128,16 @@ jobs:
             echo "CCACHE_MAXSIZE=400M"
           } >> "$GITHUB_ENV"
       - name: Restore the compiler cache
-        uses: actions/cache@v4
+        id: ccache_restore
+        uses: actions/cache/restore@v4
         with:
           path: .ccache
           key: ccache-${{ github.job }}-${{ github.event.pull_request.head.sha || github.sha }}
           restore-keys: ccache-${{ github.job }}-
+      # The counters live in the cache: zeroed, they count this run alone.
+      - name: Zero the compiler cache statistics
+        shell: bash
+        run: ccache -z
       - name: Build opt-in XIAO PSRAM image
         shell: bash
         run: |
@@ -143,7 +148,36 @@ jobs:
       - name: Compiler cache statistics
         if: always()
         shell: bash
-        run: ccache -s || true
+        run: |
+          ccache -s || true
+          s=$(ccache --print-stats 2>/dev/null || true)
+          hits=$(awk -F'\t' '$1=="direct_cache_hit"||$1=="preprocessed_cache_hit"{n+=$2} END{print n+0}' <<<"$s")
+          miss=$(awk -F'\t' '$1=="cache_miss"{n+=$2} END{print n+0}' <<<"$s")
+          echo "CCACHE_HITS=$hits" >> "$GITHUB_ENV"
+          echo "CCACHE_TOTAL=$((hits + miss))" >> "$GITHUB_ENV"
+          echo "### Compiler cache (job $GITHUB_JOB): $hits hits of $((hits + miss)) compilations this run" >> "$GITHUB_STEP_SUMMARY"
+      - name: Save the compiler cache
+        if: always() && steps.ccache_restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: ${{ steps.ccache_restore.outputs.cache-primary-key }}
+      - name: Check the compiler cache hits
+        shell: bash
+        env:
+          CACHE_RESTORED: "${{ steps.ccache_restore.outputs.cache-matched-key != '' }}"
+        run: |
+          # A cache was restored but nothing hit it: the cache is broken (a changed build path, compiler_check, the
+          # compiler, or a configuration every object depends on). It is saved above first, so the next run starts warm.
+          if [ "$CACHE_RESTORED" != "true" ]; then echo "No cache was restored (a cold run): nothing to check."; exit 0; fi
+          if [ "${CCACHE_TOTAL:-0}" -lt 50 ]; then echo "Only ${CCACHE_TOTAL:-0} compilations: too few to judge."; exit 0; fi
+          if [ "${CCACHE_HITS:-0}" -eq 0 ]; then
+            echo "::error title=ccache::A cache was restored but none of the $CCACHE_TOTAL compilations hit it. Look at the build path, CCACHE_COMPILERCHECK, the ESP-IDF image or sdkconfig; the new cache is saved, so a re-run shows whether it was a one-off."
+            exit 1
+          fi
+          rate=$((100 * CCACHE_HITS / CCACHE_TOTAL))
+          echo "Compiler cache: $CCACHE_HITS hits of $CCACHE_TOTAL ($rate %)."
+          if [ "$rate" -lt 50 ]; then echo "::warning title=ccache::Only $rate % of the compilations hit the cache ($CCACHE_HITS of $CCACHE_TOTAL)."; fi
   build:
     runs-on: ubuntu-latest
     container: espressif/idf:v6.0.2
@@ -178,11 +212,16 @@ jobs:
             echo "CCACHE_MAXSIZE=400M"
           } >> "$GITHUB_ENV"
       - name: Restore the compiler cache
-        uses: actions/cache@v4
+        id: ccache_restore
+        uses: actions/cache/restore@v4
         with:
           path: .ccache
           key: ccache-${{ github.job }}-${{ github.event.pull_request.head.sha || github.sha }}
           restore-keys: ccache-${{ github.job }}-
+      # The counters live in the cache: zeroed, they count this run alone.
+      - name: Zero the compiler cache statistics
+        shell: bash
+        run: ccache -z
       - name: Build Checkpoint C5 detector
         shell: bash
         run: |
@@ -205,7 +244,36 @@ jobs:
       - name: Compiler cache statistics
         if: always()
         shell: bash
-        run: ccache -s || true
+        run: |
+          ccache -s || true
+          s=$(ccache --print-stats 2>/dev/null || true)
+          hits=$(awk -F'\t' '$1=="direct_cache_hit"||$1=="preprocessed_cache_hit"{n+=$2} END{print n+0}' <<<"$s")
+          miss=$(awk -F'\t' '$1=="cache_miss"{n+=$2} END{print n+0}' <<<"$s")
+          echo "CCACHE_HITS=$hits" >> "$GITHUB_ENV"
+          echo "CCACHE_TOTAL=$((hits + miss))" >> "$GITHUB_ENV"
+          echo "### Compiler cache (job $GITHUB_JOB): $hits hits of $((hits + miss)) compilations this run" >> "$GITHUB_STEP_SUMMARY"
+      - name: Save the compiler cache
+        if: always() && steps.ccache_restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: ${{ steps.ccache_restore.outputs.cache-primary-key }}
+      - name: Check the compiler cache hits
+        shell: bash
+        env:
+          CACHE_RESTORED: "${{ steps.ccache_restore.outputs.cache-matched-key != '' }}"
+        run: |
+          # A cache was restored but nothing hit it: the cache is broken (a changed build path, compiler_check, the
+          # compiler, or a configuration every object depends on). It is saved above first, so the next run starts warm.
+          if [ "$CACHE_RESTORED" != "true" ]; then echo "No cache was restored (a cold run): nothing to check."; exit 0; fi
+          if [ "${CCACHE_TOTAL:-0}" -lt 50 ]; then echo "Only ${CCACHE_TOTAL:-0} compilations: too few to judge."; exit 0; fi
+          if [ "${CCACHE_HITS:-0}" -eq 0 ]; then
+            echo "::error title=ccache::A cache was restored but none of the $CCACHE_TOTAL compilations hit it. Look at the build path, CCACHE_COMPILERCHECK, the ESP-IDF image or sdkconfig; the new cache is saved, so a re-run shows whether it was a one-off."
+            exit 1
+          fi
+          rate=$((100 * CCACHE_HITS / CCACHE_TOTAL))
+          echo "Compiler cache: $CCACHE_HITS hits of $CCACHE_TOTAL ($rate %)."
+          if [ "$rate" -lt 50 ]; then echo "::warning title=ccache::Only $rate % of the compilations hit the cache ($CCACHE_HITS of $CCACHE_TOTAL)."; fi
       - name: Package firmware for web flashing
         shell: bash
         run: |
