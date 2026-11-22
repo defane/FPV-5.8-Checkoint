@@ -390,7 +390,12 @@ int main(void) {
                          .gain_steps = -1 };
         n = lp_encode_calib_state(buf, sizeof buf, &c);
         g = run(buf, n, got, 4);
-        CHECK(g == 1 && got[0].type == LP_MSG_CALIB_STATE && memcmp(&got[0].calib, &c, sizeof c) == 0,
+        const lp_calib_t *k = &got[0].calib;   /* field by field: the struct has padding */
+        CHECK(g == 1 && got[0].type == LP_MSG_CALIB_STATE && k->phase == c.phase && k->secs_left == c.secs_left &&
+              k->flags == c.flags && k->channel == c.channel && memcmp(k->gate, c.gate, 5) == 0 &&
+              k->gate_sat_pct == c.gate_sat_pct && memcmp(k->away, c.away, 5) == 0 && k->active_db_x10 == c.active_db_x10 &&
+              k->hysteresis_db_x10 == c.hysteresis_db_x10 && k->drop_db_x10 == c.drop_db_x10 &&
+              k->min_peak_db_x10 == c.min_peak_db_x10 && k->gain_steps == c.gain_steps,
               "calib state roundtrip, signed values included");
         c.phase = LP_CALIB_DONE + 1;
         CHECK(lp_encode_calib_state(buf, sizeof buf, &c) == 0, "calib state with an unknown phase refused");

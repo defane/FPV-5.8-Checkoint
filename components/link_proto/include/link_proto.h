@@ -72,6 +72,11 @@ typedef struct {
     int8_t   gain_steps;     /* advice: -1 lower the gain by one step of 2, +1 raise it */
 } lp_calib_t;
 
+/* The 25-byte payload of an lp_calib_t, shared with fleet_proto's CALIB_STATE relay. */
+#define LP_CALIB_LEN 25u
+void lp_calib_pack(uint8_t out[LP_CALIB_LEN], const lp_calib_t *c);
+bool lp_calib_unpack(const uint8_t *p, size_t len, lp_calib_t *c);   /* false: wrong length or phase */
+
 /* The forced RX gain the web may set (the C5 clamps to its PHY's maximum; the console's K g/G
  * keeps its step of 2 from the saved one). Changing it blinds the gate for a moment: the rests are
  * learnt again, so every VTX must be off. */

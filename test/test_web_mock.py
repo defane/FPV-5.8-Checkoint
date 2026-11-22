@@ -565,10 +565,29 @@ class MasterCalib(unittest.TestCase):
         self.assertEqual(self.call("cancel")["phase"], 0)
 
     def test_a_gate_without_a_reachable_c5(self):
-        out = self.call("start1", gate=1)
-        self.assertEqual((out["ok"], out["msg"]), (False, "no C5 linked"))
+        offline = self.sim.nodes[2].gate                              # its node is offline
+        for gate in (9, offline):
+            out = self.call("start1", gate=gate)
+            self.assertEqual((out["ok"], out["msg"]), (False, "no C5 linked"), gate)
         self.assertIsNone(self.sim.calib({"gate": 16, "action": "state"}, self.t))
         self.assertIsNone(self.sim.calib({"gate": 0, "action": "nope"}, self.t))
+
+    def test_a_remote_gate_calibrates_through_its_node_and_keeps_its_thresholds(self):
+        g = self.sim.nodes[0].gate
+        self.assertFalse(self.sim.state(self.t)["nodes"][0]["custom"], "the fleet's thresholds to begin with")
+        self.assertEqual(self.call("start1", gate=g)["phase"], 1)
+        self.call("state", 6.0, gate=g)
+        self.call("start2", gate=g)
+        self.assertEqual(self.call("state", 6.0, gate=g)["phase"], 4)
+        self.assertEqual(self.call("state")["phase"], 0, "gate 0 has no session of its own")
+        self.assertTrue(self.call("apply", gate=g)["ok"])
+        self.assertEqual(self.sim.applied[g], web_mock.CAL_REC)
+        self.assertTrue(self.sim.state(self.t)["nodes"][0]["custom"], "the node runs calibrated thresholds")
+        out = self.call("reset", gate=g)
+        self.assertTrue(out["ok"])
+        self.assertFalse(self.sim.state(self.t)["nodes"][0]["custom"], "back on the fleet's")
+        out = self.call("reset")
+        self.assertEqual((out["ok"], out["msg"]), (False, "gate 0 keeps its own settings"))
 
     def test_a_calibrating_gate_refuses(self):
         self.sim.local.run("cal_quick", self.t)

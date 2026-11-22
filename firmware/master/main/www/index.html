@@ -164,6 +164,7 @@
       <button id="cal_s1" class="ghost">1 · Measure in the passage</button>
       <button id="cal_s2" class="ghost" disabled>2 · Measure 2 m away</button>
       <button id="cal_cancel" class="ghost" disabled>Cancel</button>
+      <button id="cal_reset" class="ghost" hidden title="Drop this gate's calibrated thresholds: the fleet's are sent again">Use the fleet's thresholds</button>
       <span id="cal_msg" class="muted"></span>
     </div>
     <div id="cal_result" hidden>
@@ -569,7 +570,7 @@ async function poll() {
       const nodes = s.nodes || [];
       const up = s.uptime_ms || 0;
       const seen = n => n.online ? Math.max(0, (up - n.last_seen_ms)/1000 | 0) + "s" : "—";
-      const rearm = n => n.online ? rearmPill(n.rearm_db_x10, s.rearm_db_x10) : "";   // after its health
+      const rearm = n => n.online ? rearmPill(n.rearm_db_x10, s.rearm_db_x10) + (n.custom ? CAL_PILL : "") : "";   // after its health
       $("nodes").innerHTML = nodes.length ? nodes.map(n => admin ? `
         <tr data-id="${n.node_id}" data-gate="${n.gate}" data-channel="${n.channel}">
           <td><input type="number" min="1" max="15" value="${n.gate}" class="g"></td>
@@ -731,6 +732,7 @@ const CAL_WARN = [
   [32, "The C5 refused it (learning its rests, a calibration, a bench): try again in a few seconds."],
 ];
 const dbh = x => (x / 2).toFixed(1);
+const CAL_PILL = ' <span class="pill" title="Thresholds from a passage calibration, not the fleet\'s">calibrated</span>';
 async function calCall(action) {
   try {
     const r = await post("/api/calib", { gate: calGate, action });
@@ -769,7 +771,7 @@ async function calDo(action, msg) {
   calBusy = false;
   if (k.error === "logged out") { $("cal_msg").textContent = ""; return; }
   if (k.error || !k.ok) { $("cal_msg").textContent = k.error || k.msg; $("cal_msg").className = "bad"; }
-  else $("cal_msg").textContent = action === "apply" ? "applied to the gate" : "";
+  else $("cal_msg").textContent = action === "apply" ? "applied to the gate" : action === "reset" ? "back on the fleet's thresholds" : "";
   if (!k.error) calRender(k);
   calAt = Date.now();
 }
@@ -788,11 +790,16 @@ function calGates(s) {
   const want = gates.map(g => `<option value="${g}">${g === 0 ? "0 · master" : g}</option>`).join("");
   if (sel.innerHTML !== want) sel.innerHTML = want;
   if (sel.value !== String(calGate)) sel.value = calGate;
+  const nd = (s.nodes || []).find(n => n.gate === calGate && n.online);
+  $("cal_reset").hidden = !(nd && nd.custom);       // a remote gate running thresholds of its own
 }
 $("cal_gate").addEventListener("change", () => { calGate = +$("cal_gate").value; calPhase = 0; calAt = 0; $("cal_msg").textContent = ""; calRender({ phase: 0, flags: 0, passage: [], away: [], rec: {}, secs_left: 0 }); calPoll(); });
 $("cal_s1").addEventListener("click", () => calDo("start1", "starting…"));
 $("cal_s2").addEventListener("click", () => calDo("start2", "starting…"));
 $("cal_cancel").addEventListener("click", () => calDo("cancel"));
+$("cal_reset").addEventListener("click", () => {
+  if (confirm(`Gate ${calGate} goes back to the fleet's thresholds (its calibration is dropped)?`)) calDo("reset", "sending…");
+});
 $("cal_apply").addEventListener("click", () => {
   if (confirm(`Apply these thresholds to gate ${calGate}? They replace its min peak, active, hysteresis and drop (saved on its C5).`)) calDo("apply", "sending…");
 });

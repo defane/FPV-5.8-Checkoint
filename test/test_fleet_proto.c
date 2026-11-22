@@ -262,6 +262,25 @@ int main(void) {
         n = fp_encode_gain(buf, sizeof buf, &gm);
         CHECK(!fp_decode(buf, n - 1, &m), "a truncated gain frame rejected");
     }
+
+    /* CALIB_START / CALIB_STATE: the passage calibration, relayed. */
+    {
+        size_t n = fp_encode_calib_start(buf, sizeof buf, 1);
+        CHECK(fp_decode(buf, n, &m) && m.type == FP_MSG_CALIB_START && m.calib_step == 1, "calib start roundtrip");
+        CHECK(fp_encode_calib_start(buf, sizeof buf, 3) == 0, "calib step 3 refused");
+        lp_calib_t c = { .phase = LP_CALIB_DONE, .flags = 0x0004, .channel = 2, .gate = { 30, 40, 50, 52, 60 },
+                         .gate_sat_pct = 3, .away = { -2, 10, 20, 24, 30 }, .active_db_x10 = 105, .hysteresis_db_x10 = 40,
+                         .drop_db_x10 = 30, .min_peak_db_x10 = 125, .gain_steps = 1 };
+        n = fp_encode_calib_state(buf, sizeof buf, &c);
+        CHECK(n && n <= FP_MAX_FRAME && fp_decode(buf, n, &m) && m.type == FP_MSG_CALIB_STATE && m.calib.phase == LP_CALIB_DONE &&
+              m.calib.away[0] == -2 && m.calib.min_peak_db_x10 == 125 && m.calib.gain_steps == 1 && m.calib.channel == 2,
+              "calib state roundtrip through a fleet frame");
+        c.phase = LP_CALIB_DONE + 1;
+        CHECK(fp_encode_calib_state(buf, sizeof buf, &c) == 0, "calib state with an unknown phase refused");
+        c.phase = LP_CALIB_MEASURED1;
+        n = fp_encode_calib_state(buf, sizeof buf, &c);
+        CHECK(!fp_decode(buf, n - 1, &m), "a truncated calib state rejected");
+    }
     /* A truncated frame (wrong length for the type) is rejected. */
     {
         fp_gate_pass_t s = { .gate_index = 1, .channel = 1, .peak_db_x10 = 1,

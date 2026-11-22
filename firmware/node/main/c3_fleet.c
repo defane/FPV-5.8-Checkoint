@@ -118,6 +118,12 @@ static void on_msg(const uint8_t mac[6], const fp_msg_t *msg, int8_t rssi) {
     /* Calibrate/reboot: only from our master. Not keyed on gate_index: the
      * master addresses us by MAC, and our saved gate can lag its record (a
      * CONFIG sent while we were off is lost), which would drop it silently. */
+    case FP_MSG_CALIB_START:
+        if (ours) {
+            ESP_LOGI(TAG, "master passage calibration step %u -> C5", msg->calib_step);
+            c3_link_calib_start(msg->calib_step);
+        }
+        break;
     case FP_MSG_GAIN:
         if (ours) {
             ESP_LOGI(TAG, "master gain %u -> C5", msg->gain.gain);
@@ -219,6 +225,15 @@ void c3_fleet_report_pass(const lp_event_t *e) {
                                 .seq = s_pass_seq++ };
     uint8_t buf[FP_MAX_FRAME];
     size_t n = fp_encode_gate_pass(buf, sizeof buf, &gp);
+    if (n) espnow_link_send(s_c6, buf, n);
+}
+
+/* The C5 sends its session's state every STATS period while one exists: each goes on to the master, which
+ * keeps the last (a lost one is replaced a second later). */
+void c3_fleet_report_calib(const lp_calib_t *c) {
+    if (!s_paired || s_degraded) return;
+    uint8_t buf[FP_MAX_FRAME];
+    const size_t n = fp_encode_calib_state(buf, sizeof buf, c);
     if (n) espnow_link_send(s_c6, buf, n);
 }
 

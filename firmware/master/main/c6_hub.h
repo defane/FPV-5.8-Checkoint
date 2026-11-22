@@ -36,6 +36,9 @@ typedef struct {
                               * + scan stalls, since its boot */
     uint16_t rearm_x10;      /* the re-arm drop its C5 echoed *10, FP_REARM_UNKNOWN until told */
     char     fw[LP_FW_LEN];  /* firmware id */
+    lp_calib_t calib;        /* the C5's passage-calibration state, last relayed */
+    uint32_t calib_ms;       /* when it came, 0 = none yet or the node rebooted since */
+    bool     custom;         /* a snapshot's: this node has thresholds from a passage calibration (not the fleet's) */
 } c6_node_t;
 
 typedef struct {
@@ -89,6 +92,9 @@ bool c6_hub_send_gain(uint8_t gate_index, uint8_t gain);
 bool c6_hub_calib_start(uint8_t gate_index, uint8_t step);
 bool c6_hub_calib_get(uint8_t gate_index, lp_calib_t *out);
 bool c6_hub_calib_apply(uint8_t gate_index);
+/* A remote gate back on the fleet's thresholds: its calibration override is dropped and the fleet's
+ * CONFIG sent. False for gate 0 (it keeps the C5's own settings) or a gate nobody answers for. */
+bool c6_hub_calib_reset(uint8_t gate_index);
 int32_t c6_hub_vtx_threshold_x10(void);        /* remote gates: C/N*10 above which a VTX is probably on (pushed active_db) */
 
 /* Debug mode of a remote gate (1..): its C5's console text and keys, over the node (fleet_proto

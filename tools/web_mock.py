@@ -397,7 +397,7 @@ class Master(ConsoleDebug):
                   "cn_x10": n.cn_x10(t) if n.online else CN_UNKNOWN, "states": n.states(t) if n.online else [0] * 8,
                   "last_seen_ms": int(t * 1000) - 300 if n.online else 12000, "rssi": n.rssi,
                   "rx_frames": int(t * 6), "status_rx": int(t * 2), "status_lost": n.status_lost,
-                  "mac": n.mac, "levels": n.levels(t) if n.online else [CN_UNKNOWN] * 8,
+                  "custom": n.gate in self.applied, "mac": n.mac, "levels": n.levels(t) if n.online else [CN_UNKNOWN] * 8,
                   **n.health(t)} for n in self.nodes]
         left = self.pairing_left(t)                       # closes it first when its 5 minutes are over
         return {"pairing": self.pairing, "pairing_left_s": left, "num_gates": 1 + len(self.nodes), "has_local": lo.up(t),
@@ -463,19 +463,21 @@ class Master(ConsoleDebug):
         left = max(0, int(s["end"] - t + 0.999)) if s["phase"] in (1, 3) else 0
         ph = s["phase"]
         return {"ok": True, "msg": "", "gate": gate, "phase": ph, "secs_left": left, "flags": s["flags"],
-                "channel": self.local.channel if ph >= 2 else (255 if ph == 0 else 255),
+                "channel": (self.c5_of(gate) or self.local).channel if ph >= 2 else 255,
                 "passage": CAL_PASSAGE if ph >= 2 else [0] * 5, "passage_sat": 0,
                 "away": CAL_AWAY if ph == 4 else [0] * 5,
                 "rec": CAL_REC if ph == 4 else {"active": 0, "hysteresis": 0, "drop": 0, "min_peak": 0}, "gain_steps": 0}
 
     def calib(self, b, t):
-        """post_calib() in c6_web.c: None for its 400s. Gate 0 only for now (remote gates: no C5 linked)."""
+        """post_calib() in c6_web.c: None for its 400s. A remote gate goes through its node."""
         gate, action = b.get("gate", -1), b.get("action")
-        if not 0 <= gate < 16 or action not in ("state", "start1", "start2", "cancel", "apply"):
+        if not 0 <= gate < 16 or action not in ("state", "start1", "start2", "cancel", "apply", "reset"):
             return None
         ok, msg = True, ""
         s = self.cals.setdefault(gate, {"phase": 0, "end": 0.0, "flags": 0})
-        reach = self.local if gate == 0 and self.local.up(t) else None
+        reach = self.c5_of(gate)
+        if reach is not None and not reach.up(t):
+            reach = None
         self.cal_state(gate, t)                                     # a measurement that has ended finishes first
         if action in ("start1", "start2", "apply") and reach is None:
             ok, msg = False, "no C5 linked"
@@ -493,6 +495,13 @@ class Master(ConsoleDebug):
             else:
                 self.applied[gate] = dict(CAL_REC)
                 s.update(phase=0, flags=0)
+        elif action == "reset":
+            if gate == 0:
+                ok, msg = False, "gate 0 keeps its own settings"
+            elif gate not in self.applied and reach is None:
+                ok, msg = False, "no such gate"
+            else:
+                self.applied.pop(gate, None)
         return {**self.cal_state(gate, t), "ok": ok, "msg": msg}
 
     def gain(self, b, t):

@@ -114,6 +114,54 @@ static bool pairing_open(void) {
     return s_pairing;
 }
 
+/* ---- per-gate thresholds from a passage calibration (an override of the fleet's detector config) ----
+ * Only the four thresholds a calibration sets; D and alpha stay the fleet's. Keyed by MAC (node ids can
+ * repeat after a removal), in their own NVS key so the node table's record never changes. Merged into
+ * default_config() at every push (send_config), so a re-pair, a back-online CONFIG or a change of D
+ * never erases it. */
+typedef struct __attribute__((packed)) { uint8_t mac[6]; int16_t active, hysteresis, drop, min_peak; } ovr_rec_t;
+static ovr_rec_t s_ovr[C6_MAX_NODES];
+static uint8_t   s_num_ovr;
+
+static ovr_rec_t *find_ovr(const uint8_t mac[6]) {            /* s_lock held */
+    for (unsigned i = 0; i < s_num_ovr; i++)
+        if (memcmp(s_ovr[i].mac, mac, 6) == 0) return &s_ovr[i];
+    return NULL;
+}
+
+static void ovr_save(void) {                                   /* s_lock held */
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS, NVS_READWRITE, &h) != ESP_OK) return;
+    if (s_num_ovr) nvs_set_blob(h, "ovr", s_ovr, s_num_ovr * sizeof(ovr_rec_t));
+    else nvs_erase_key(h, "ovr");
+    nvs_commit(h);
+    nvs_close(h);
+}
+
+static void ovr_load(void) {
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS, NVS_READONLY, &h) != ESP_OK) return;
+    size_t len = sizeof s_ovr;
+    if (nvs_get_blob(h, "ovr", s_ovr, &len) == ESP_OK && len % sizeof(ovr_rec_t) == 0) s_num_ovr = (uint8_t)(len / sizeof(ovr_rec_t));
+    nvs_close(h);
+}
+
+static void ovr_set(const uint8_t mac[6], const lp_calib_t *k) {   /* s_lock held */
+    ovr_rec_t *o = find_ovr(mac);
+    if (!o && s_num_ovr < C6_MAX_NODES) { o = &s_ovr[s_num_ovr++]; memcpy(o->mac, mac, 6); }
+    if (!o) return;
+    o->active = k->active_db_x10; o->hysteresis = k->hysteresis_db_x10; o->drop = k->drop_db_x10; o->min_peak = k->min_peak_db_x10;
+    ovr_save();
+}
+
+static bool ovr_drop(const uint8_t mac[6]) {                    /* s_lock held */
+    ovr_rec_t *o = find_ovr(mac);
+    if (!o) return false;
+    *o = s_ovr[--s_num_ovr];
+    ovr_save();
+    return true;
+}
+
 /* ---- NVS node table ---- */
 typedef struct __attribute__((packed)) {
     uint8_t mac[6], node_id, gate_index, channel;
@@ -173,8 +221,14 @@ static uint8_t num_gates(void) {
 }
 
 static void send_config(const uint8_t mac[6], uint8_t gate_index, uint8_t channel) {
-    const fp_config_t cfg = { .gate_index = gate_index, .channel = channel,
-                              .enable = 1, .det = default_config() };
+    fp_config_t cfg = { .gate_index = gate_index, .channel = channel, .enable = 1, .det = default_config() };
+    xSemaphoreTake(s_lock, portMAX_DELAY);          /* never held by a caller of this */
+    const ovr_rec_t *o = find_ovr(mac);
+    if (o) {                                        /* this gate's thresholds from a passage calibration */
+        cfg.det.active_db_x10 = o->active; cfg.det.hysteresis_db_x10 = o->hysteresis;
+        cfg.det.drop_db_x10 = o->drop; cfg.det.min_peak_db_x10 = o->min_peak;
+    }
+    xSemaphoreGive(s_lock);
     uint8_t buf[FP_MAX_FRAME];
     size_t m = fp_encode_config(buf, sizeof buf, &cfg);
     if (m) espnow_link_send(mac, buf, m);
@@ -291,7 +345,14 @@ static void on_msg(const uint8_t mac[6], const fp_msg_t *msg, int8_t rssi) {
     case FP_MSG_HEARTBEAT: {
         xSemaphoreTake(s_lock, portMAX_DELAY);
         c6_node_t *n = find_by_mac(mac);
-        if (n) { (void)node_touch(n, rssi); back = *n; resync = true; }
+        if (n) { (void)node_touch(n, rssi); n->calib_ms = 0; back = *n; resync = true; }   /* it rebooted: no session */
+        xSemaphoreGive(s_lock);
+        break;
+    }
+    case FP_MSG_CALIB_STATE: {
+        xSemaphoreTake(s_lock, portMAX_DELAY);
+        c6_node_t *n = find_by_mac(mac);
+        if (n) { (void)node_touch(n, rssi); n->calib = msg->calib; n->calib_ms = now_ms() | 1u; }
         xSemaphoreGive(s_lock);
         break;
     }
@@ -392,6 +453,7 @@ void c6_hub_start(void) {
     audio_player_play(AUDIO_SOUND_COIN, audio_pitch_for_channel(0));  /* speaker check */
 #endif
     nodes_load();
+    ovr_load();
     rt_init(&s_rt, &(rt_config_t){ .num_gates = num_gates() });
 
     esp_err_t err = espnow_link_start(WIFI_IF_AP, CONFIG_C6_AP_CHANNEL, on_msg);
@@ -462,6 +524,7 @@ bool c6_hub_remove_node(uint8_t node_id) {
         if (s_nodes[i].node_id == node_id) { idx = (int)i; break; }
     if (idx < 0) { xSemaphoreGive(s_lock); return false; }
     memcpy(mac, s_nodes[idx].mac, 6);
+    (void)ovr_drop(mac);
     for (unsigned i = (unsigned)idx; i + 1u < s_num_nodes; i++) s_nodes[i] = s_nodes[i + 1u];
     s_num_nodes--;
     nodes_save();
@@ -536,6 +599,16 @@ bool c6_hub_send_gain(uint8_t gate_index, uint8_t gain) {
     return sent;
 }
 
+/* The gate's online nodes' MACs; s_lock taken inside. */
+static unsigned gate_macs(uint8_t gate, uint8_t macs[][6]) {
+    unsigned n = 0;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    for (unsigned i = 0; i < s_num_nodes; i++)
+        if (s_nodes[i].gate_index == gate && s_nodes[i].online) memcpy(macs[n++], s_nodes[i].mac, 6);
+    xSemaphoreGive(s_lock);
+    return n;
+}
+
 bool c6_hub_calib_start(uint8_t gate_index, uint8_t step) {
     if (step > 2u) return false;
     if (gate_index == 0u) {
@@ -543,16 +616,77 @@ bool c6_hub_calib_start(uint8_t gate_index, uint8_t step) {
         c6_link_calib_start(step);
         return true;
     }
-    return false;   /* remote gates: through their node */
+    uint8_t macs[C6_MAX_NODES][6];
+    const unsigned n = gate_macs(gate_index, macs);
+    uint8_t buf[FP_MAX_FRAME];
+    const size_t m = fp_encode_calib_start(buf, sizeof buf, step);
+    bool sent = false;
+    for (unsigned i = 0; m && i < n; i++) {
+        if (espnow_link_send(macs[i], buf, m) == ESP_OK) sent = true;
+        if (step == 0) {                                          /* the page no longer shows it */
+            xSemaphoreTake(s_lock, portMAX_DELAY);
+            c6_node_t *nd = find_by_mac(macs[i]);
+            if (nd) nd->calib_ms = 0;
+            xSemaphoreGive(s_lock);
+        }
+    }
+    return sent;
 }
 
 bool c6_hub_calib_get(uint8_t gate_index, lp_calib_t *out) {
     memset(out, 0, sizeof *out);
-    return gate_index == 0u && c6_link_calib_get(out);
+    if (gate_index == 0u) return c6_link_calib_get(out);
+    bool have = false;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    for (unsigned i = 0; i < s_num_nodes && !have; i++) {
+        const c6_node_t *n = &s_nodes[i];
+        if (n->gate_index != gate_index || !n->online || !n->calib_ms || n->calib.phase == LP_CALIB_NONE) continue;
+        if (now_ms() - n->calib_ms > 4000u) continue;               /* its C5 sends one a second: this one is old */
+        *out = n->calib;
+        have = true;
+    }
+    xSemaphoreGive(s_lock);
+    return have;
 }
 
 bool c6_hub_calib_apply(uint8_t gate_index) {
-    return gate_index == 0u && c6_link_calib_apply();
+    if (gate_index == 0u) return c6_link_calib_apply();
+    lp_calib_t k;
+    if (!c6_hub_calib_get(gate_index, &k) || k.phase != LP_CALIB_DONE || k.min_peak_db_x10 <= 0) return false;
+    struct { uint8_t mac[6], gate, channel; } to[C6_MAX_NODES];
+    unsigned n = 0;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    for (unsigned i = 0; i < s_num_nodes; i++)
+        if (s_nodes[i].gate_index == gate_index && s_nodes[i].online) {
+            ovr_set(s_nodes[i].mac, &k);
+            memcpy(to[n].mac, s_nodes[i].mac, 6); to[n].gate = s_nodes[i].gate_index; to[n].channel = s_nodes[i].channel;
+            n++;
+        }
+    xSemaphoreGive(s_lock);
+    for (unsigned i = 0; i < n; i++) send_config(to[i].mac, to[i].gate, to[i].channel);
+    (void)c6_hub_calib_start(gate_index, 0);                         /* the proposal is applied: end the session */
+    ESP_LOGI(TAG, "gate %u thresholds from its passage calibration: active %d hyst %d drop %d min_peak %d (x10), %u node(s)",
+             gate_index, (int)k.active_db_x10, (int)k.hysteresis_db_x10, (int)k.drop_db_x10, (int)k.min_peak_db_x10, n);
+    return n > 0;
+}
+
+bool c6_hub_calib_reset(uint8_t gate_index) {
+    if (gate_index == 0u) return false;
+    struct { uint8_t mac[6], gate, channel; } to[C6_MAX_NODES];
+    unsigned n = 0;
+    bool dropped = false;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    for (unsigned i = 0; i < s_num_nodes; i++)
+        if (s_nodes[i].gate_index == gate_index) {
+            dropped |= ovr_drop(s_nodes[i].mac);
+            if (s_nodes[i].online) {
+                memcpy(to[n].mac, s_nodes[i].mac, 6); to[n].gate = s_nodes[i].gate_index; to[n].channel = s_nodes[i].channel;
+                n++;
+            }
+        }
+    xSemaphoreGive(s_lock);
+    for (unsigned i = 0; i < n; i++) send_config(to[i].mac, to[i].gate, to[i].channel);   /* the fleet's again */
+    return dropped || n > 0;
 }
 
 /* Remote gates run the detector config the hub pushes (at pairing, on a save and
@@ -570,7 +704,10 @@ void c6_hub_snapshot(c6_fleet_t *out) {
     out->uptime_ms = now_ms();
     out->free_heap = esp_get_free_heap_size();
     out->heap_total = heap_caps_get_total_size(MALLOC_CAP_INTERNAL);
-    for (unsigned i = 0; i < s_num_nodes; i++) out->nodes[i] = s_nodes[i];
+    for (unsigned i = 0; i < s_num_nodes; i++) {
+        out->nodes[i] = s_nodes[i];
+        out->nodes[i].custom = find_ovr(s_nodes[i].mac) != NULL;
+    }
     out->num_standings = s_rt.num_channels;
     for (unsigned i = 0; i < s_rt.num_channels; i++) {
         out->standings[i].channel = s_rt.ch[i].channel;

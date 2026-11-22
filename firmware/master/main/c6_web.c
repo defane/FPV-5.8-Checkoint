@@ -84,11 +84,11 @@ static esp_err_t get_state(httpd_req_t *req) {
     const c6_snapshot_t *s = &s_snap;
     const c6_fleet_t *f = &s_fleet;
 
-    /* Worst case (every field at its widest, every list full) 10607 B: header + local 487 (+20 for pairing_left_s) (its
-     * states 27 and levels 59, the fleet's and gate 0's re-arm drop), 15 nodes 7304 (487 with
+    /* Worst case (every field at its widest, every list full) 10847 B: header + local 487 (+20 for pairing_left_s) (its
+     * states 27 and levels 59, the fleet's and gate 0's re-arm drop), 15 nodes 7544 (+16 each for "custom": 487 + 16 with
      * its comma, states and levels included), 8 standings 1031, 24 passes 1727, the lists'
      * brackets 38; sized so it never truncates. */
-    static char body[10752];   /* larger than the stack; this handler is serialised by httpd */
+    static char body[11008];   /* larger than the stack; this handler is serialised by httpd */
     const lp_stats_t *l = &s->local;
     char states[STATES_LEN];
     int o = 0;
@@ -113,13 +113,13 @@ static esp_err_t get_state(httpd_req_t *req) {
         o += snprintf(body + o, sizeof body - o,
                       "%s{\"node_id\":%u,\"gate\":%u,\"channel\":%u,\"online\":%s,\"cn_x10\":%ld,"
                       "\"states\":[%s],\"last_seen_ms\":%lu,\"rssi\":%d,\"rx_frames\":%lu,"
-                      "\"status_rx\":%lu,\"status_lost\":%lu,"
+                      "\"status_rx\":%lu,\"status_lost\":%lu,\"custom\":%s,"
                       "\"mac\":\"%02x:%02x:%02x:%02x:%02x:%02x\",",
                       i ? "," : "", n->node_id, n->gate_index, n->channel,
                       n->online ? "true" : "false", (long)n->cn_x10,
                       put_states(states, n->online ? n->states : 0u), (unsigned long)n->last_seen_ms,
                       (int)n->rssi, (unsigned long)n->rx_frames,
-                      (unsigned long)n->status_rx, (unsigned long)n->status_lost,
+                      (unsigned long)n->status_rx, (unsigned long)n->status_lost, n->custom ? "true" : "false",
                       n->mac[0], n->mac[1], n->mac[2], n->mac[3], n->mac[4], n->mac[5]);
         o += put_levels(body + o, sizeof body - o, n->online ? n->levels : NULL);
         o += put_health(body + o, sizeof body - o, n->passes, n->flags, n->gain, n->c5_uptime_s,
@@ -433,7 +433,7 @@ static esp_err_t post_gain(httpd_req_t *req) {
  * channels' smoothed rise and proposes thresholds (link_proto CALIB_*, docs/detector.md). It never
  * blinds the gate and the VTX stays ON, so there is no VTX guard; a pass rung during step 1 is real
  * (sound, a lap): the page says to reset that channel. POST {"gate":0..15,"action":"state" | "start1" |
- * "start2" | "cancel" | "apply"} answers the session as {"ok","msg"?,"gate","phase" (0 none, 1 measuring
+ * "start2" | "cancel" | "apply" | "reset" (a remote gate back on the fleet's thresholds)} answers the session as {"ok","msg"?,"gate","phase" (0 none, 1 measuring
  * in the passage, 2 measured, 3 measuring away, 4 done),"secs_left","flags" (pass_calib.h PC_*),
  * "channel" (255 before step 1),"passage":[p10,p50,p90,p95,max] and "away":[...] (half dB),"passage_sat"
  * (% of clipped captures),"rec":{"active","hysteresis","drop","min_peak"} (dB x10, phase 4),
@@ -463,6 +463,7 @@ static esp_err_t post_calib(httpd_req_t *req) {
     else if (strcmp(action, "start2") == 0) ok = c6_hub_calib_start((uint8_t)gate, 2);
     else if (strcmp(action, "cancel") == 0) { c6_hub_calib_start((uint8_t)gate, 0); }
     else if (strcmp(action, "apply") == 0) { ok = c6_hub_calib_apply((uint8_t)gate); if (!ok) msg = "nothing to apply"; }
+    else if (strcmp(action, "reset") == 0) { ok = c6_hub_calib_reset((uint8_t)gate); if (!ok) msg = gate == 0 ? "gate 0 keeps its own settings" : "no such gate"; }
     else if (strcmp(action, "state") != 0) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "action");
         return ESP_FAIL;

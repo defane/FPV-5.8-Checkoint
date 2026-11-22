@@ -17,6 +17,7 @@ static const char *TAG = "c6_link";
 static portMUX_TYPE s_cal_mux = portMUX_INITIALIZER_UNLOCKED;
 static lp_calib_t s_calib;                  /* the local C5's passage-calibration state */
 static bool s_calib_have;
+static uint32_t s_calib_ms;                  /* when it came: the C5 sends one a second while a session exists */
 static volatile bool s_rearm_sync = true;   /* push the fleet's drop at the next CONFIG_STATE */
 
 /* Debug mode: the local C5's console text (LOG frames) in a ring, sanitized for the page's JSON. */
@@ -85,6 +86,7 @@ static void handle_msg(const lp_msg_t *m) {
         portENTER_CRITICAL(&s_cal_mux);
         s_calib = m->calib;
         s_calib_have = true;
+        s_calib_ms = now_ms();
         portEXIT_CRITICAL(&s_cal_mux);
         break;
     case LP_MSG_HELLO:        /* the C5 (re)booted: learn its config now, not at the next poll */
@@ -182,7 +184,7 @@ void c6_link_calib_start(uint8_t step) {
 bool c6_link_calib_get(lp_calib_t *out) {
     portENTER_CRITICAL(&s_cal_mux);
     *out = s_calib;
-    const bool have = s_calib_have && s_calib.phase != LP_CALIB_NONE;
+    const bool have = s_calib_have && s_calib.phase != LP_CALIB_NONE && now_ms() - s_calib_ms <= 4000u;
     portEXIT_CRITICAL(&s_cal_mux);
     return have;
 }

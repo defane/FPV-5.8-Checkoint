@@ -119,6 +119,11 @@ void c3_link_set_master_config(const lp_config_t *c) {
     c3_link_push_config(c);
 }
 
+void c3_link_calib_start(uint8_t step) {
+    uint8_t b[LP_MAX_FRAME];
+    enqueue(b, lp_encode_calib_start(b, sizeof b, step));   /* 0 (nothing sent) over step 2 */
+}
+
 void c3_link_send_gain(uint8_t gain) {
     uint8_t b[LP_MAX_FRAME];
     enqueue(b, lp_encode_gain(b, sizeof b, gain));   /* 0 (nothing sent) outside the range */
@@ -133,6 +138,7 @@ static void handle_msg(const lp_msg_t *m) {
     uint8_t b[LP_MAX_FRAME];
     switch (m->type) {
     case LP_MSG_LOG:        log_store(&m->data); break;
+    case LP_MSG_CALIB_STATE: c3_fleet_report_calib(&m->calib); break;
     case LP_MSG_EVENT_PASS: if (s_on_pass) s_on_pass(&m->event); break;
     case LP_MSG_STATS:
         if (s_on_stats) s_on_stats(&m->stats);

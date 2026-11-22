@@ -23,11 +23,11 @@ with no change on the gate side.
 - **Protocols:** `components/link_proto` v6 (C5↔bridge UART: `CONFIG_*` with the
   detector settings, the relative re-arm drop included, `EVENT_PASS` with the pass's age,
   `STATS` with the 8 channels' levels, each channel's detector state, the strongest rise
-  (the calibration guard's) and the C5's health, `COMMAND`, `GAIN`, `LOG` console text, `KEY` console keystrokes, `DEBUG`);
+  (the calibration guard's) and the C5's health, `COMMAND`, `GAIN`, `CALIB_START`/`CALIB_STATE`, `LOG` console text, `KEY` console keystrokes, `DEBUG`);
   `components/fleet_proto` v6 (C6↔C3 ESP-NOW: pairing, time beacons, `CONFIG` (the gate
   and its detector settings, link_proto's `lp_config_t` as it goes to the C5, re-arm drop
   included), `GATE_PASS`, `NODE_STATUS` relaying the C5's `STATS` and the re-arm drop its
-  last `CONFIG_STATE` echoed, `COMMAND`, `GAIN`, and `DEBUG`/`KEY`/`LOG_REQ`/`LOG_CHUNK` for a remote gate's debug mode); `components/espnow_link` (transport);
+  last `CONFIG_STATE` echoed, `COMMAND`, `GAIN`, `CALIB_START`/`CALIB_STATE`, and `DEBUG`/`KEY`/`LOG_REQ`/`LOG_CHUNK` for a remote gate's debug mode); `components/espnow_link` (transport);
   `components/race_timing` (laps/sectors per channel). A board left on an older
   firmware is not misread, it simply does not talk (v4 added the re-arm drop and the
   channels' states, v5 the remote gate's debug mode, v6 the RX gain: a C3 left on v5 drops off the race, not only
@@ -217,6 +217,18 @@ page for a gate with no master.
   "sent": [...], "failed": [...], "busy": [...]}` or `{"ok": false, "vtx": [...]}`; the degraded C3's
   `POST /api/gain` `{"gain": ..., "force": 0|1}` → `{"ok": true}`, `{"ok": false, "vtx": true, "cn_x10": x}`
   or `{"ok": false, "msg": "no C5 linked"}`. The new gain shows in the next `STATS`.
+- **Passage calibration** (admin, C6 page *Passage calibration*; [detector.md](detector.md#passage-calibration-the-web-a-real-drone)):
+  a drone with its VTX on, in the passage then 2 m away, 5 s each: the gate's C5 measures and proposes its thresholds
+  (min peak, active, hysteresis, drop), the page shows the two levels, the warnings and the proposal, *Apply* sets them.
+  It does not blind the gate (no VTX guard), and a pass rung in step 1 is real (reset that channel). Gate 0 goes over
+  the UART (`CALIB_START` / `CALIB_STATE`); a remote gate through its node (`FP_MSG_CALIB_START`, and each `CALIB_STATE` the C5
+  sends, once a second while a session exists, relayed): the C6 keeps the last one per node and a node that rebooted
+  has none. **Per-gate thresholds:** the fleet's `CONFIG` is one value for every gate, so a calibrated gate has its own
+  four thresholds stored on the C6 (NVS key `ovr`, by MAC, partial: D and alpha stay the fleet's), merged into every
+  `CONFIG` it sends that node (pairing, back online, a change of D), so a re-send never erases it. The nodes table shows a
+  *calibrated* pill; *Use the fleet's thresholds* (`action: "reset"`) drops it. API: `POST /api/calib`
+  `{"gate": 0..15, "action": "state" | "start1" | "start2" | "cancel" | "apply" | "reset"}` answers the session
+  (phase, seconds left, flags, the drone's channel, the two measurements, the proposal).
 - **Back online:** the C6 re-sends a node's `CONFIG` (gate, detector settings with the
   fleet's re-arm drop) when the node comes back online, and to each heartbeat (a C3 sends
   them only while it boots, until it hears its master), so a rebooted gate returns to its

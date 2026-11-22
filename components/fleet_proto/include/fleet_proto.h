@@ -22,7 +22,7 @@
 extern "C" {
 #endif
 
-#define FP_VERSION      6u   /* 6: GAIN (the master sets a gate's RX gain);
+#define FP_VERSION      6u   /* 6: GAIN (the master sets a gate's RX gain), CALIB_START / CALIB_STATE (passage calibration);
                               * 5: DEBUG, KEY, LOG_REQ, LOG_CHUNK (a remote gate's console on the master's page);
                               * 4: CONFIG's lp_config_t and NODE_STATUS carry the re-arm drop,
                               * NODE_STATUS each channel's detector state;
@@ -44,6 +44,8 @@ typedef enum {
     FP_MSG_LOG_REQ      = 11, /* master -> node:  the console text after a position (stop-and-wait) */
     FP_MSG_LOG_CHUNK    = 12, /* node  -> master: up to LP_TEXT_MAX bytes of it, and the node's debug state */
     FP_MSG_GAIN         = 13, /* master -> node:  force the node's C5 RX gain (link_proto GAIN) */
+    FP_MSG_CALIB_START  = 14, /* master -> node:  a passage-calibration step for its C5 (0 end, 1 passage, 2 away) */
+    FP_MSG_CALIB_STATE  = 15, /* node  -> master: the C5's session (link_proto CALIB_STATE), relayed each time it sends one */
 } fp_type_t;
 
 typedef enum { FP_ROLE_NODE = 1, FP_ROLE_MASTER = 2 } fp_role_t;
@@ -153,6 +155,8 @@ typedef struct {
         fp_log_req_t      log_req;
         fp_log_chunk_t    log_chunk;
         fp_gain_t         gain;
+        uint8_t           calib_step; /* CALIB_START */
+        lp_calib_t        calib;      /* CALIB_STATE */
     };
 } fp_msg_t;
 
@@ -167,6 +171,8 @@ size_t fp_encode_node_status(uint8_t *buf, size_t cap, const fp_node_status_t *m
 size_t fp_encode_heartbeat(uint8_t *buf, size_t cap, const fp_heartbeat_t *m);
 size_t fp_encode_command(uint8_t *buf, size_t cap, const fp_command_t *m);   /* 0 for an unknown cmd */
 size_t fp_encode_gain(uint8_t *buf, size_t cap, const fp_gain_t *m);   /* 0 outside LP_GAIN_MIN..LP_GAIN_MAX */
+size_t fp_encode_calib_start(uint8_t *buf, size_t cap, uint8_t step);   /* 0 over 2 */
+size_t fp_encode_calib_state(uint8_t *buf, size_t cap, const lp_calib_t *c);   /* 0 for an unknown phase */
 size_t fp_encode_debug(uint8_t *buf, size_t cap, bool on);
 size_t fp_encode_key(uint8_t *buf, size_t cap, const char *keys, size_t len);   /* 0 unless 1..LP_KEY_MAX */
 size_t fp_encode_log_req(uint8_t *buf, size_t cap, uint32_t since);

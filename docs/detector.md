@@ -403,8 +403,8 @@ weakest of the fleet for step 1 and check the strongest away); a pass rung while
 passage is real (sound, a lap on the master): reset that channel after; the **formulas are a first
 proposal**, to confirm on real passes (bench B6) and retune here. The session lasts until it is
 applied, cancelled, or `LP_CALIB_IDLE_S` (10 min) pass; the bridge applies the proposal as a plain
-`CONFIG_SET` over the C5's echoed settings. The C6 admin page has it in *Passage calibration* (a gate
-selector, gate 0 and each remote gate), the degraded C3's page in its own card.
+`CONFIG_SET` over the C5's echoed settings (a remote gate's thresholds are kept by the C6, [fleet.md](fleet.md)). The C6 admin
+page has it in *Passage calibration* (a gate selector, gate 0 and each remote gate), the degraded C3's page in its own card.
 
 ## Parameters (console `K`, saved in NVS namespace "checkpoint", key "prefs")
 
