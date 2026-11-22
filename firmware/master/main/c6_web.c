@@ -374,6 +374,61 @@ static esp_err_t post_command(httpd_req_t *req) {
     return httpd_resp_send(req, out, o);
 }
 
+/* Force a gate's C5 RX gain: {"gate":0..15,"gain":LP_GAIN_MIN..LP_GAIN_MAX,"force":0|1}. Changing it
+ * makes the C5 learn its rests again (the gate is blind a moment), so it wants every VTX off: it
+ * follows post_command's rule, answering {"ok":false,"vtx":[{"gate","cn_x10"}]} while the gate sees
+ * a carrier, until the page asks the admin and retries with force. Otherwise {"ok":true,"sent":[g],
+ * "failed":[],"busy":[]}: "failed" a gate nobody answers for (offline, no C5), "busy" a gate calibrating
+ * (its C5 would take the gain, but the calibration's rests would be wrong). The new gain comes back
+ * in /api/state. */
+static esp_err_t post_gain(httpd_req_t *req) {
+    char buf[64];
+    if (!web_auth_request(req, buf, sizeof buf)) return ESP_OK;
+    const int32_t gate = json_i(buf, "gate", -1), gain = json_i(buf, "gain", -1);
+    if (gate < 0 || gate >= (int32_t)RT_MAX_GATES || gain < (int32_t)LP_GAIN_MIN || gain > (int32_t)LP_GAIN_MAX) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "gate/gain");
+        return ESP_FAIL;
+    }
+    c6_store_snapshot(&s_snap);
+    c6_hub_snapshot(&s_fleet);
+    int32_t cn = LP_CN_UNKNOWN, active = c6_hub_vtx_threshold_x10();
+    bool busy = false, known = gate == 0;
+    if (gate == 0 && s_snap.has_local) {
+        cn = s_snap.local.cn_x10;
+        busy = s_snap.local.flags & LP_HEALTH_CALIBRATING;
+        if (s_snap.has_local_cfg) active = s_snap.local_cfg.active_db_x10;
+    }
+    for (unsigned i = 0; i < s_fleet.num_nodes; i++) {
+        const c6_node_t *n = &s_fleet.nodes[i];
+        if (n->gate_index != gate) continue;
+        known = true;
+        if (!n->online) continue;
+        if (n->cn_x10 > cn) cn = n->cn_x10;
+        if (n->flags & LP_HEALTH_CALIBRATING) busy = true;
+    }
+    if (!known) { httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "gate"); return ESP_FAIL; }
+
+    char out[96];
+    int o;
+    if (json_i(buf, "force", 0) == 0 && cn != LP_CN_UNKNOWN && cn > active) {
+        o = snprintf(out, sizeof out, "{\"ok\":false,\"vtx\":[{\"gate\":%ld,\"cn_x10\":%ld}]}", (long)gate, (long)cn);
+        ESP_LOGW(TAG, "gain gate %ld held: strong signal", (long)gate);
+    } else {
+        const bool sent = !busy && c6_hub_send_gain((uint8_t)gate, (uint8_t)gain);
+        const uint32_t bit = 1u << gate;
+        o = snprintf(out, sizeof out, "{\"ok\":true,\"sent\":");
+        o += put_gates(out + o, sizeof out - o, sent ? bit : 0u);
+        o += snprintf(out + o, sizeof out - o, ",\"failed\":");
+        o += put_gates(out + o, sizeof out - o, !busy && !sent ? bit : 0u);
+        o += snprintf(out + o, sizeof out - o, ",\"busy\":");
+        o += put_gates(out + o, sizeof out - o, busy ? bit : 0u);
+        o += snprintf(out + o, sizeof out - o, "}");
+        ESP_LOGI(TAG, "gain %ld gate %ld: %s", (long)gain, (long)gate, sent ? "sent" : busy ? "busy" : "failed");
+    }
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_send(req, out, o);
+}
+
 /* Debug mode (admin): a gate's C5 console text and typed keys. Every body may carry "gate" (default
  * 0, the master's own C5 over its UART; 1.. a remote gate, over its node: c6_hub_debug_*). One gate
  * at a time is in debug mode: switching one on switches the previous off. */
@@ -509,7 +564,7 @@ void c6_web_start(void) {
     web_auth_init(s_admin_key, ADMIN_SALT, ADMIN_ITERATIONS, ADMIN_AUTH_OPEN);
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.lru_purge_enable = true;
-    cfg.max_uri_handlers = 16;   /* 14 here + web_auth's 2 */
+    cfg.max_uri_handlers = 17;   /* 15 here + web_auth's 2 */
     cfg.stack_size = 6144;       /* the signature's PSA HMAC under post_command: ~3.5 KB of the 4 KB default */
     httpd_handle_t srv = NULL;
     if (httpd_start(&srv, &cfg) != ESP_OK) { ESP_LOGE(TAG, "httpd start failed"); return; }
@@ -525,6 +580,7 @@ void c6_web_start(void) {
         { .uri = "/api/volume",   .method = HTTP_POST, .handler = post_volume },
         { .uri = "/api/rearm",    .method = HTTP_POST, .handler = post_rearm },
         { .uri = "/api/command",  .method = HTTP_POST, .handler = post_command },
+        { .uri = "/api/gain",     .method = HTTP_POST, .handler = post_gain },
         { .uri = "/api/log",      .method = HTTP_POST, .handler = post_log },
         { .uri = "/api/key",      .method = HTTP_POST, .handler = post_key },
         { .uri = "/api/debug",    .method = HTTP_POST, .handler = post_debug },

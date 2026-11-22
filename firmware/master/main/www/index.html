@@ -142,6 +142,13 @@
       <tbody id="nodes"><tr><td colspan="8" class="muted">no nodes paired</td></tr></tbody>
     </table>
     <p class="muted" style="margin:10px 0 0">Gate 0 is the master's own C5.</p>
+    <div class="bar admin-only" style="margin-top:12px">
+      <label class="muted">RX gain of gate <select id="gain_gate"><option value="0">0 · master</option></select></label>
+      <input id="gain_in" type="number" min="10" max="83" step="2" style="width:70px" aria-label="RX gain">
+      <button id="gain_set">Set gain</button>
+      <span id="gain_msg" class="muted"></span>
+    </div>
+    <p class="muted admin-only" style="margin:6px 0 0;font-size:.8rem">Forced, no AGC (40 by default): lower it when a strong signal clips, raise it for a weak one. The C5 saves it and learns its rests again, so that gate is blind for a few seconds: every VTX off.</p>
   </div>
 
   <h2 class="adv admin-only">Detector (every gate)</h2>
@@ -318,7 +325,7 @@ function route() {
 window.addEventListener("hashchange", route);
 function setAdmin(on) {             // back to spectator forgets the key
   admin = on; editing = false;
-  if (!on) { AdminAuth.logout(); rearmDirty = false; infoClose(); dbgText = ""; dbgNext = 0; dbgGate = 0; $("dbg").open = false; dbgShow(false); dbgRender(); }
+  if (!on) { AdminAuth.logout(); rearmDirty = false; gainDirty = false; gainGate = 0; infoClose(); dbgText = ""; dbgNext = 0; dbgGate = 0; $("dbg").open = false; dbgShow(false); dbgRender(); }
   document.body.classList.toggle("is-admin", on);
   $("role").setAttribute("aria-checked", on);
   if (!on && location.hash === "#maintenance") location.hash = "";
@@ -493,6 +500,7 @@ async function poll() {
     const s = await (await fetch("/api/state")).json();
     fillChannels(s);
     dbgGates(s);
+    gainGates(s);
     $("conn").hidden = true;
     $("pair_state").textContent = s.pairing ? "OPEN" : "closed";
     $("pair_state").className = s.pairing ? "on" : "off";
@@ -635,6 +643,48 @@ $("nodes").addEventListener("click", async e => {
     poll();
   }
 });
+// RX gain of one gate (a C5 forces it, saved there): the field follows the selected gate's gain until
+// the admin edits it. The VTX guard is the calibrations': a gate that sees a carrier asks first.
+let gainGate = 0, gainDirty = false;
+function gainGates(s) {
+  const gates = [...(s.has_local ? [0] : []), ...new Set((s.nodes || []).filter(n => n.online).map(n => n.gate))].sort((a, b) => a - b);
+  if (!gates.includes(gainGate)) gates.push(gainGate);          // a gate that dropped keeps its entry while selected
+  const sel = $("gain_gate");
+  const want = gates.map(g => `<option value="${g}">${g === 0 ? "0 · master" : g}</option>`).join("");
+  if (sel.innerHTML !== want) sel.innerHTML = want;
+  if (sel.value !== String(gainGate)) sel.value = gainGate;
+  const c5 = gainGate === 0 ? (s.has_local ? s.local : null) : (s.nodes || []).find(n => n.gate === gainGate && n.online);
+  const now = c5 && c5.fw ? c5.gain : null;
+  if (!gainDirty && document.activeElement !== $("gain_in") && now !== null) $("gain_in").value = now;
+  $("gain_set").disabled = !!(c5 && c5.calibrating);
+}
+$("gain_gate").addEventListener("change", () => { gainGate = +$("gain_gate").value; gainDirty = false; $("gain_msg").textContent = ""; poll(); });
+$("gain_in").addEventListener("input", () => { gainDirty = true; });
+async function sendGain(gate, gain, force) {
+  try {
+    const r = await post("/api/gain", { gate, gain, force });
+    return r.ok ? await r.json() : { error: r.status === 401 ? "admin password needed" : r.status === 400 ? "10 to 83" : "refused (" + r.status + ")" };
+  } catch (e) { return { error: /logged out|not logged in/.test(e.message) ? "logged out" : "master not answering" }; }
+}
+$("gain_set").addEventListener("click", async () => {
+  const gate = gainGate, gain = Math.round(+$("gain_in").value);
+  if (!(gain >= 10 && gain <= 83)) { $("gain_msg").textContent = "10 to 83"; $("gain_msg").className = "bad"; return; }
+  if (!confirm(`Set the RX gain of gate ${gate} to ${gain}? That gate stops detecting for a few seconds while it learns its rests again. All VTXs must be OFF.`)) return;
+  $("gain_msg").textContent = "sending…"; $("gain_msg").className = "muted";
+  let r = await sendGain(gate, gain, 0);
+  if (r.vtx && r.vtx.length) {
+    if (!confirm(`Gate ${gate} sees a strong signal (${cnTxt(r.vtx[0].cn_x10)} dB over its rest): a VTX may be on. Force the change?`)) {
+      $("gain_msg").textContent = "cancelled"; return;
+    }
+    r = await sendGain(gate, gain, 1);
+  }
+  if (r.error === "logged out") { $("gain_msg").textContent = ""; return; }
+  const sent = (r.sent || []).length, busy = (r.busy || []).length;
+  const msg = r.error || (sent ? "sent" : busy ? "not sent: the gate is calibrating" : "not reached (offline or no C5)");
+  $("gain_msg").textContent = msg; $("gain_msg").className = sent ? "muted" : "bad";
+  if (sent) { gainDirty = false; setTimeout(() => $("gain_msg").textContent = "", 4000); poll(); }
+});
+
 // Debug: the C5's console text (POST /api/log from the position we have) and its keys.
 const DBG_MAX = 60000;
 let dbgNext = 0, dbgText = "", dbgPaused = false, dbgBusy = false, dbgOn = false, dbgGate = 0;

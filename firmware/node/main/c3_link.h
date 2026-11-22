@@ -14,6 +14,7 @@ void c3_link_push_config(const lp_config_t *c);   /* CONFIG_SET to the C5 */
 /* Relay mode: the master's CONFIG for this gate. Pushed now (CONFIG_SET), and kept (RAM) to push
  * again when the C5 says HELLO: it booted after this one went out (lost), or it was swapped. */
 void c3_link_set_master_config(const lp_config_t *c);
+void c3_link_send_gain(uint8_t gain);             /* GAIN to the C5 (LP_GAIN_MIN..MAX; the C5 clamps and relearns its rests) */
 void c3_link_send_command(lp_cmd_t cmd);          /* COMMAND (console B/F, reboot) to the C5 */
 /* A valid frame from the C5 within the last 3 s (it STATS every second);
  * false when it never spoke, or went silent (unplugged, rebooting, hung, v1). */

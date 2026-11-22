@@ -22,7 +22,7 @@ extern "C" {
 #endif
 
 #define LP_SOF      0xC5u
-#define LP_VERSION  5u   /* 5: LOG (C5 text), KEY (console keystrokes), DEBUG. 4: CONFIG carries the re-arm drop,
+#define LP_VERSION  6u   /* 6: GAIN (the web sets the C5's RX gain). 5: LOG (C5 text), KEY (console keystrokes), DEBUG. 4: CONFIG carries the re-arm drop,
                           * STATS each channel's detector state. 3: the C5 scans: STATS levels, EVENT_PASS age */
 #define LP_MAX_PAYLOAD 56u
 #define LP_MAX_FRAME   (6u + LP_MAX_PAYLOAD)   /* SOF+VER+TYPE+LEN + payload + CRC16(2) */
@@ -38,9 +38,16 @@ typedef enum {
     LP_MSG_LOG = 9,          /* C5 -> bridge: a chunk of the console's text output (debug mode) */
     LP_MSG_DEBUG = 11,       /* bridge -> C5: debug mode on/off (off by default: no LOG, KEY ignored) */
     LP_MSG_KEY = 10,         /* bridge -> C5: console keystrokes ("Ka", "T", "F" ...), debug mode */
+    LP_MSG_GAIN = 12,        /* bridge -> C5: force this RX gain index (console K g/G, saved, rests relearnt) */
 } lp_type_t;
 
 typedef enum { LP_ROLE_C5 = 1, LP_ROLE_C3 = 2 } lp_role_t;
+
+/* The forced RX gain the web may set (the C5 clamps to its PHY's maximum; the console's K g/G
+ * keeps its step of 2 from the saved one). Changing it blinds the gate for a moment: the rests are
+ * learnt again, so every VTX must be off. */
+#define LP_GAIN_MIN 10u
+#define LP_GAIN_MAX 83u
 
 /* COMMAND: what the console's B, F and a reset do, for a C5 nobody plugs USB
  * into. A calibration blinds the gate (no pass detection) while it runs and
@@ -152,6 +159,7 @@ typedef struct {
         uint8_t     command;    /* COMMAND: an lp_cmd_t (unknown values are not decoded) */
         lp_text_t   data;       /* LOG / KEY */
         uint8_t     debug;      /* DEBUG: 0 off, 1 on */
+        uint8_t     gain;       /* GAIN: LP_GAIN_MIN..LP_GAIN_MAX */
     };
 } lp_msg_t;
 
@@ -166,6 +174,7 @@ size_t lp_encode_command(uint8_t *buf, size_t cap, lp_cmd_t cmd);   /* 0 for an 
 /* 0 when len is 0 or over LP_TEXT_MAX / LP_KEY_MAX. */
 size_t lp_encode_log(uint8_t *buf, size_t cap, const char *text, size_t len);
 size_t lp_encode_debug(uint8_t *buf, size_t cap, bool on);
+size_t lp_encode_gain(uint8_t *buf, size_t cap, uint8_t gain);   /* 0 outside LP_GAIN_MIN..LP_GAIN_MAX */
 size_t lp_encode_key(uint8_t *buf, size_t cap, const char *keys, size_t len);
 
 /* Streaming decoder: feed one received byte at a time. Returns true and fills

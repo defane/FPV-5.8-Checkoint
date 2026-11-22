@@ -513,6 +513,29 @@ bool c6_hub_send_command(uint8_t gate_index, lp_cmd_t cmd) {
     return sent;
 }
 
+bool c6_hub_send_gain(uint8_t gate_index, uint8_t gain) {
+    if (gain < LP_GAIN_MIN || gain > LP_GAIN_MAX) return false;
+    if (gate_index == 0u) {
+        if (!c6_store_has_local()) return false;
+        c6_link_send_gain(gain);
+        return true;
+    }
+    uint8_t macs[C6_MAX_NODES][6];
+    unsigned n = 0;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    for (unsigned i = 0; i < s_num_nodes; i++)
+        if (s_nodes[i].gate_index == gate_index && s_nodes[i].online) memcpy(macs[n++], s_nodes[i].mac, 6);
+    xSemaphoreGive(s_lock);
+    const fp_gain_t g = { .gate_index = gate_index, .gain = gain };
+    uint8_t buf[FP_MAX_FRAME];
+    const size_t m = fp_encode_gain(buf, sizeof buf, &g);
+    bool sent = false;
+    for (unsigned i = 0; m && i < n; i++)
+        if (espnow_link_send(macs[i], buf, m) == ESP_OK) sent = true;
+    if (sent) ESP_LOGI(TAG, "gain %u -> gate %u", gain, gate_index);
+    return sent;
+}
+
 /* Remote gates run the detector config the hub pushes (at pairing, on a save and
  * each time a node comes back online), so its activity level is where a C/N says
  * a VTX is on. Gate 0 uses its own C5's echoed active_db once known (c6_store). */

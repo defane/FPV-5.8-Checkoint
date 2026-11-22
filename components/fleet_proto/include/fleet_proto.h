@@ -4,7 +4,7 @@
  * integer-only little-endian payloads, guarded by a version byte and a CRC16 so
  * a mismatched firmware or a stray frame is rejected.
  *
- * Frame: [VER=5][TYPE][payload...][CRC16_lo][CRC16_hi], CRC16-CCITT over
+ * Frame: [VER=6][TYPE][payload...][CRC16_lo][CRC16_hi], CRC16-CCITT over
  * VER,TYPE,payload (reuses link_proto's lp_crc16). Detector/audio tunables ride
  * as link_proto's lp_config_t so the C6 forwards them to a C5 over UART
  * unchanged.
@@ -22,7 +22,8 @@
 extern "C" {
 #endif
 
-#define FP_VERSION      5u   /* 5: DEBUG, KEY, LOG_REQ, LOG_CHUNK (a remote gate's console on the master's page);
+#define FP_VERSION      6u   /* 6: GAIN (the master sets a gate's RX gain);
+                              * 5: DEBUG, KEY, LOG_REQ, LOG_CHUNK (a remote gate's console on the master's page);
                               * 4: CONFIG's lp_config_t and NODE_STATUS carry the re-arm drop,
                               * NODE_STATUS each channel's detector state;
                               * 3: NODE_STATUS levels, the C5 scans; 2: seq + health, COMMAND */
@@ -42,6 +43,7 @@ typedef enum {
     FP_MSG_KEY          = 10, /* master -> node:  keys to type on the node's C5 console (debug on) */
     FP_MSG_LOG_REQ      = 11, /* master -> node:  the console text after a position (stop-and-wait) */
     FP_MSG_LOG_CHUNK    = 12, /* node  -> master: up to LP_TEXT_MAX bytes of it, and the node's debug state */
+    FP_MSG_GAIN         = 13, /* master -> node:  force the node's C5 RX gain (link_proto GAIN) */
 } fp_type_t;
 
 typedef enum { FP_ROLE_NODE = 1, FP_ROLE_MASTER = 2 } fp_role_t;
@@ -126,6 +128,11 @@ typedef struct {
 } fp_log_chunk_t;
 
 typedef struct {
+    uint8_t  gate_index;      /* the gate it is meant for (a node answers to its master's MAC, as COMMAND) */
+    uint8_t  gain;            /* LP_GAIN_MIN..LP_GAIN_MAX */
+} fp_gain_t;
+
+typedef struct {
     uint8_t  role;            /* fp_role_t */
     uint32_t uptime_ms;
 } fp_heartbeat_t;
@@ -145,6 +152,7 @@ typedef struct {
         lp_text_t         key;        /* 1..LP_KEY_MAX bytes */
         fp_log_req_t      log_req;
         fp_log_chunk_t    log_chunk;
+        fp_gain_t         gain;
     };
 } fp_msg_t;
 
@@ -158,6 +166,7 @@ size_t fp_encode_gate_pass(uint8_t *buf, size_t cap, const fp_gate_pass_t *m);
 size_t fp_encode_node_status(uint8_t *buf, size_t cap, const fp_node_status_t *m);
 size_t fp_encode_heartbeat(uint8_t *buf, size_t cap, const fp_heartbeat_t *m);
 size_t fp_encode_command(uint8_t *buf, size_t cap, const fp_command_t *m);   /* 0 for an unknown cmd */
+size_t fp_encode_gain(uint8_t *buf, size_t cap, const fp_gain_t *m);   /* 0 outside LP_GAIN_MIN..LP_GAIN_MAX */
 size_t fp_encode_debug(uint8_t *buf, size_t cap, bool on);
 size_t fp_encode_key(uint8_t *buf, size_t cap, const char *keys, size_t len);   /* 0 unless 1..LP_KEY_MAX */
 size_t fp_encode_log_req(uint8_t *buf, size_t cap, uint32_t since);

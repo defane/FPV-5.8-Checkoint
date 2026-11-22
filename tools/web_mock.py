@@ -35,6 +35,8 @@ NOISE_X10 = 60            # a gate's rise with no drone, about
 REFRACTORY_S = 1.5        # refractory_ms: no re-arm before it
 LEAVE_S = 0.9             # a drone gone this long: its level is under the release (active - hysteresis)
 CAL_S = {"cal_full": 3.7, "cal_quick": 3.2}   # blind: the recalibration + the 3 s relearn
+RELEARN_S = 3.0                                # a gain change: nothing rings while the rests are learnt again
+GAIN_MIN, GAIN_MAX = 10, 83                    # LP_GAIN_MIN / LP_GAIN_MAX in link_proto.h
 REBOOT_S = 4.0
 PASSES_KEPT = {"master": 24, "node": 16}   # C6_EVENTS, C3_EVENTS
 RESULTS_KEPT = 10   # RT_HISTORY in race_timing.h
@@ -173,6 +175,11 @@ class Gate:
         else:
             self.cal_until = t + CAL_S[cmd]
 
+    def set_gain(self, gain, t):
+        """The C5 forces that gain (saved) and learns its rests again: blind for a moment."""
+        self.gain = gain
+        self.cal_until = t + RELEARN_S
+
     def health(self, t):
         return {"passes": self.passes, "cal_needed": self.cal_needed, "calibrating": self.calibrating(t),
                 "gain": self.gain, "c5_uptime_s": max(0, int(t - self.booted)),
@@ -299,7 +306,7 @@ class Master(ConsoleDebug):
     ADMIN = {"/api/pairing": ("set_pairing", 128), "/api/node": ("set_node", 128),
              "/api/node_remove": ("remove_node", 128), "/api/reset": ("reset_race", 16),
              "/api/volume": ("set_volume", 128), "/api/command": ("command", 128),
-             "/api/rearm": ("set_rearm", 64),
+             "/api/rearm": ("set_rearm", 64), "/api/gain": ("gain", 64),
              "/api/log": ("log", 64), "/api/key": ("key", 96), "/api/debug": ("set_debug", 32)}
 
     def __init__(self, vtx=False):
@@ -441,6 +448,25 @@ class Master(ConsoleDebug):
             g.rearm = x10
         return {"ok": True}
 
+    def gain(self, b, t):
+        """post_gain() in c6_web.c: None for its 400s."""
+        gate, gain, force = b.get("gate", -1), b.get("gain", -1), b.get("force", 0)
+        if not (0 <= gate < 16 and GAIN_MIN <= gain <= GAIN_MAX):
+            return None
+        mine = [n for n in self.nodes if n.gate == gate]
+        if gate != 0 and not mine:
+            return None
+        reach = [self.local] if gate == 0 and self.local.up(t) else [n for n in mine if n.online]
+        cn = max([g.cn_x10(t) for g in reach] or [CN_UNKNOWN])
+        if not force and cn > ACTIVE_X10:
+            return {"ok": False, "vtx": [{"gate": gate, "cn_x10": cn}]}
+        busy = any(g.calibrating(t) for g in reach)
+        sent = bool(reach) and not busy
+        for g in reach if sent else []:
+            g.set_gain(gain, t)
+        return {"ok": True, "sent": [gate] if sent else [], "failed": [] if sent or busy else [gate],
+                "busy": [gate] if busy else []}
+
     def command(self, b, t):
         """post_command() in c6_web.c: None for its 400s."""
         gate, name, force = b.get("gate", -2), b.get("cmd"), b.get("force", 0)
@@ -487,7 +513,7 @@ class Master(ConsoleDebug):
 class Node(ConsoleDebug):
     """firmware/node/main/c3_web.c, the degraded local web."""
     TAG = "c3"
-    ADMIN = {"/api/config": ("set_config", 512), "/api/command": ("command", 96),
+    ADMIN = {"/api/config": ("set_config", 512), "/api/command": ("command", 96), "/api/gain": ("gain", 64),
              "/api/log": ("log", 64), "/api/key": ("key", 96), "/api/debug": ("set_debug", 32)}
 
     def __init__(self, vtx=False):
@@ -522,6 +548,19 @@ class Node(ConsoleDebug):
 
     def set_config(self, b, t):
         self.config.update({k: v for k, v in b.items() if k in self.config})
+        return {"ok": True}
+
+    def gain(self, b, t):
+        """post_gain() in c3_web.c: None for its 400."""
+        gain, g = b.get("gain", -1), self.gate
+        if not GAIN_MIN <= gain <= GAIN_MAX:
+            return None
+        if not g.up(t):
+            return {"ok": False, "msg": "no C5 linked"}
+        cn = g.cn_x10(t)
+        if not b.get("force") and cn > self.config["active_db_x10"]:
+            return {"ok": False, "vtx": True, "cn_x10": cn}
+        g.set_gain(gain, t)
         return {"ok": True}
 
     def command(self, b, t):

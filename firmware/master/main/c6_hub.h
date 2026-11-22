@@ -79,6 +79,10 @@ void c6_hub_snapshot(c6_fleet_t *out);
  * node(s) over ESP-NOW (false if none). The caller confirms the VTXs are off
  * before a calibration. */
 bool c6_hub_send_command(uint8_t gate_index, lp_cmd_t cmd);
+/* Force a gate's C5 RX gain (LP_GAIN_MIN..LP_GAIN_MAX): 0 is the local C5 over UART, 1.. its online
+ * node(s) over ESP-NOW. False when the gain is out of range or nobody could be reached. The C5
+ * relearns its rests: the caller confirms the VTXs are off first. */
+bool c6_hub_send_gain(uint8_t gate_index, uint8_t gain);
 int32_t c6_hub_vtx_threshold_x10(void);        /* remote gates: C/N*10 above which a VTX is probably on (pushed active_db) */
 
 /* Debug mode of a remote gate (1..): its C5's console text and keys, over the node (fleet_proto

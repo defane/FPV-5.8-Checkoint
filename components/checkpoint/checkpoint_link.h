@@ -17,3 +17,4 @@ bool checkpoint_link_apply_config(const lp_config_t *c); /* validate, post to th
 void checkpoint_link_get_config(lp_config_t *out);
 void checkpoint_link_get_stats(lp_stats_t *out);         /* live rises, detector states, health */
 void checkpoint_link_command(uint8_t cmd);               /* lp_cmd_t: recalibrate (B/F) or reboot */
+void checkpoint_link_set_gain(uint8_t gain);             /* the console's K g/G, to a given index */

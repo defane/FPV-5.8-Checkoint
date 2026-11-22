@@ -70,6 +70,9 @@ static void handle_msg(const lp_msg_t *m) {
     case LP_MSG_COMMAND:        /* recalibrate or reboot: the bridge's web confirmed it */
         checkpoint_link_command(m->command);
         break;
+    case LP_MSG_GAIN:           /* the bridge's admin set the RX gain: as K g/G, to that index */
+        checkpoint_link_set_gain(m->gain);
+        break;
     case LP_MSG_DEBUG:          /* the bridge's admin switched the debug page on or off */
         cp_log_enable(m->debug != 0);
         break;

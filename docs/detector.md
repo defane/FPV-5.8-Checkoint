@@ -15,7 +15,7 @@ channel (`components/checkpoint/cp_scan.c`, `checkpoint.c`; pure C:
   channel (bench B1 measures this board's). Each reading carries the time of its capture.
 - **Gain:** forced, no AGC: index 40 by default (widscan58's preset for the C5-Zero's
   onboard antenna). `K` then `g`/`G` moves it by 2, between 10 and the PHY's maximum,
-  saved; the rests are learnt again after a change.
+  saved; the rests are learnt again after a change. The admin web sets it too, to a given index.
 - **Smoothing:** per channel, a median of the last 3 readings (a lone burst, a Wi-Fi frame
   say, vanishes), then an exponential average weighted by each reading's interval.
   `alpha` is the weight per 17.5 ms reference sweep, the 57 Hz the defaults were tuned
@@ -380,7 +380,7 @@ Which value ([host], the tables above, mild fading): 16 dB unless the laps say o
 | `refractory_ms` | 1500 ms | `r`/`R` ±250 ms |
 | `stale_ms` | 1000 ms | (fixed) |
 | `rearm_db`, the relative re-arm drop D ([above](#relative-re-arm), 0 = off) | 16 dB (`CONFIG_CHECKPOINT_REARM_DROP_DB`) | `e`/`E` ±1 dB, 0 to 40 |
-| RX gain (forced index) | 40 | `g`/`G` ±2 (relearns the rests) |
+| RX gain (forced index) | 40 | `g`/`G` ±2 (relearns the rests); the C6 and C3 pages set it to an index, 10 to 83 ([fleet.md](fleet.md#gate-health-and-remote-commands-no-console-in-production)) |
 
 The record is version 4 (`PREFS_VERSION`). Version 4 adds D in the two bytes version 3
 kept reserved, so a version-3 record is read as it is, every value kept, with the build's

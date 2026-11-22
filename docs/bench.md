@@ -458,7 +458,13 @@ decide from them whether the IPEX lead needs a fixed attenuator (a PI pad, see
 (`` ` ``) while the detector scans, 5 times: `python tools/flash.py PORT` sends it through
 `tools/enter_download.py`, then flashes.
 
-Debug mode (off at boot): on the C3's page, unlock as admin, open *Debug*, switch it on. Pass:
+RX gain from the web (admin; C3 page *C5 health*, C6 *Gates / nodes*): set 36 then 40 again on a
+gate with every VTX off. Pass: it asks first; the gate shows *calibrating* for about 3 s, then the
+*gain* field and the `STATS` gain follow, the console prints `CHECKPOINT gain=36/83 (saved...)`, and it
+survives a C5 reboot (saved). With a VTX on the channel it refuses until forced. On the C6 a remote
+gate takes it through its node (`master gain N -> C5` in the node's log).
+
+Debug mode (off at boot): on the C3's *Maintenance* page (unlock as admin, the link in the header), open *Debug*, switch it on. Pass:
 the `PASS` and `CHECKPOINT` lines appear within about 1 s; `T` prints the status, `K` the menu,
 `Ka` lowers the smoothing (the log shows the new `set alpha=`); `F` asks before it blinds the gate.
 Switched off (or after a C3 reboot): no log, and a key is refused. Same on the C6's page (advanced

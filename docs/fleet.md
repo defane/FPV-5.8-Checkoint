@@ -20,17 +20,17 @@ flash FW=master-wave-c5` (or `idf.py -DIDF_TARGET=esp32c5 -DSDKCONFIG=sdkconfig.
 `firmware/master`, → `build-c5/master-c5.bin`). Later swap that C5 for a real C6
 with no change on the gate side.
 
-- **Protocols:** `components/link_proto` v5 (C5↔bridge UART: `CONFIG_*` with the
+- **Protocols:** `components/link_proto` v6 (C5↔bridge UART: `CONFIG_*` with the
   detector settings, the relative re-arm drop included, `EVENT_PASS` with the pass's age,
   `STATS` with the 8 channels' levels, each channel's detector state, the strongest rise
   (the calibration guard's) and the C5's health, `COMMAND`, `GAIN`, `LOG` console text, `KEY` console keystrokes, `DEBUG`);
   `components/fleet_proto` v6 (C6↔C3 ESP-NOW: pairing, time beacons, `CONFIG` (the gate
   and its detector settings, link_proto's `lp_config_t` as it goes to the C5, re-arm drop
   included), `GATE_PASS`, `NODE_STATUS` relaying the C5's `STATS` and the re-arm drop its
-  last `CONFIG_STATE` echoed, `COMMAND`, and `DEBUG`/`KEY`/`LOG_REQ`/`LOG_CHUNK` for a remote gate's debug mode); `components/espnow_link` (transport);
+  last `CONFIG_STATE` echoed, `COMMAND`, `GAIN`, and `DEBUG`/`KEY`/`LOG_REQ`/`LOG_CHUNK` for a remote gate's debug mode); `components/espnow_link` (transport);
   `components/race_timing` (laps/sectors per channel). A board left on an older
   firmware is not misread, it simply does not talk (v4 added the re-arm drop and the
-  channels' states, v5 the remote gate's debug mode: a C3 left on v4 drops off the race, not only
+  channels' states, v5 the remote gate's debug mode, v6 the RX gain: a C3 left on v5 drops off the race, not only
   the debug): **reflash every C5, C3 and the C6 together** after a protocol change.
 - **Detector states:** the C5 reports each channel's detector state in `STATS`, 2 bits per
   channel (`states`, R1 in bits 1..0, R8 in bits 15..14: 0 idle, 1 rising, 2 peak passed,
@@ -205,6 +205,18 @@ page for a gate with no master.
   degraded C3's `POST /api/command` `{"cmd": ..., "force": 0|1}` (its one gate)
   replies `{"ok": true}`, `{"ok": false, "vtx": true, "cn_x10": x}` or
   `{"ok": false, "msg": "no C5 linked"}`.
+- **RX gain** (admin): the C5 forces its gain (no AGC, 40 by default, saved in its NVS), set from the
+  web in *Gates / nodes* on the C6 (a gate selector, a field that follows the gate's current gain,
+  *Set gain*) and in the degraded C3's *C5 health* card. It goes as `GAIN` (`link_proto`) to
+  a C5, relayed by `FP_MSG_GAIN` to a remote gate (from its master's MAC only, as `COMMAND`), and the C5
+  does what the console's `K g/G` does, to that index: clamped to 10..the PHY's maximum (83), saved,
+  the rests learnt again (a bench refuses it: `CHECKPOINT gain refused=busy`). It blinds the gate for
+  about 3 s and the rests are learnt at the new gain, so it has the **calibrations' guard**: the page
+  asks, then a gate seeing a strong signal is refused unless forced, and a gate calibrating is skipped
+  (*busy*). **API:** C6 `POST /api/gain` `{"gate": 0..15, "gain": 10..83, "force": 0|1}` → `{"ok": true,
+  "sent": [...], "failed": [...], "busy": [...]}` or `{"ok": false, "vtx": [...]}`; the degraded C3's
+  `POST /api/gain` `{"gain": ..., "force": 0|1}` → `{"ok": true}`, `{"ok": false, "vtx": true, "cn_x10": x}`
+  or `{"ok": false, "msg": "no C5 linked"}`. The new gain shows in the next `STATS`.
 - **Back online:** the C6 re-sends a node's `CONFIG` (gate, detector settings with the
   fleet's re-arm drop) when the node comes back online, and to each heartbeat (a C3 sends
   them only while it boots, until it hears its master), so a rebooted gate returns to its

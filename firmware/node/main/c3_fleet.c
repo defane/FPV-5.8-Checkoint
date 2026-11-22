@@ -118,6 +118,12 @@ static void on_msg(const uint8_t mac[6], const fp_msg_t *msg, int8_t rssi) {
     /* Calibrate/reboot: only from our master. Not keyed on gate_index: the
      * master addresses us by MAC, and our saved gate can lag its record (a
      * CONFIG sent while we were off is lost), which would drop it silently. */
+    case FP_MSG_GAIN:
+        if (ours) {
+            ESP_LOGI(TAG, "master gain %u -> C5", msg->gain.gain);
+            c3_link_send_gain(msg->gain.gain);
+        }
+        break;
     case FP_MSG_COMMAND:
         if (s_paired && memcmp(mac, s_c6, 6) == 0) {
             ESP_LOGI(TAG, "master command %u (1=cal_full 2=cal_quick 3=reboot) -> C5",

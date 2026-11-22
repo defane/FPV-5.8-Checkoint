@@ -455,5 +455,78 @@ class MasterDebug(DebugCases, unittest.TestCase):
         self.assertIn("PASS channel=R1", self.sim.log({"since": 0}, 60.0)["text"])
 
 
+class GainCases:
+    """/api/gain against c3_web.c's and c6_web.c's rules: range, the VTX guard, a C5 that relearns."""
+
+    def setUp(self):
+        self.sim = self.cls()
+
+    def quiet(self, t):
+        g = self.sim.local_c5()
+        g.next_pass, g.last_pass = t + 100.0, t - 100.0
+
+    def test_gain_page_posts_what_the_firmware_reads(self):
+        page = (ROOT / self.page).read_text()
+        src = (ROOT / SOURCES[self.cls]).read_text()
+        sent = set()
+        for obj in re.findall(r'/api/gain", JSON\.stringify\(\{([^{}]*)\}\)|post\("/api/gain", \{([^{}]*)\}', page):
+            for part in obj:
+                sent |= set(re.findall(r"(?:^|,)\s*(\w+)\s*(?=[:,]|$)", part.strip()))
+        self.assertEqual(sent, self.gain_keys)
+        routes = dict(re.findall(r'\.uri = "(/api/\w+)",\s*\.method = HTTP_POST,\s*\.handler = (\w+)', src))
+        if "/api/gain" not in routes:       # c3_web.c registers its handlers one by one
+            routes["/api/gain"] = "post_gain"
+        self.assertLessEqual(sent, c_reads(c_function(src, routes["/api/gain"]), src))
+        self.assertLessEqual(sent, mock_reads(self.cls, "gain"))
+        widest = "{" + ",".join(f'"{k}":{v}' for k, v in (("gate", 15), ("gain", 83), ("force", 1)) if k in sent) + "}"
+        self.assertLess(len(widest), self.cls.ADMIN["/api/gain"][1])
+
+    def test_gain_range_and_effect(self):
+        t = 60.0
+        self.sim.state(t)
+        self.quiet(t)
+        for bad in (9, 84, -1):
+            self.assertIsNone(self.sim.gain({"gain": bad, "gate": 0}, t), bad)
+        out = self.sim.gain({"gain": 50, "gate": 0}, t)
+        self.assertTrue(out["ok"])
+        g = self.sim.local_c5()
+        self.assertEqual(g.gain, 50)
+        self.assertTrue(g.calibrating(t + 1), "the gate relearns its rests: blind a moment")
+        self.assertFalse(g.calibrating(t + 10))
+
+    def test_gain_asks_before_blinding_a_gate_that_sees_a_carrier(self):
+        sim = self.cls(vtx=True)
+        t = 60.0
+        sim.state(t)
+        out = sim.gain({"gain": 30, "gate": 0}, t)
+        self.assertFalse(out["ok"])
+        self.assertTrue(out.get("vtx"), out)
+        self.assertNotEqual(sim.local_c5().gain, 30, "nothing was sent")
+        self.assertTrue(sim.gain({"gain": 30, "gate": 0, "force": 1}, t)["ok"])
+        self.assertEqual(sim.local_c5().gain, 30)
+
+
+class NodeGain(GainCases, unittest.TestCase):
+    cls, page, gain_keys = web_mock.Node, "firmware/node/main/www/index.html", {"gain", "force"}
+
+
+class MasterGain(GainCases, unittest.TestCase):
+    cls, page, gain_keys = web_mock.Master, "firmware/master/main/www/index.html", {"gate", "gain", "force"}
+
+    def test_a_remote_gate_takes_its_gain_through_its_node(self):
+        t = 60.0
+        self.sim.state(t)
+        node = self.sim.nodes[0]
+        node.next_pass, node.last_pass = t + 100.0, t - 100.0
+        self.assertEqual(self.sim.gain({"gain": 44, "gate": node.gate}, t),
+                         {"ok": True, "sent": [node.gate], "failed": [], "busy": []})
+        self.assertEqual(node.gain, 44)
+        self.assertEqual(self.sim.gain({"gain": 46, "gate": node.gate}, t + 1)["busy"], [node.gate], "still relearning")
+        self.assertEqual(node.gain, 44)
+        off = self.sim.nodes[2]                                   # offline
+        self.assertEqual(self.sim.gain({"gain": 44, "gate": off.gate}, t)["failed"], [off.gate])
+        self.assertIsNone(self.sim.gain({"gain": 44, "gate": 9}, t), "no such gate")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -168,13 +168,13 @@ int main(void) {
         const uint16_t crc = lp_crc16(buf, n - 2u);
         buf[n - 2] = (uint8_t)(crc & 0xFFu);
         buf[n - 1] = (uint8_t)(crc >> 8);
-        CHECK(FP_VERSION == 5u && !fp_decode(buf, n, &m), "version-3 frame rejected (valid CRC)");
-        /* Its 33-byte CONFIG payload under version 5 is the wrong length. */
+        CHECK(FP_VERSION == 6u && !fp_decode(buf, n, &m), "version-3 frame rejected (valid CRC)");
+        /* Its 33-byte CONFIG payload under version 6 is the wrong length. */
         n = fp_encode_config(buf, sizeof buf, &s) - 4u;   /* drop the last 4 payload bytes */
         const uint16_t c2 = lp_crc16(buf, n - 2u);
         buf[n - 2] = (uint8_t)(c2 & 0xFFu);
         buf[n - 1] = (uint8_t)(c2 >> 8);
-        CHECK(!fp_decode(buf, n, &m), "a v3-length config payload rejected at version 5");
+        CHECK(!fp_decode(buf, n, &m), "a v3-length config payload rejected at version 6");
     }
 
     /* Debug mode of a remote gate: DEBUG, KEY, LOG_REQ, LOG_CHUNK. */
@@ -246,6 +246,21 @@ int main(void) {
         CHECK(!fp_log_take(&exp, &c, &skip, &gap) && exp == 45 && gap == 0, "an empty chunk (nothing new) changes nothing");
         c.from = 3; c.len = 5;
         CHECK(!fp_log_take(&exp, &c, &skip, &gap) && exp == 45, "an older chunk (a late reply) is dropped");
+    }
+
+    /* GAIN: the master forces a gate's RX gain. */
+    {
+        const fp_gain_t gm = { .gate_index = 3, .gain = 44 };
+        size_t n = fp_encode_gain(buf, sizeof buf, &gm);
+        CHECK(fp_decode(buf, n, &m) && m.type == FP_MSG_GAIN && m.gain.gate_index == 3 && m.gain.gain == 44, "gain roundtrip");
+        const fp_gain_t lo = { .gate_index = 1, .gain = LP_GAIN_MIN - 1 }, hi = { .gate_index = 1, .gain = LP_GAIN_MAX + 1 };
+        CHECK(fp_encode_gain(buf, sizeof buf, &lo) == 0 && fp_encode_gain(buf, sizeof buf, &hi) == 0, "gain outside the bounds refused");
+        uint8_t f[6] = { FP_VERSION, FP_MSG_GAIN, 1, 200 };
+        uint16_t crc = lp_crc16(f, 4);
+        f[4] = (uint8_t)crc; f[5] = (uint8_t)(crc >> 8);
+        CHECK(!fp_decode(f, sizeof f, &m), "gain out of range rejected (valid CRC)");
+        n = fp_encode_gain(buf, sizeof buf, &gm);
+        CHECK(!fp_decode(buf, n - 1, &m), "a truncated gain frame rejected");
     }
     /* A truncated frame (wrong length for the type) is rejected. */
     {

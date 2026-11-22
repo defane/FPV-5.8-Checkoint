@@ -220,6 +220,38 @@ static esp_err_t post_command(httpd_req_t *req)
     return httpd_resp_sendstr(req, "{\"ok\":true}");
 }
 
+/* Set the C5's forced RX gain: {"gain":LP_GAIN_MIN..LP_GAIN_MAX,"force":0|1}. It blinds the gate for a
+ * moment (the rests are learnt again at the new gain) and wants every VTX off, so it follows
+ * post_command's rule: {"vtx":true,"cn_x10":N} while the gate sees a carrier, until the page asks the
+ * admin and retries with force. The new gain comes back in /api/state's stats. */
+static esp_err_t post_gain(httpd_req_t *req)
+{
+    char buf[64];
+    if (!web_auth_request(req, buf, sizeof buf)) return ESP_OK;
+    const int32_t gain = json_i(buf, "gain", -1);
+    if (gain < (int32_t)LP_GAIN_MIN || gain > (int32_t)LP_GAIN_MAX) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "gain");
+        return ESP_FAIL;
+    }
+    const bool force = json_i(buf, "force", 0) != 0;
+
+    httpd_resp_set_type(req, "application/json");
+    if (!c3_link_c5_alive())
+        return httpd_resp_sendstr(req, "{\"ok\":false,\"msg\":\"no C5 linked\"}");
+    if (!force) {
+        c3_snapshot_t s;
+        c3_store_snapshot(&s);
+        if (s.has_stats && s.stats.cn_x10 != LP_CN_UNKNOWN && s.stats.cn_x10 > s.config.active_db_x10) {
+            char r[64];
+            snprintf(r, sizeof r, "{\"ok\":false,\"vtx\":true,\"cn_x10\":%ld}", (long)s.stats.cn_x10);
+            return httpd_resp_sendstr(req, r);
+        }
+    }
+    c3_link_send_gain((uint8_t)gain);
+    ESP_LOGW(TAG, "gain %ld from web%s", (long)gain, force ? " (forced)" : "");
+    return httpd_resp_sendstr(req, "{\"ok\":true}");
+}
+
 /* Debug mode (admin): the C5's console text and typed keys. POST {"since":N} answers
  * {"next":M,"lost":0|1,"text":"..."}: the bytes after position N (c3_link_log_read; the text
  * holds no quote, backslash or control other than the newline, which is escaped here). The page
@@ -306,7 +338,7 @@ void c3_web_start(void)
     web_auth_init(s_admin_key, ADMIN_SALT, ADMIN_ITERATIONS, ADMIN_AUTH_OPEN);
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.lru_purge_enable = true;
-    cfg.max_uri_handlers = 10;
+    cfg.max_uri_handlers = 12;
     cfg.stack_size = 6144;       /* the signature's PSA HMAC under the handlers: ~3.5 KB of the 4 KB default */
     httpd_handle_t srv = NULL;
     if (httpd_start(&srv, &cfg) != ESP_OK) { ESP_LOGE(TAG, "httpd start failed"); return; }
@@ -327,6 +359,8 @@ void c3_web_start(void)
     httpd_register_uri_handler(srv, &keyu);
     const httpd_uri_t dbgu = { .uri = "/api/debug", .method = HTTP_POST, .handler = post_debug };
     httpd_register_uri_handler(srv, &dbgu);
+    const httpd_uri_t gainu = { .uri = "/api/gain", .method = HTTP_POST, .handler = post_gain };
+    httpd_register_uri_handler(srv, &gainu);
     web_auth_register(srv);   /* POST /api/session, GET /auth.js */
     ESP_LOGI(TAG, "web UI on http://192.168.4.1/");
 }

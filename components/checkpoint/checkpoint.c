@@ -218,12 +218,13 @@ static void post_bench(cp_t *cp, char key)
     else cp_printf("CHECKPOINT bench=%c start\n", key);
 }
 
-static void post_gain(cp_t *cp, bool up)
+/* The console's K g/G (a step from the saved gain) and the link's GAIN (an index), the same way. */
+static void post_gain_to(cp_t *cp, int want, bool step, bool up)
 {
     if (bench_owns(cp)) { cp_printf("CHECKPOINT gain refused=busy\n"); return; }
     const unsigned max = sdr_rx_gain_max();
     portENTER_CRITICAL(&cp_mux);
-    int g = (int)cp->gain + (up ? (int)CP_GAIN_STEP : -(int)CP_GAIN_STEP);
+    int g = step ? (int)cp->gain + (up ? (int)CP_GAIN_STEP : -(int)CP_GAIN_STEP) : want;
     if (g > (int)max) g = (int)max;
     if (g < (int)CP_GAIN_MIN) g = (int)CP_GAIN_MIN;
     cp->gain = (uint8_t)g;
@@ -232,6 +233,8 @@ static void post_gain(cp_t *cp, bool up)
     prefs_save(cp);
     cp_printf("CHECKPOINT gain=%d/%u (saved; the rests are learnt again)\n", g, max);
 }
+
+static void post_gain(cp_t *cp, bool up) { post_gain_to(cp, 0, true, up); }
 
 /* ---- C5<->C3 link accessors (checkpoint_link.h), called from the link task ---- */
 
@@ -340,6 +343,15 @@ void checkpoint_link_get_stats(lp_stats_t *out)
  * recalibration only posts a request (refused while one is pending or running, or a bench
  * runs: "command=cal_full refused=busy"); the gate is blind until it and the relearn end. */
 void checkpoint_link_command(uint8_t cmd) { cp_command(cmd, "link"); }
+
+_Static_assert(CP_GAIN_MIN == LP_GAIN_MIN, "the link and the console clamp at the same lowest gain");
+
+/* GAIN from the bridge's web: the K g/G path, to that index (clamped to CP_GAIN_MIN..the PHY's
+ * maximum, saved, the rests learnt again: the gate is blind a moment; refused while a bench runs). */
+void checkpoint_link_set_gain(uint8_t gain)
+{
+    if (s_cp) post_gain_to(s_cp, gain, false, false);
+}
 
 /* The Waveshare ESP32-C5-Zero's antenna switch: high = IPEX, low = onboard. Left
  * alone unless asked for: other boards use GPIO 26 otherwise. */

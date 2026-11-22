@@ -361,6 +361,19 @@ int main(void) {
               "after q the menu is closed: s is not a bench, F still calibrates");
     }
 
+    {   /* GAIN: the web forces the C5's RX gain */
+        size_t n = lp_encode_gain(buf, sizeof buf, 40);
+        int g = run(buf, n, got, 4);
+        CHECK(g == 1 && got[0].type == LP_MSG_GAIN && got[0].gain == 40, "gain roundtrip");
+        CHECK(lp_encode_gain(buf, sizeof buf, LP_GAIN_MIN) && lp_encode_gain(buf, sizeof buf, LP_GAIN_MAX), "gain bounds accepted");
+        CHECK(lp_encode_gain(buf, sizeof buf, LP_GAIN_MIN - 1) == 0 && lp_encode_gain(buf, sizeof buf, LP_GAIN_MAX + 1) == 0,
+              "gain outside the bounds refused");
+        uint8_t f[7] = { LP_SOF, LP_VERSION, LP_MSG_GAIN, 1, 200 };
+        uint16_t crc = lp_crc16(&f[1], 4);
+        f[5] = (uint8_t)crc; f[6] = (uint8_t)(crc >> 8);
+        CHECK(run(f, sizeof f, got, 4) == 0, "gain out of range dropped (valid CRC)");
+    }
+
     printf("%d/%d link_proto checks passed\n", g_pass, g_pass + g_fail);
     return g_fail ? 1 : 0;
 }

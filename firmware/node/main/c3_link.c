@@ -119,6 +119,11 @@ void c3_link_set_master_config(const lp_config_t *c) {
     c3_link_push_config(c);
 }
 
+void c3_link_send_gain(uint8_t gain) {
+    uint8_t b[LP_MAX_FRAME];
+    enqueue(b, lp_encode_gain(b, sizeof b, gain));   /* 0 (nothing sent) outside the range */
+}
+
 void c3_link_send_command(lp_cmd_t cmd) {
     uint8_t b[LP_MAX_FRAME];
     enqueue(b, lp_encode_command(b, sizeof b, cmd));   /* 0 (nothing sent) for an unknown cmd */

@@ -155,6 +155,11 @@ size_t lp_encode_debug(uint8_t *buf, size_t cap, bool on) {
     return frame(buf, cap, LP_MSG_DEBUG, &pl, 1u);
 }
 
+size_t lp_encode_gain(uint8_t *buf, size_t cap, uint8_t gain) {
+    if (gain < LP_GAIN_MIN || gain > LP_GAIN_MAX) return 0;
+    return frame(buf, cap, LP_MSG_GAIN, &gain, 1u);
+}
+
 size_t lp_encode_key(uint8_t *buf, size_t cap, const char *keys, size_t len) {
     if (!keys || len == 0 || len > LP_KEY_MAX) return 0;
     return frame(buf, cap, LP_MSG_KEY, (const uint8_t *)keys, (uint8_t)len);
@@ -278,6 +283,11 @@ static bool decode_payload(uint8_t type, uint8_t len, const uint8_t *p,
         if (len != 1u || p[0] > 1u) return false;
         out->type = LP_MSG_DEBUG;
         out->debug = p[0];
+        return true;
+    case LP_MSG_GAIN:
+        if (len != 1u || p[0] < LP_GAIN_MIN || p[0] > LP_GAIN_MAX) return false;
+        out->type = LP_MSG_GAIN;
+        out->gain = p[0];
         return true;
     case LP_MSG_LOG:
     case LP_MSG_KEY: {

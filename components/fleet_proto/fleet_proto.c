@@ -139,6 +139,11 @@ size_t fp_encode_heartbeat(uint8_t *buf, size_t cap, const fp_heartbeat_t *m) {
     return frame(buf, cap, FP_MSG_HEARTBEAT, pl, sizeof pl);
 }
 
+size_t fp_encode_gain(uint8_t *buf, size_t cap, const fp_gain_t *m) {
+    if (m->gain < LP_GAIN_MIN || m->gain > LP_GAIN_MAX) return 0;
+    const uint8_t pl[2] = { m->gate_index, m->gain };
+    return frame(buf, cap, FP_MSG_GAIN, pl, sizeof pl);
+}
 size_t fp_encode_debug(uint8_t *buf, size_t cap, bool on) {
     const uint8_t pl = on ? 1u : 0u;
     return frame(buf, cap, FP_MSG_DEBUG, &pl, 1u);
@@ -251,6 +256,11 @@ bool fp_decode(const uint8_t *buf, size_t n, fp_msg_t *out) {
         if (len != 5) return false;
         out->heartbeat.role = p[0];
         out->heartbeat.uptime_ms = get_u32(p + 1);
+        return true;
+    case FP_MSG_GAIN:
+        if (len != 2 || p[1] < LP_GAIN_MIN || p[1] > LP_GAIN_MAX) return false;
+        out->gain.gate_index = p[0];
+        out->gain.gain = p[1];
         return true;
     case FP_MSG_DEBUG:
         if (len != 1 || p[0] > 1) return false;

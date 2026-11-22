@@ -151,6 +151,14 @@ void c6_link_send_command(lp_cmd_t cmd) {
     ESP_LOGI(TAG, "local C5 command %d (1=cal_full 2=cal_quick 3=reboot)", (int)cmd);
 }
 
+void c6_link_send_gain(uint8_t gain) {
+    uint8_t buf[LP_MAX_FRAME];
+    const size_t n = lp_encode_gain(buf, sizeof buf, gain);
+    if (!n) return;   /* out of range */
+    uart_write_bytes(LINK_UART, (const char *)buf, n);
+    ESP_LOGI(TAG, "local C5 gain %u", gain);
+}
+
 void c6_link_start(void) {
     const uart_config_t cfg = {
         .baud_rate = CONFIG_C6_UART_BAUD,

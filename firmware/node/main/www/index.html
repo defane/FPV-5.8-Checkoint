@@ -121,6 +121,12 @@
     </div>
     <div class="muted" style="margin-top:10px;font-size:.85rem;word-break:break-all">firmware <span id="h_fw" style="color:#e7ebf0">—</span></div>
     <div class="admin-only">
+      <div class="bar" style="margin-top:12px">
+        <label class="muted">RX gain <input id="gain_in" type="number" min="10" max="83" step="2" style="width:70px"></label>
+        <button id="gain_set">Set gain</button>
+        <span id="gain_msg" class="muted"></span>
+      </div>
+      <div class="muted" style="margin-top:6px;font-size:.8rem">Forced, no AGC (40 by default). Lower it when a strong signal clips, raise it for a weak one. It is saved on the C5 and the gate learns its rests again: blind for a few seconds, every VTX off.</div>
       <div class="muted" style="margin-top:8px;font-size:.8rem">Radio calibration, reboot and the debug console are on the <a href="#maintenance" class="maint-link-inline" style="color:#93c5fd">Maintenance</a> page.</div>
     </div>
   </div>
@@ -270,7 +276,7 @@ function route() {
 window.addEventListener("hashchange", route);
 function setAdmin(on) {             // back to spectator forgets the key and unsaved detector edits
   admin = on;
-  if (!on) { AdminAuth.logout(); dirty = false; infoClose(); dbgText = ""; dbgNext = 0; $("dbg").open = false; dbgShow(false); dbgRender(); }
+  if (!on) { AdminAuth.logout(); dirty = false; gainDirty = false; infoClose(); dbgText = ""; dbgNext = 0; $("dbg").open = false; dbgShow(false); dbgRender(); }
   document.body.classList.toggle("is-admin", on);
   $("role").setAttribute("aria-checked", on);
   if (!on && location.hash === "#maintenance") location.hash = "";
@@ -330,6 +336,8 @@ function fillHealth(s) {
   $("h_faults").textContent = ok ? st.faults : "—";
   $("h_fw").textContent = ok && st.fw ? st.fw : "—";
   document.querySelectorAll('button[data-cmd^="cal_"]').forEach(b => { b.disabled = ok && st.calibrating; });
+  $("gain_set").disabled = ok && st.calibrating;
+  if (ok && !gainDirty && document.activeElement !== $("gain_in")) $("gain_in").value = st.gain;
 }
 // The detector at a glance: its C5 linked, then its calibration (details in the C5 health card).
 const detPill = s => { const st = s.stats || {};
@@ -440,6 +448,33 @@ document.querySelectorAll("button[data-cmd]").forEach(b => b.addEventListener("c
     if (r.ok) setTimeout(() => $("cmd_msg").textContent = "", 4000);
   } catch (e) { $("cmd_msg").textContent = "failed"; }
 }));
+
+// RX gain: the C5 forces it (K g/G on its console); the same VTX guard as a calibration, since it
+// learns its rests again. The field follows the C5's gain until the admin edits it.
+let gainDirty = false;
+$("gain_in").addEventListener("input", () => { gainDirty = true; });
+async function sendGain(gain, force) {
+  const r = await AdminAuth.request("POST", "/api/gain", JSON.stringify({ gain, force }));
+  if (r.status === 401) { setAdmin(false); return { ok: false, msg: "password required" }; }
+  return r.ok ? r.json() : { ok: false, msg: r.status === 400 ? "10 to 83" : "failed (" + r.status + ")" };
+}
+$("gain_set").addEventListener("click", async () => {
+  const gain = Math.round(+$("gain_in").value);
+  if (!(gain >= 10 && gain <= 83)) { $("gain_msg").textContent = "10 to 83"; return; }
+  if (!confirm(`Set the RX gain to ${gain}? The gate stops detecting for a few seconds while it learns its rests again. All VTXs must be OFF.`)) return;
+  $("gain_msg").textContent = "sending…";
+  try {
+    let r = await sendGain(gain, 0);
+    if (r.vtx) {
+      if (!confirm(`The gate sees a strong signal (${(r.cn_x10 / 10).toFixed(1)} dB over its rest): a VTX may be on. Force the change?`)) {
+        $("gain_msg").textContent = "cancelled"; return;
+      }
+      r = await sendGain(gain, 1);
+    }
+    $("gain_msg").textContent = r.ok ? "sent" : (r.msg || "failed");
+    if (r.ok) { gainDirty = false; setTimeout(() => $("gain_msg").textContent = "", 4000); }
+  } catch (e) { $("gain_msg").textContent = "failed"; }
+});
 
 // Debug: the C5's console text (POST /api/log from the position we have) and its keys.
 const DBG_MAX = 60000;
