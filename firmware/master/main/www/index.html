@@ -28,16 +28,13 @@
   button.sm { padding: 4px 8px; font-size: .78rem; }
   button:disabled { opacity: .4; cursor: default; }
   .switch { display: inline-flex; align-items: center; gap: 8px; margin: 0; background: #2a313a; color: #e7ebf0;
-            border-radius: 999px; padding: 4px 10px 4px 4px; font-size: .8rem; cursor: pointer; }
-  .switch:has(input:checked) { background: #14532d; color: #86efac; }
-  /* A native <input type=checkbox switch> (its role says switch whatever the browser draws), drawn the same everywhere. */
-  .switch input[type=checkbox] { appearance: none; -webkit-appearance: none; position: relative; margin: 0; flex: none;
-                                 width: 30px; height: 16px; border-radius: 999px; background: #0f1216; cursor: pointer; }
-  .switch input[type=checkbox]::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px;
-                                        border-radius: 50%; background: #8b97a7; transition: left .15s; }
-  .switch input[type=checkbox]:checked::after { left: 16px; background: #2ecc71; }
-  .switch input[type=checkbox]:focus-visible { outline: 3px solid #93c5fd; outline-offset: 2px; }
-  @media (prefers-reduced-motion: reduce) { .switch input[type=checkbox]::after { transition: none; } }
+            border-radius: 999px; padding: 4px 10px 4px 4px; font-size: .78rem; }
+  .switch i { position: relative; width: 30px; height: 16px; border-radius: 999px; background: #0f1216; }
+  .switch i::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px;
+                     border-radius: 50%; background: #8b97a7; transition: left .15s; }
+  .switch[aria-checked=true] { background: #14532d; color: #86efac; }
+  .switch[aria-checked=true] i::after { left: 16px; background: #2ecc71; }
+  @media (prefers-reduced-motion: reduce) { .switch i::after { transition: none; } }
   dialog { background: #1b2026; color: #e7ebf0; border: 1px solid #2a313a; border-radius: 10px; padding: 16px;
            width: min(300px, calc(100vw - 64px)); }
   dialog::backdrop { background: rgba(0, 0, 0, .6); }
@@ -123,8 +120,8 @@
   <h1>Checkpoint C6 — race</h1>
   <span class="bar"><span id="conn" class="pill bad" role="alert" hidden>connection lost</span>
   <a id="maint_link" class="admin-only maint-link" href="#maintenance">Maintenance</a>
-  <label class="switch"><input type="checkbox" switch role="switch" id="mode"><span>advanced</span></label>
-  <label class="switch"><input type="checkbox" switch role="switch" id="role"><span>admin</span></label></span>
+  <button id="mode" class="switch" role="switch" aria-checked="false"><i></i><span>advanced</span></button>
+  <button id="role" class="switch" role="switch" aria-checked="false"><i></i><span>admin</span></button></span>
 </header>
 <main>
   <dialog id="login">
@@ -149,7 +146,7 @@
   </div>
 
   <div class="h2bar"><h2 id="h_results">Last results</h2>
-    <label class="switch"><input type="checkbox" switch role="switch" id="pause"><span>pause</span></label></div>
+    <button id="pause" class="switch" role="switch" aria-checked="false"><i></i><span>pause</span></button></div>
   <div class="card scroll" tabindex="0" role="region" aria-labelledby="h_results">
     <table class="chans nowrap"><caption class="sr-only">Last laps of each channel</caption><tbody id="results"><tr><td class="muted">no laps yet</td></tr></tbody></table>
     <p class="muted" style="margin:10px 0 0">Seconds, each channel's newest lap on top. Click a row for its sectors, gate to gate. Pause holds the table; a badge counts the laps it is behind.</p>
@@ -289,7 +286,7 @@
     <summary>Gate C5 console: log and keys</summary>
     <div class="bar">
       <label class="muted" style="font-size:.8rem">Gate <select id="dbg_gate"><option value="0">0 · master</option></select></label>
-      <label class="switch"><input type="checkbox" switch role="switch" id="dbg_on"><span>debug mode</span></label>
+      <button id="dbg_on" class="switch" role="switch" aria-checked="false"><i></i><span>debug mode</span></button>
       <span class="muted" style="font-size:.8rem">off at every boot; one gate at a time; while off its C5 sends no log and ignores keys</span>
     </div>
     <div id="dbg_body" hidden>

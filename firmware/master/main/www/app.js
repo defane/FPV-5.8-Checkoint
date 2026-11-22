@@ -109,14 +109,12 @@ function setAdmin(on) {             // back to spectator forgets the key
   admin = on; editing = false;
   if (!on) { AdminAuth.logout(); rearmDirty = false; rearmGate = -1; gainDirty = false; gainGate = 0; calGate = 0; calPhase = 0; infoClose(); dbgText = ""; dbgNext = 0; dbgGate = 0; $("dbg").open = false; dbgShow(false); dbgRender(); }
   document.body.classList.toggle("is-admin", on);
-  $("role").checked = on;
+  $("role").setAttribute("aria-checked", on);
   if (!on && location.hash === "#maintenance") location.hash = "";
   route();
 }
 
-// The switch only follows the state: a click asks (the login, the request), setAdmin() sets it.
-$("role").addEventListener("click", e => {
-  e.preventDefault();
+$("role").addEventListener("click", () => {
   if (admin) { setAdmin(false); poll(); return; }
   $("p").value = ""; $("login_msg").textContent = "";
   $("login").showModal();
@@ -146,7 +144,7 @@ $("login_form").addEventListener("submit", async e => {
 const MODE_KEY = "checkpoint.mode";
 function setSimple(simple, save) {
   document.body.classList.toggle("simple", simple);
-  $("mode").checked = !simple;
+  $("mode").setAttribute("aria-checked", !simple);
   if (save) try { localStorage.setItem(MODE_KEY, simple ? "simple" : "advanced"); } catch (_) {}
 }
 try { setSimple(localStorage.getItem(MODE_KEY) !== "advanced", false); } catch (_) { setSimple(true, false); }
@@ -233,7 +231,7 @@ $("results").addEventListener("click", async e => {
 
 function setPaused(on) {
   paused = on; resultsSig = null;
-  $("pause").checked = on;
+  $("pause").setAttribute("aria-checked", on);
   loadResults(live);
 }
 $("pause").addEventListener("click", () => setPaused(!paused));
@@ -688,7 +686,7 @@ setInterval(calPoll, 1000);
 const DBG_MAX = 60000;
 let dbgNext = 0, dbgText = "", dbgPaused = false, dbgBusy = false, dbgOn = false, dbgGate = 0;
 function dbgShow(on) {
-  dbgOn = on; $("dbg_on").checked = on; $("dbg_body").hidden = !on;
+  dbgOn = on; $("dbg_on").setAttribute("aria-checked", on); $("dbg_body").hidden = !on;
 }
 // The gate the panel talks to; its log, position and switch are that gate's (one is in debug mode at a time).
 function dbgReset() { dbgText = ""; dbgNext = 0; dbgRender(); }
@@ -720,7 +718,7 @@ $("dbg_gate").addEventListener("change", () => {
   // so a mere choice never starts one.
   dbgSwitch(was ? true : undefined).catch(() => { $("dbg_msg").textContent = "failed"; });
 });
-$("dbg_on").addEventListener("click", e => { e.preventDefault(); dbgSwitch(!dbgOn).catch(() => { $("dbg_msg").textContent = "failed"; }); });
+$("dbg_on").addEventListener("click", () => { dbgSwitch(!dbgOn).catch(() => { $("dbg_msg").textContent = "failed"; }); });
 function dbgRender() {
   const f = $("dbg_filter").value.toLowerCase();
   const lines = dbgText.split("\n");

@@ -80,14 +80,12 @@ function setAdmin(on) {             // back to spectator forgets the key and uns
   admin = on;
   if (!on) { AdminAuth.logout(); dirty = false; gainDirty = false; calPhase = 0; infoClose(); dbgText = ""; dbgNext = 0; $("dbg").open = false; dbgShow(false); dbgRender(); }
   document.body.classList.toggle("is-admin", on);
-  $("role").checked = on;
+  $("role").setAttribute("aria-checked", on);
   if (!on && location.hash === "#maintenance") location.hash = "";
   route();
 }
 
-// The switch only follows the state: a click asks (the login, the request), setAdmin() sets it.
-$("role").addEventListener("click", e => {
-  e.preventDefault();
+$("role").addEventListener("click", () => {
   if (admin) return setAdmin(false);
   $("p").value = ""; $("login_msg").textContent = "";
   $("login").showModal();
@@ -358,7 +356,7 @@ setInterval(calPoll, 1000);
 const DBG_MAX = 60000;
 let dbgNext = 0, dbgText = "", dbgPaused = false, dbgBusy = false, dbgOn = false;
 function dbgShow(on) {
-  dbgOn = on; $("dbg_on").checked = on; $("dbg_body").hidden = !on;
+  dbgOn = on; $("dbg_on").setAttribute("aria-checked", on); $("dbg_body").hidden = !on;
 }
 async function dbgSwitch(on) {   // on: true/false to set it, undefined to ask
   const r = await AdminAuth.request("POST", "/api/debug", JSON.stringify(on === undefined ? {} : { on: on ? 1 : 0 }));
@@ -368,7 +366,7 @@ async function dbgSwitch(on) {   // on: true/false to set it, undefined to ask
   if (!!j.debug !== dbgOn) { dbgText = ""; dbgNext = 0; dbgRender(); }
   dbgShow(!!j.debug);
 }
-$("dbg_on").addEventListener("click", e => { e.preventDefault(); dbgSwitch(!dbgOn).catch(() => { $("dbg_msg").textContent = "failed"; }); });
+$("dbg_on").addEventListener("click", () => { dbgSwitch(!dbgOn).catch(() => { $("dbg_msg").textContent = "failed"; }); });
 function dbgRender() {
   const f = $("dbg_filter").value.toLowerCase();
   const lines = dbgText.split("\n");

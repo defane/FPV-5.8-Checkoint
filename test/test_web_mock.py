@@ -899,19 +899,17 @@ class PagesPlatform(unittest.TestCase):
             server.shutdown()
             server.server_close()
 
-    def test_switches_are_native_checkboxes_with_a_switch_role(self):
+    def test_the_switches_are_buttons_that_say_switch_and_their_state(self):
+        """Kept as buttons with role=switch (their look and feel are the ones the operator knows): each says its state in aria-checked."""
         for name, html in self.html().items():
-            self.assertNotRegex(html, r'<button[^>]*role="switch"', f"{name}: a button posing as a switch")
-            self.assertNotIn("aria-checked", html)
-            switches = re.findall(r'<label class="switch"><input type="checkbox" switch role="switch" id="(\w+)">', html)
-            self.assertEqual(len(switches), len(re.findall(r'<label class="switch">', html)), f"{name}: a switch that is not one")
-            self.assertGreaterEqual(len(switches), 2, name)
-        self.assertEqual(sorted(re.findall(r'type="checkbox" switch role="switch" id="(\w+)"', self.html()["master"])),
+            self.assertNotRegex(html, r'<input[^>]*\bswitch\b', f"{name}: a native switch is not used")
+            ids = re.findall(r'<button id="(\w+)" class="switch" role="switch" aria-checked="false"><i></i><span>', html)
+            self.assertEqual(len(ids), len(re.findall(r'class="switch"', html)), f"{name}: a switch that is not one")
+            js = (ROOT / self.PAGES[name]).with_name("app.js").read_text()
+            for i in ids:
+                self.assertIn(f'$("{i}").setAttribute("aria-checked"', js, f"{name}: #{i} never says its state")
+        self.assertEqual(sorted(re.findall(r'<button id="(\w+)" class="switch" role="switch"', self.html()["master"])),
                          ["dbg_on", "mode", "pause", "role"])
-        for name, path in self.PAGES.items():
-            js = (ROOT / path).with_name("app.js").read_text()
-            self.assertNotIn("aria-checked", js)
-            self.assertIn('$("role").checked = on;', js)
 
     def test_the_accent_colour_and_reduced_motion_are_set(self):
         for name, html in self.html().items():
