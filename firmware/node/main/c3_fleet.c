@@ -66,6 +66,24 @@ static void apply_config(const fp_config_t *c) {
     else c3_link_set_master_config(&c->det);
 }
 
+/* One LOG_CHUNK for a LOG_REQ: the console text from `since`, with whether debug is on here (it
+ * is off after a reboot, which tells the master). A request while on renews the lease. */
+static void send_log_chunk(uint32_t since) {
+    fp_log_chunk_t c = { 0 };
+    const bool on = c3_link_debug();
+    uint32_t next = since;
+    bool lost = false;
+    if (on) {
+        c3_link_debug_lease(FP_DEBUG_LEASE_MS);
+        c.len = (uint8_t)c3_link_log_read(since, c.text, sizeof c.text, &next, &lost);
+    }
+    c.from = next - c.len;
+    c.flags = (on ? FP_LOG_DEBUG : 0u) | (lost ? FP_LOG_LOST : 0u);
+    uint8_t buf[FP_MAX_FRAME];
+    const size_t n = fp_encode_log_chunk(buf, sizeof buf, &c);
+    if (n) espnow_link_send(s_c6, buf, n);
+}
+
 static void on_msg(const uint8_t mac[6], const fp_msg_t *msg, int8_t rssi) {
     (void)rssi;                    /* the node shows no RSSI; the master tracks it */
     /* Every master broadcasts beacons: only ours says the fleet is reachable, or an unpaired
@@ -106,6 +124,27 @@ static void on_msg(const uint8_t mac[6], const fp_msg_t *msg, int8_t rssi) {
                      msg->command.cmd);
             c3_link_send_command((lp_cmd_t)msg->command.cmd);
         }
+        break;
+    /* Debug mode, only from our master (a KEY can start a calibration or a bench): switch it
+     * on or off, type keys on the C5's console, hand over the console text after a position. */
+    case FP_MSG_DEBUG:
+        if (!ours) break;
+        c3_link_debug_set(msg->debug.on != 0);
+        if (msg->debug.on) c3_link_debug_lease(FP_DEBUG_LEASE_MS);
+        ESP_LOGW(TAG, "debug mode %s from the master", msg->debug.on ? "ON" : "off");
+        break;
+    case FP_MSG_KEY: {
+        char keys[LP_KEY_MAX + 1];
+        memcpy(keys, msg->key.text, msg->key.len);
+        keys[msg->key.len] = '\0';
+        if (ours && c3_link_debug() && lp_keys_valid(keys)) {
+            c3_link_send_keys(keys, msg->key.len);
+            ESP_LOGW(TAG, "keys \"%s\" from the master", keys);
+        }
+        break;
+    }
+    case FP_MSG_LOG_REQ:
+        if (ours) send_log_chunk(msg->log_req.since);
         break;
     default:
         break;

@@ -4,7 +4,7 @@
  * integer-only little-endian payloads, guarded by a version byte and a CRC16 so
  * a mismatched firmware or a stray frame is rejected.
  *
- * Frame: [VER=4][TYPE][payload...][CRC16_lo][CRC16_hi], CRC16-CCITT over
+ * Frame: [VER=5][TYPE][payload...][CRC16_lo][CRC16_hi], CRC16-CCITT over
  * VER,TYPE,payload (reuses link_proto's lp_crc16). Detector/audio tunables ride
  * as link_proto's lp_config_t so the C6 forwards them to a C5 over UART
  * unchanged.
@@ -22,7 +22,8 @@
 extern "C" {
 #endif
 
-#define FP_VERSION      4u   /* 4: CONFIG's lp_config_t and NODE_STATUS carry the re-arm drop,
+#define FP_VERSION      5u   /* 5: DEBUG, KEY, LOG_REQ, LOG_CHUNK (a remote gate's console on the master's page);
+                              * 4: CONFIG's lp_config_t and NODE_STATUS carry the re-arm drop,
                               * NODE_STATUS each channel's detector state;
                               * 3: NODE_STATUS levels, the C5 scans; 2: seq + health, COMMAND */
 #define FP_MAX_PAYLOAD  64u
@@ -37,6 +38,10 @@ typedef enum {
     FP_MSG_NODE_STATUS  = 6,  /* node  -> master: periodic C/N, states, counters, C5 health */
     FP_MSG_HEARTBEAT    = 7,  /* node  -> master: boot probe, until it hears us; answered with CONFIG */
     FP_MSG_COMMAND      = 8,  /* master -> node:  forward an lp_cmd_t to the node's C5 */
+    FP_MSG_DEBUG        = 9,  /* master -> node:  debug mode (the C5's console log + keys) on or off */
+    FP_MSG_KEY          = 10, /* master -> node:  keys to type on the node's C5 console (debug on) */
+    FP_MSG_LOG_REQ      = 11, /* master -> node:  the console text after a position (stop-and-wait) */
+    FP_MSG_LOG_CHUNK    = 12, /* node  -> master: up to LP_TEXT_MAX bytes of it, and the node's debug state */
 } fp_type_t;
 
 typedef enum { FP_ROLE_NODE = 1, FP_ROLE_MASTER = 2 } fp_role_t;
@@ -102,6 +107,24 @@ typedef struct {
     uint8_t  cmd;             /* lp_cmd_t */
 } fp_command_t;
 
+/* Debug mode of one remote gate, pulled by the master (a push would load the air for every gate):
+ * the node's C3 keeps its C5's console text in a ring (link_proto's LOG frames) and answers each
+ * LOG_REQ with the next bytes. All four count only from the node's own master (its MAC). The node
+ * leaves debug mode itself when no LOG_REQ came for FP_DEBUG_LEASE_MS (a master that rebooted or
+ * lost its DEBUG off). */
+#define FP_DEBUG_LEASE_MS 30000u
+#define FP_LOG_DEBUG      1u   /* LOG_CHUNK flag: the node's debug mode is on (off after its reboot) */
+#define FP_LOG_LOST       2u   /* LOG_CHUNK flag: the ring had dropped bytes after the position asked */
+typedef struct { uint8_t on; } fp_debug_t;
+typedef struct { uint32_t since; } fp_log_req_t;
+typedef struct {
+    uint32_t from;            /* position (bytes since debug was switched on) of text[0]: the master drops
+                               * what it already has and marks a gap */
+    uint8_t  flags;           /* FP_LOG_* */
+    uint8_t  len;             /* 0..LP_TEXT_MAX */
+    char     text[LP_TEXT_MAX];   /* sanitized by the node (lp_logring) */
+} fp_log_chunk_t;
+
 typedef struct {
     uint8_t  role;            /* fp_role_t */
     uint32_t uptime_ms;
@@ -118,6 +141,10 @@ typedef struct {
         fp_node_status_t  node_status;
         fp_heartbeat_t    heartbeat;
         fp_command_t      command;
+        fp_debug_t        debug;
+        lp_text_t         key;        /* 1..LP_KEY_MAX bytes */
+        fp_log_req_t      log_req;
+        fp_log_chunk_t    log_chunk;
     };
 } fp_msg_t;
 
@@ -131,6 +158,17 @@ size_t fp_encode_gate_pass(uint8_t *buf, size_t cap, const fp_gate_pass_t *m);
 size_t fp_encode_node_status(uint8_t *buf, size_t cap, const fp_node_status_t *m);
 size_t fp_encode_heartbeat(uint8_t *buf, size_t cap, const fp_heartbeat_t *m);
 size_t fp_encode_command(uint8_t *buf, size_t cap, const fp_command_t *m);   /* 0 for an unknown cmd */
+size_t fp_encode_debug(uint8_t *buf, size_t cap, bool on);
+size_t fp_encode_key(uint8_t *buf, size_t cap, const char *keys, size_t len);   /* 0 unless 1..LP_KEY_MAX */
+size_t fp_encode_log_req(uint8_t *buf, size_t cap, uint32_t since);
+size_t fp_encode_log_chunk(uint8_t *buf, size_t cap, const fp_log_chunk_t *m);   /* 0 over LP_TEXT_MAX */
+
+/* The master's side of the pull: what to keep of a LOG_CHUNK. *expected is the position of the next
+ * byte it has not got; the chunk's text starts at c->from. A repeat (a request asked twice) gives
+ * nothing, one that overlaps what we have gives its tail (*skip bytes of head to drop), and one
+ * that starts later means bytes were lost (*gap of them, the node's ring or the air). Returns true
+ * when there is text to keep, and moves *expected past it. */
+bool fp_log_take(uint32_t *expected, const fp_log_chunk_t *c, uint8_t *skip, uint32_t *gap);
 
 /* Decode one received datagram. True and fills *out on a valid frame. */
 bool fp_decode(const uint8_t *buf, size_t n, fp_msg_t *out);

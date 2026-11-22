@@ -15,6 +15,7 @@
 #include "nvs.h"
 #include "sdkconfig.h"
 #include "status_led.h"
+#include <stdio.h>
 #include <string.h>
 
 static const char *TAG = "c6_hub";
@@ -31,6 +32,40 @@ static bool              s_pairing = true;    /* open at boot for bring-up */
 static uint32_t          s_beacon_seq;
 
 static uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
+
+/* ---- debug mode of ONE remote gate (the admin web's Debug panel) ----
+ * Pulled, not pushed: a node streaming its C5's console would load the air for every gate. The
+ * target is one node at a time; while a page polls /api/log (the lease), dbg_task asks it for the
+ * next bytes, one LOG_REQ in flight (stop-and-wait, 20 per second at most), and keeps the text in a
+ * ring for the page. Everything below is under s_lock; no frame goes out under it. */
+#define DBG_RING        4096u
+#define DBG_LEASE_MS    10000u    /* no /api/log from a page this long: the master switches it off */
+#define DBG_TICK_MS     50u
+#define DBG_IDLE_MS     100u      /* between two polls when the last chunk was not full */
+#define DBG_REPLY_MS    300u      /* a LOG_REQ unanswered this long is asked again */
+#define DBG_ON_GRACE_MS 1500u     /* a debug-off chunk right after our DEBUG on: it is not there yet */
+static char          s_dlog[DBG_RING];
+static lp_logring_t  s_dring = { .buf = s_dlog, .cap = DBG_RING };
+static int           s_dgate = -1;        /* the target gate, -1 none */
+static uint8_t       s_dmac[6];
+static uint32_t      s_dexpected;         /* the node's position of the next byte we have not got */
+static bool          s_dinflight;
+static uint32_t      s_dreq_ms, s_don_ms, s_dpage_ms;
+static bool          s_dfast;             /* the last chunk was full: ask again at once */
+
+static void dbg_note_lost(unsigned long bytes) {   /* s_lock held: a line in the log itself */
+    lp_text_t t;
+    const int n = snprintf(t.text, sizeof t.text, "\n[log: %lu bytes lost]\n", bytes);
+    if (n <= 0) return;
+    t.len = (uint8_t)(n < (int)sizeof t.text ? n : (int)sizeof t.text - 1);
+    lp_logring_put(&s_dring, &t);
+}
+
+static void send_debug_frame(const uint8_t mac[6], bool on) {
+    uint8_t buf[FP_MAX_FRAME];
+    const size_t n = fp_encode_debug(buf, sizeof buf, on);
+    if (n) espnow_link_send(mac, buf, n);
+}
 
 static void audio_start(void) {
     const audio_player_config_t cfg = {
@@ -252,6 +287,32 @@ static void on_msg(const uint8_t mac[6], const fp_msg_t *msg, int8_t rssi) {
         xSemaphoreGive(s_lock);
         break;
     }
+    case FP_MSG_LOG_CHUNK: {
+        const fp_log_chunk_t *c = &msg->log_chunk;
+        bool again = false;
+        xSemaphoreTake(s_lock, portMAX_DELAY);
+        if (s_dgate >= 0 && memcmp(mac, s_dmac, 6) == 0) {
+            s_dinflight = false;
+            if (!(c->flags & FP_LOG_DEBUG)) {
+                /* Off at the node: it rebooted, or our DEBUG on is not through yet. */
+                if (now_ms() - s_don_ms < DBG_ON_GRACE_MS) again = true;
+                else { s_dgate = -1; ESP_LOGW(TAG, "gate debug: the node is out of debug mode, released"); }
+            } else {
+                uint8_t skip;
+                uint32_t gap;
+                if (fp_log_take(&s_dexpected, c, &skip, &gap)) {
+                    if (gap) dbg_note_lost((unsigned long)gap);
+                    lp_text_t t = { .len = (uint8_t)(c->len - skip) };
+                    memcpy(t.text, c->text + skip, t.len);
+                    lp_logring_put(&s_dring, &t);
+                }
+                s_dfast = c->len == LP_TEXT_MAX;
+            }
+        }
+        xSemaphoreGive(s_lock);
+        if (again) send_debug_frame(mac, true);
+        break;
+    }
     default:
         break;
     }
@@ -291,6 +352,30 @@ static void beacon_task(void *arg) {
     }
 }
 
+static void dbg_task(void *arg) {
+    (void)arg;
+    for (;;) {
+        vTaskDelay(pdMS_TO_TICKS(DBG_TICK_MS));
+        uint8_t mac[6] = { 0 }, buf[FP_MAX_FRAME];
+        size_t n = 0;
+        bool lease_over = false;
+        const uint32_t t = now_ms();
+        xSemaphoreTake(s_lock, portMAX_DELAY);
+        if (s_dgate >= 0) {
+            memcpy(mac, s_dmac, 6);
+            if (t - s_dpage_ms > DBG_LEASE_MS) { lease_over = true; s_dgate = -1; }
+            else if (s_dinflight ? t - s_dreq_ms >= DBG_REPLY_MS
+                                 : (s_dfast || t - s_dreq_ms >= DBG_IDLE_MS)) {
+                s_dinflight = true; s_dfast = false; s_dreq_ms = t;
+                n = fp_encode_log_req(buf, sizeof buf, s_dexpected);
+            }
+        }
+        xSemaphoreGive(s_lock);
+        if (lease_over) { send_debug_frame(mac, false); ESP_LOGW(TAG, "gate debug: no page for a while, off"); }
+        else if (n) espnow_link_send(mac, buf, n);
+    }
+}
+
 void c6_hub_start(void) {
     s_lock = xSemaphoreCreateMutex();
     audio_start();
@@ -306,6 +391,7 @@ void c6_hub_start(void) {
     for (unsigned i = 0; i < s_num_nodes; i++) espnow_link_add_peer(s_nodes[i].mac);
 
     xTaskCreate(beacon_task, "c6_beacon", 3072, NULL, 4, NULL);
+    xTaskCreate(dbg_task, "c6_dbg", 3072, NULL, 3, NULL);
     ESP_LOGI(TAG, "fleet hub: %u node(s), %u gate(s), pairing %s",
              s_num_nodes, num_gates(), s_pairing ? "open" : "closed");
 }
@@ -443,4 +529,66 @@ void c6_hub_snapshot(c6_fleet_t *out) {
         out->standings[i].last_seen_ms = s_rt.ch[i].last_cross_ms;
     }
     xSemaphoreGive(s_lock);
+}
+
+/* ---- debug mode of a remote gate (see the block at the top) ---- */
+
+/* The first online node of a gate, false if none. s_lock held. */
+static bool dbg_find(uint8_t gate, uint8_t mac[6]) {
+    for (unsigned i = 0; i < s_num_nodes; i++)
+        if (s_nodes[i].gate_index == gate && s_nodes[i].online) { memcpy(mac, s_nodes[i].mac, 6); return true; }
+    return false;
+}
+
+bool c6_hub_debug_set(uint8_t gate, bool on) {
+    uint8_t mac[6] = { 0 }, old[6] = { 0 };
+    bool had = false, ok = true;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    if (s_dgate >= 0 && (on ? s_dgate != (int)gate : s_dgate == (int)gate)) {   /* one target at a time: the previous one off */
+        memcpy(old, s_dmac, 6);
+        had = true;
+        s_dgate = -1;
+    }
+    if (on) {
+        if (dbg_find(gate, mac)) {
+            const bool same = s_dgate == (int)gate;
+            if (!same) {
+                lp_logring_reset(&s_dring);
+                s_dexpected = 0;
+                s_dinflight = s_dfast = false;
+                s_dgate = gate;
+                memcpy(s_dmac, mac, 6);
+                s_don_ms = s_dreq_ms = now_ms();
+            }
+            s_dpage_ms = now_ms();
+        } else ok = false;
+    }
+    xSemaphoreGive(s_lock);
+    if (had) send_debug_frame(old, false);
+    if (on && ok) send_debug_frame(mac, true);
+    return ok;
+}
+
+int c6_hub_debug_gate(void) {
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    const int g = s_dgate;
+    xSemaphoreGive(s_lock);
+    return g;
+}
+
+size_t c6_hub_log_read(uint32_t since, char *out, size_t max, uint32_t *next, bool *lost) {
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    s_dpage_ms = now_ms();                       /* the page is still there: renews the lease */
+    const size_t n = lp_logring_read(&s_dring, since, out, max, next, lost);
+    xSemaphoreGive(s_lock);
+    return n;
+}
+
+bool c6_hub_send_keys(uint8_t gate, const char *keys, size_t n) {
+    uint8_t mac[6] = { 0 }, buf[FP_MAX_FRAME];
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    const bool ok = s_dgate == (int)gate && dbg_find(gate, mac);
+    xSemaphoreGive(s_lock);
+    const size_t m = ok ? fp_encode_key(buf, sizeof buf, keys, n) : 0;
+    return m && espnow_link_send(mac, buf, m) == ESP_OK;
 }

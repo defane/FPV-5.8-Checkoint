@@ -33,5 +33,9 @@ size_t c3_link_log_read(uint32_t since, char *out, size_t max, uint32_t *next, b
 /* Debug mode, off at every boot (the C5 switches off on our HELLO too): the log is kept and the keys
  * go out only while it is on. */
 void c3_link_debug_set(bool on);
+/* Debug mode switched on by the C6 (fleet_proto DEBUG): it expires `ms` after the call unless a
+ * later one renews it (each LOG_REQ), so a master that vanished leaves nothing on. Call after
+ * c3_link_debug_set(true); the web's own c3_link_debug_set() clears the lease. */
+void c3_link_debug_lease(uint32_t ms);
 bool c3_link_debug(void);
 void c3_link_send_keys(const char *keys, size_t n);   /* KEY frame: typed on the C5's console */

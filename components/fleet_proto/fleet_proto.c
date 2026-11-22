@@ -139,6 +139,45 @@ size_t fp_encode_heartbeat(uint8_t *buf, size_t cap, const fp_heartbeat_t *m) {
     return frame(buf, cap, FP_MSG_HEARTBEAT, pl, sizeof pl);
 }
 
+size_t fp_encode_debug(uint8_t *buf, size_t cap, bool on) {
+    const uint8_t pl = on ? 1u : 0u;
+    return frame(buf, cap, FP_MSG_DEBUG, &pl, 1u);
+}
+size_t fp_encode_key(uint8_t *buf, size_t cap, const char *keys, size_t len) {
+    if (!keys || len == 0 || len > LP_KEY_MAX) return 0;
+    uint8_t pl[1 + LP_KEY_MAX];
+    pl[0] = (uint8_t)len;
+    for (size_t i = 0; i < len; i++) pl[1 + i] = (uint8_t)keys[i];
+    return frame(buf, cap, FP_MSG_KEY, pl, (uint8_t)(1u + len));
+}
+size_t fp_encode_log_req(uint8_t *buf, size_t cap, uint32_t since) {
+    uint8_t pl[4];
+    put_u32(pl, since);
+    return frame(buf, cap, FP_MSG_LOG_REQ, pl, sizeof pl);
+}
+#define LOG_CHUNK_HDR 6u   /* from(4) + flags + len */
+_Static_assert(LOG_CHUNK_HDR + LP_TEXT_MAX <= FP_MAX_PAYLOAD, "a full LOG_CHUNK fits a fleet frame");
+size_t fp_encode_log_chunk(uint8_t *buf, size_t cap, const fp_log_chunk_t *m) {
+    if (m->len > LP_TEXT_MAX) return 0;
+    uint8_t pl[LOG_CHUNK_HDR + LP_TEXT_MAX];
+    put_u32(pl, m->from);
+    pl[4] = m->flags;
+    pl[5] = m->len;
+    for (uint8_t i = 0; i < m->len; i++) pl[LOG_CHUNK_HDR + i] = (uint8_t)m->text[i];
+    return frame(buf, cap, FP_MSG_LOG_CHUNK, pl, (uint8_t)(LOG_CHUNK_HDR + m->len));
+}
+
+bool fp_log_take(uint32_t *expected, const fp_log_chunk_t *c, uint8_t *skip, uint32_t *gap) {
+    *skip = 0;
+    *gap = 0;
+    const uint32_t end = c->from + c->len;
+    if (c->len == 0 || end <= *expected) return false;
+    if (c->from > *expected) *gap = c->from - *expected;
+    else *skip = (uint8_t)(*expected - c->from);
+    *expected = end;
+    return true;
+}
+
 /* ---- decode ---- */
 
 bool fp_decode(const uint8_t *buf, size_t n, fp_msg_t *out) {
@@ -212,6 +251,26 @@ bool fp_decode(const uint8_t *buf, size_t n, fp_msg_t *out) {
         if (len != 5) return false;
         out->heartbeat.role = p[0];
         out->heartbeat.uptime_ms = get_u32(p + 1);
+        return true;
+    case FP_MSG_DEBUG:
+        if (len != 1 || p[0] > 1) return false;
+        out->debug.on = p[0];
+        return true;
+    case FP_MSG_KEY:
+        if (len < 2 || p[0] == 0 || p[0] > LP_KEY_MAX || len != 1u + p[0]) return false;
+        out->key.len = p[0];
+        for (uint8_t i = 0; i < p[0]; i++) out->key.text[i] = (char)p[1 + i];
+        return true;
+    case FP_MSG_LOG_REQ:
+        if (len != 4) return false;
+        out->log_req.since = get_u32(p);
+        return true;
+    case FP_MSG_LOG_CHUNK:
+        if (len < LOG_CHUNK_HDR || p[5] > LP_TEXT_MAX || len != LOG_CHUNK_HDR + p[5]) return false;
+        out->log_chunk.from = get_u32(p);
+        out->log_chunk.flags = p[4];
+        out->log_chunk.len = p[5];
+        for (uint8_t i = 0; i < p[5]; i++) out->log_chunk.text[i] = (char)p[LOG_CHUNK_HDR + i];
         return true;
     default:
         return false;

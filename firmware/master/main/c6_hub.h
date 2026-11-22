@@ -78,3 +78,13 @@ void c6_hub_snapshot(c6_fleet_t *out);
  * before a calibration. */
 bool c6_hub_send_command(uint8_t gate_index, lp_cmd_t cmd);
 int32_t c6_hub_vtx_threshold_x10(void);        /* remote gates: C/N*10 above which a VTX is probably on (pushed active_db) */
+
+/* Debug mode of a remote gate (1..): its C5's console text and keys, over the node (fleet_proto
+ * DEBUG, KEY, LOG_REQ, LOG_CHUNK). One target at a time. on switches it on (the previous target
+ * off) and false when the gate has no online node; off switches the target off. It leaves by
+ * itself when the node reports it is out of debug (a reboot) or no c6_hub_log_read() comes for
+ * 10 s. The log is a ring like the local C5's: positions count bytes since it was switched on. */
+bool c6_hub_debug_set(uint8_t gate, bool on);
+int  c6_hub_debug_gate(void);                  /* the target gate, -1 none */
+size_t c6_hub_log_read(uint32_t since, char *out, size_t max, uint32_t *next, bool *lost);   /* renews the lease */
+bool c6_hub_send_keys(uint8_t gate, const char *keys, size_t n);   /* KEY to the gate's node; false if not its target */

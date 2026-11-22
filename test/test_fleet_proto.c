@@ -168,13 +168,84 @@ int main(void) {
         const uint16_t crc = lp_crc16(buf, n - 2u);
         buf[n - 2] = (uint8_t)(crc & 0xFFu);
         buf[n - 1] = (uint8_t)(crc >> 8);
-        CHECK(FP_VERSION == 4u && !fp_decode(buf, n, &m), "version-3 frame rejected (valid CRC)");
-        /* Its 33-byte CONFIG payload under version 4 is the wrong length. */
+        CHECK(FP_VERSION == 5u && !fp_decode(buf, n, &m), "version-3 frame rejected (valid CRC)");
+        /* Its 33-byte CONFIG payload under version 5 is the wrong length. */
         n = fp_encode_config(buf, sizeof buf, &s) - 4u;   /* drop the last 4 payload bytes */
         const uint16_t c2 = lp_crc16(buf, n - 2u);
         buf[n - 2] = (uint8_t)(c2 & 0xFFu);
         buf[n - 1] = (uint8_t)(c2 >> 8);
-        CHECK(!fp_decode(buf, n, &m), "a v3-length config payload rejected at version 4");
+        CHECK(!fp_decode(buf, n, &m), "a v3-length config payload rejected at version 5");
+    }
+
+    /* Debug mode of a remote gate: DEBUG, KEY, LOG_REQ, LOG_CHUNK. */
+    {
+        size_t n = fp_encode_debug(buf, sizeof buf, true);
+        CHECK(fp_decode(buf, n, &m) && m.type == FP_MSG_DEBUG && m.debug.on == 1, "debug on roundtrip");
+        n = fp_encode_debug(buf, sizeof buf, false);
+        CHECK(fp_decode(buf, n, &m) && m.debug.on == 0, "debug off roundtrip");
+        uint8_t f[5] = { FP_VERSION, FP_MSG_DEBUG, 2 };
+        uint16_t crc = lp_crc16(f, 3);
+        f[3] = (uint8_t)crc; f[4] = (uint8_t)(crc >> 8);
+        CHECK(!fp_decode(f, sizeof f, &m), "debug value out of range rejected");
+
+        n = fp_encode_key(buf, sizeof buf, "Ka", 2);
+        CHECK(fp_decode(buf, n, &m) && m.type == FP_MSG_KEY && m.key.len == 2 && m.key.text[0] == 'K' &&
+              m.key.text[1] == 'a', "key roundtrip");
+        const char sixteen[LP_KEY_MAX + 1] = "0123456789abcdef";
+        n = fp_encode_key(buf, sizeof buf, sixteen, LP_KEY_MAX);
+        CHECK(n && fp_decode(buf, n, &m) && m.key.len == LP_KEY_MAX, "a full key string fits");
+        CHECK(fp_encode_key(buf, sizeof buf, sixteen, LP_KEY_MAX + 1) == 0 &&
+              fp_encode_key(buf, sizeof buf, "", 0) == 0, "key string over the maximum, or empty, refused");
+        n = fp_encode_key(buf, sizeof buf, "Ka", 2);
+        buf[2] = 5;                                          /* length byte lies: CRC refuses it ... */
+        CHECK(!fp_decode(buf, n, &m), "a key frame with a wrong CRC rejected");
+        uint8_t k[8] = { FP_VERSION, FP_MSG_KEY, 5, 'K', 'a' };   /* ... and a valid CRC with a lying length */
+        crc = lp_crc16(k, 5);
+        k[5] = (uint8_t)crc; k[6] = (uint8_t)(crc >> 8);
+        CHECK(!fp_decode(k, 7, &m), "key length byte over its payload rejected");
+
+        n = fp_encode_log_req(buf, sizeof buf, 123456u);
+        CHECK(fp_decode(buf, n, &m) && m.type == FP_MSG_LOG_REQ && m.log_req.since == 123456u, "log request roundtrip");
+
+        fp_log_chunk_t c = { .from = 4000u, .flags = FP_LOG_DEBUG | FP_LOG_LOST, .len = 5, .text = "PASS\n" };
+        n = fp_encode_log_chunk(buf, sizeof buf, &c);
+        CHECK(fp_decode(buf, n, &m) && m.type == FP_MSG_LOG_CHUNK && m.log_chunk.from == 4000u &&
+              m.log_chunk.flags == (FP_LOG_DEBUG | FP_LOG_LOST) && m.log_chunk.len == 5 &&
+              memcmp(m.log_chunk.text, "PASS\n", 5) == 0, "log chunk roundtrip");
+        c.len = 0;
+        n = fp_encode_log_chunk(buf, sizeof buf, &c);
+        CHECK(fp_decode(buf, n, &m) && m.log_chunk.len == 0, "an empty log chunk (nothing new) roundtrips");
+        c.len = LP_TEXT_MAX;
+        memset(c.text, 'a', sizeof c.text);
+        n = fp_encode_log_chunk(buf, sizeof buf, &c);
+        CHECK(n && n <= FP_MAX_FRAME && fp_decode(buf, n, &m) && m.log_chunk.len == LP_TEXT_MAX,
+              "a full log chunk fits a fleet frame");
+        c.len = LP_TEXT_MAX + 1;
+        CHECK(fp_encode_log_chunk(buf, sizeof buf, &c) == 0, "log chunk over the maximum refused");
+        uint8_t l[12] = { FP_VERSION, FP_MSG_LOG_CHUNK, 0, 0, 0, 0, 0, 4, 'a', 'b' };   /* says 4, carries 2 */
+        crc = lp_crc16(l, 10);
+        l[10] = (uint8_t)crc; l[11] = (uint8_t)(crc >> 8);
+        CHECK(!fp_decode(l, sizeof l, &m), "log chunk length byte over its payload rejected");
+        n = fp_encode_log_req(buf, sizeof buf, 1u);
+        CHECK(!fp_decode(buf, n - 1, &m), "a truncated log request rejected");
+    }
+
+    /* fp_log_take: the master keeps each byte of the node's log once, and counts a gap. */
+    {
+        uint32_t exp = 0;
+        uint8_t skip;
+        uint32_t gap;
+        fp_log_chunk_t c = { .from = 0, .len = 10 };
+        CHECK(fp_log_take(&exp, &c, &skip, &gap) && skip == 0 && gap == 0 && exp == 10, "the first chunk is kept whole");
+        CHECK(!fp_log_take(&exp, &c, &skip, &gap) && exp == 10, "the same chunk again (a request asked twice) gives nothing");
+        c.from = 6; c.len = 10;                                  /* 6..16: 4 bytes are repeats */
+        CHECK(fp_log_take(&exp, &c, &skip, &gap) && skip == 4 && gap == 0 && exp == 16, "an overlapping chunk gives its tail");
+        c.from = 40; c.len = 5;                                  /* the node's ring dropped 16..40 */
+        CHECK(fp_log_take(&exp, &c, &skip, &gap) && skip == 0 && gap == 24 && exp == 45, "a later chunk reports the bytes lost");
+        c.from = 45; c.len = 0;
+        CHECK(!fp_log_take(&exp, &c, &skip, &gap) && exp == 45 && gap == 0, "an empty chunk (nothing new) changes nothing");
+        c.from = 3; c.len = 5;
+        CHECK(!fp_log_take(&exp, &c, &skip, &gap) && exp == 45, "an older chunk (a late reply) is dropped");
     }
     /* A truncated frame (wrong length for the type) is rejected. */
     {

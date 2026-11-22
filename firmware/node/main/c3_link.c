@@ -36,20 +36,29 @@ static bool s_has_master_cfg;
 typedef struct { uint8_t buf[LP_MAX_FRAME]; uint8_t len; } frame_t;
 
 static void enqueue(const uint8_t *b, size_t n);
+static uint32_t now_ms(void);
 
 static char s_log[LOG_RING];
 static lp_logring_t s_ring = { .buf = s_log, .cap = LOG_RING };
 static portMUX_TYPE s_log_mux = portMUX_INITIALIZER_UNLOCKED;
 
 static volatile bool s_debug;
+static volatile bool s_leased;          /* debug was switched on by the master: it expires */
+static volatile uint32_t s_lease_until;
 
 void c3_link_debug_set(bool on) {
     uint8_t b[LP_MAX_FRAME];
     portENTER_CRITICAL(&s_log_mux);
     if (on && !s_debug) lp_logring_reset(&s_ring);   /* a fresh log: the page restarts from 0 */
     s_debug = on;
+    s_leased = false;                                /* the web's own switch has no lease */
     portEXIT_CRITICAL(&s_log_mux);
     enqueue(b, lp_encode_debug(b, sizeof b, on));
+}
+
+void c3_link_debug_lease(uint32_t ms) {
+    s_lease_until = now_ms() + ms;
+    s_leased = true;
 }
 
 bool c3_link_debug(void) { return s_debug; }
@@ -181,6 +190,11 @@ static void link_task(void *arg) {
             uart_write_bytes(LINK_UART, (const char *)f.buf, f.len);
 
         const uint32_t t = now_ms();
+        /* Debug mode the master switched on, unpolled for FP_DEBUG_LEASE_MS: it left, off again. */
+        if (s_debug && s_leased && (int32_t)(t - s_lease_until) > 0) {
+            ESP_LOGW(TAG, "debug mode lease over: off");
+            c3_link_debug_set(false);
+        }
         if (rn && t - last_req >= CONFIG_POLL_MS) {
             last_req = t;
             uart_write_bytes(LINK_UART, (const char *)req, rn);
