@@ -37,7 +37,7 @@ jobs:
       - uses: actions/setup-node@v4   # test/*.mjs
         with:
           node-version: 20
-      - name: Host tests (C: detector, protocols, timing, web auth; JS: pages)
+      - name: Host tests (C detector, protocols, timing, web auth; JS pages)
         shell: bash
         working-directory: test
         run: |
