@@ -1,7 +1,7 @@
 # FPV 5.8 Checkpoint
 
-A "drone just passed" platform, forked from C5VRX-5 (upstream:
-https://github.com/Twotoz/C5VRX, remote `upstream`): a two-ESP checkpoint
+A "drone just passed" platform, started from C5VRX-5 (https://github.com/Twotoz/C5VRX;
+no longer a fork, the git remote `upstream` only points at its history): a two-ESP checkpoint
 (C5 + C3) that scales to a C6-mastered race-timing fleet (see Fleet below).
 
 - **ESP32-C5** (Waveshare ESP32-C5-Zero, `firmware/detector`): the **sdr_rx** engine
@@ -26,8 +26,8 @@ A C3 that cannot reach the C6 at boot falls back to a degraded local AP+web
 
 The engine is ported from widscan58 (CapnBry, `a9fff97`), whose radio layer derives
 from esp-sdr (ESPARGOS, `a8eaac1`): the ported files keep their GPL-3.0-or-later
-headers, plus a provenance line and their changes. The project was forked from
-C5VRX-5 (upstream `6bc9e4b`), whose receive engine was removed on this branch
+headers, plus a provenance line and their changes. The project started from
+C5VRX-5 (upstream `6bc9e4b`) and is no longer a fork: its receive engine was removed
 (issue #2); `main` keeps it until a board bench validates sdr_rx. Read `AGENTS.md`
 first: it is upstream's agent policy (attribution, research provenance) and still
 governs the C5VRX material this tree keeps (the I/Q dump research, the console

@@ -19,6 +19,6 @@ CPU. GPIO 26, the C5-Zero's antenna switch, is driven only on request
 ([bench.md](bench.md#6-gain-and-antenna)). GPIO27, the C5-Zero's onboard WS2812, is
 free; the detector does not drive it (a follow-up).
 
-History: the C5VRX engine this fork ran before issue #2 also drove a video
+History: the C5VRX engine this project ran before issue #2 also drove a video
 transport that reached no pin, and a GPIO-matrix I/Q loopback on GPIO 0–5, 25 and
 27, which is why GPIO27's LED was unusable then. Both went with that engine.

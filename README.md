@@ -13,9 +13,9 @@ passes. It scales to a multi-gate race-timing fleet.
 > cache, PSD/FFT, level metrics, LO planner, linker guard), whose radio layer is derived from
 > [esp-sdr](https://github.com/ESPARGOS/esp-sdr) by **ESPARGOS** (commit `a8eaac1`: the PHY I/Q dump
 > capture, RX path, gain and analog filter control). Those files keep their GPL-3.0-or-later notices.
-> This project was forked from [C5VRX](https://github.com/Twotoz/C5VRX) — **C5VRX-5, by Twotoz and the C5VRX
-> contributors** (upstream `6bc9e4b`); the C5VRX receive engine was removed on this branch (issue #2), but
-> C5VRX research is still used: the C5 PHY I/Q dump format first decoded by C5VRX-1, the console
+> This project started from [C5VRX](https://github.com/Twotoz/C5VRX) — **C5VRX-5, by Twotoz and the C5VRX
+> contributors** (upstream `6bc9e4b`) — and is no longer a fork: the C5VRX receive engine was removed (issue #2) and
+> the platform around it is new. Some C5VRX material remains and keeps its credit: the C5 PHY I/Q dump format first decoded by C5VRX-1, the console
 > structure, the firmware id and NVS helpers, the Raceband scan benches and the off-grid tuning finding
 > (zerowidth PR #3). Visit the [official C5VRX website](https://twotoz.github.io/C5VRX/) for the original
 > project; its Discord invite is available there. This repository adds the pass detector, the coin
@@ -223,16 +223,16 @@ from **esp-sdr** by ESPARGOS — <https://github.com/ESPARGOS/esp-sdr>, commit `
 `main/common/rx_recalibration.c`, `main/common/burst_gain.h`). The ported files keep
 their GPL-3.0-or-later notices and list their changes in their headers.
 
-History: this project was forked from **C5VRX** by Twotoz and the C5VRX contributors —
+History: this project started from **C5VRX** by Twotoz and the C5VRX contributors, and is no longer a fork —
 <https://github.com/Twotoz/C5VRX> · <https://twotoz.github.io/C5VRX/> (Discord
 invite on the website), at upstream `6bc9e4b`. The C5VRX-5 receive engine ran the
-detector until issue #2 and is removed on this branch (`main` keeps it until a board
+detector until issue #2 and is removed (`main` keeps it until a board
 bench validates sdr_rx). Still used from C5VRX-5: the console structure and its
 download-key reboot (`components/checkpoint/cp_console.c`, the reboot of
 `components/sdr_rx/sdr_radio_c5.c`), the firmware id and NVS helpers
 (`components/checkpoint/fw_id.c`, `cp_nvs.c`), `tools/flash.py` and
 `tools/enter_download.py`, and the off-grid tuning finding of zerowidth/C5VRX PR #3.
-The Raceband scan benches this fork first built on the C5VRX engine (issue #1) give
+The Raceband scan benches first built on the C5VRX engine (issue #1) give
 `cp_bench.c` the shape of its scan recording and residue trace. Reused material keeps
 its original copyright, license and credits; see `AGENTS.md` for the reuse policy and
 `assets/BRANDING.md` for branding terms.
