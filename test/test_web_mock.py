@@ -18,6 +18,12 @@ spec = importlib.util.spec_from_file_location("web_mock", ROOT / "tools/web_mock
 web_mock = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(web_mock)
 
+def page_text(rel):
+    """A page with its script: the code lives in app.js beside the HTML (the firmware's CSP allows no inline script)."""
+    p = ROOT / rel
+    return p.read_text() + p.with_name("app.js").read_text()
+
+
 SOURCES = {web_mock.Master: "firmware/master/main/c6_web.c", web_mock.Node: "firmware/node/main/c3_web.c"}
 
 
@@ -116,7 +122,7 @@ class Firmware(unittest.TestCase):
     def test_node_page_posts_what_the_firmware_reads(self):
         """The C3 page's detector body: every key parsed by post_config (json_i) and echoed in
         /api/state's config, and its widest form within the firmware's buffer."""
-        page = (ROOT / "firmware/node/main/www/index.html").read_text()
+        page = page_text("firmware/node/main/www/index.html")
         body = re.search(r'\$\("save"\).*?const body = \{(.*?)\};', page, re.S).group(1)
         keys = re.findall(r"^\s*(\w+):", body, re.M)
         src = (ROOT / SOURCES[web_mock.Node]).read_text()
@@ -132,7 +138,7 @@ class Firmware(unittest.TestCase):
         """Every admin POST of the C6 page: a route of c6_web.c and of the mock, each key it sends
         parsed by the C handler (json_i/json_s) and read by the mock; the re-arm body within its
         buffer."""
-        page = (ROOT / "firmware/master/main/www/index.html").read_text()
+        page = page_text("firmware/master/main/www/index.html")
         src = (ROOT / SOURCES[web_mock.Master]).read_text()
         routes = dict(re.findall(r'\.uri = "(/api/\w+)",\s*\.method = HTTP_POST,\s*\.handler = (\w+)', src))
         posts = page_posts(page)
@@ -379,7 +385,7 @@ class DebugCases:
     def test_page_sends_what_the_firmware_reads(self):
         """The debug panel's bodies: each key the page sends is parsed by the C handler and read by the mock,
         the C handler's buffer holds the widest one, and every route is the mock's."""
-        page = (ROOT / self.page).read_text()
+        page = page_text(self.page)
         src = (ROOT / SOURCES[self.cls]).read_text()
         routes = dict(re.findall(r'\.uri = "(/api/\w+)",\s*\.method = HTTP_POST,\s*\.handler = (\w+)', src))
         sent = {}
@@ -467,7 +473,7 @@ class GainCases:
         g.next_pass, g.last_pass = t + 100.0, t - 100.0
 
     def test_gain_page_posts_what_the_firmware_reads(self):
-        page = (ROOT / self.page).read_text()
+        page = page_text(self.page)
         src = (ROOT / SOURCES[self.cls]).read_text()
         sent = set()
         for obj in re.findall(r'/api/gain", JSON\.stringify\(\{([^{}]*)\}\)|post\("/api/gain", \{([^{}]*)\}', page):
@@ -577,7 +583,7 @@ class MasterOrder(unittest.TestCase):
 
     def test_the_old_per_node_save_is_gone(self):
         self.assertNotIn("/api/node", web_mock.Master.ADMIN)
-        page = (ROOT / "firmware/master/main/www/index.html").read_text()
+        page = page_text("firmware/master/main/www/index.html")
         self.assertNotIn('class="save"', page)
         self.assertNotIn('"/api/node",', page)
 
@@ -771,12 +777,147 @@ class NodeCalib(unittest.TestCase):
         self.assertEqual((out["ok"], out["msg"]), (False, "no C5 linked"))
 
     def test_page_sends_what_the_firmware_reads(self):
-        page = (ROOT / "firmware/node/main/www/index.html").read_text()
+        page = page_text("firmware/node/main/www/index.html")
         src = (ROOT / SOURCES[web_mock.Node]).read_text()
         self.assertIn('"/api/calib", JSON.stringify({ action, channel })', page)
         self.assertEqual(c_reads(c_function(src, "post_calib"), src), {"action", "channel"})
         self.assertLessEqual({"action", "channel"}, mock_reads(web_mock.Node, "calib"))
         self.assertLess(len('{"action":"start1","channel":255}'), web_mock.Node.ADMIN["/api/calib"][1])
+
+
+class PagesAccessibility(unittest.TestCase):
+    """What the modern-web-guidance audit asked of both pages: announced statuses, one h1, tables a keyboard and a screen
+    reader can use, bigger touch targets, and no refresh while the tab is hidden."""
+    PAGES = {"node": "firmware/node/main/www/index.html", "master": "firmware/master/main/www/index.html"}
+
+    def pages(self):
+        return {k: page_text(v) for k, v in self.PAGES.items()}
+
+    def test_every_status_message_is_a_live_region(self):
+        for name, page in self.pages().items():
+            for el in re.findall(r'<span id="(\w*msg)"[^>]*>', page):
+                tag = re.search(rf'<span id="{el}"[^>]*>', page).group(0)
+                self.assertIn('role="status"', tag, f"{name}: #{el} is not announced")
+            self.assertRegex(page, r'<pre id="dbg_log" role="log" aria-live="off"[^>]*tabindex="0"')
+        self.assertIn('id="conn" class="pill bad" role="alert"', self.pages()["master"])
+
+    def test_one_h1_the_page_title(self):
+        for name, page in self.pages().items():
+            self.assertEqual(len(re.findall(r"<h1[ >]", page)), 1, name)
+            self.assertRegex(page, r"<header[^>]*>\s*(?:<div>)?<h1>Checkpoint C[36]")
+
+    def test_tables_are_named_scrollable_and_have_column_scopes(self):
+        page = self.pages()["master"]
+        tables = re.findall(r"<table[^>]*>(?:<caption[^>]*>.*?</caption>)?", page)
+        self.assertGreaterEqual(len(tables), 6)
+        for t in tables:
+            self.assertIn("<caption", t, "a table without a caption")
+        for head in re.findall(r"<thead>(.*?)</thead>", page, re.S):
+            self.assertNotRegex(head, r"<th(?![^>]*scope=)", "a column header without scope")
+        for card in re.findall(r'<div class="card scroll[^"]*"[^>]*>', page):
+            self.assertIn('tabindex="0" role="region"', card, card)
+            ref = re.search(r'aria-labelledby="(\w+)"', card).group(1)
+            self.assertIn(f'id="{ref}"', page, f"{ref} names nothing")
+
+    def test_a_narrow_gates_table_becomes_cards_with_a_label_on_each_cell(self):
+        page = self.pages()["master"]
+        self.assertIn('<table class="stack">', page)
+        self.assertRegex(page, r"@container \(width < 40rem\)")
+        for label in ("Gate", "Node", "Link", "Health", "RSSI", "Loss", "Seen"):
+            self.assertIn(f'data-label="{label}"', page)
+
+    def test_touch_targets_grow_on_coarse_pointers(self):
+        for name, page in self.pages().items():
+            block = re.search(r"@media \(pointer: coarse\) \{(.*?)\n  \}", page, re.S)
+            self.assertIsNotNone(block, name)
+            self.assertIn("min-block-size: 2.75rem", block.group(1))
+            self.assertLess(page.index("button.info {"), page.index("@media (pointer: coarse)"), "the override must come after the size rules")
+
+    def test_a_hidden_tab_asks_the_esp_for_nothing(self):
+        for name, page in self.pages().items():
+            self.assertRegex(page, r"async function poll\(\) \{\n  if \(document\.hidden\) return;")
+            self.assertRegex(page, r"async function dbgPoll\(\) \{\n  if \(document\.hidden \|\|")
+            self.assertRegex(page, r"async function calPoll\(\) \{\n  if \(document\.hidden\) return;")
+            self.assertIn('document.addEventListener("visibilitychange"', page)
+
+
+class PagesPlatform(unittest.TestCase):
+    """The platform features the pages use as the web guidance asks: native switches, popover notes, a Content-Security-Policy
+    the pages obey (no inline script), accent-color and reduced motion."""
+    PAGES = {"node": "firmware/node/main/www/index.html", "master": "firmware/master/main/www/index.html"}
+
+    def html(self):
+        return {k: (ROOT / v).read_text() for k, v in self.PAGES.items()}
+
+    def test_the_pages_run_no_inline_script(self):
+        for name, html in self.html().items():
+            self.assertEqual(re.findall(r"<script(?![^>]*\bsrc=)[^>]*>", html), [], f"{name}: an inline script")
+            self.assertEqual(re.findall(r"\son[a-z]+=\"", html), [], f"{name}: an inline event handler")
+            self.assertEqual(re.findall(r"javascript:", html), [])
+            self.assertIn('<script src="/auth.js"></script>\n<script src="/app.js"></script>', html)
+            self.assertTrue((ROOT / self.PAGES[name]).with_name("app.js").exists())
+
+    def test_the_policy_lets_only_the_pages_own_scripts_run(self):
+        csp = web_mock.page_headers()["Content-Security-Policy"]
+        directives = dict(d.strip().split(" ", 1) for d in csp.split(";") if d.strip())
+        self.assertEqual(directives["script-src"], "'self'", "no inline script, no eval, no other origin")
+        self.assertEqual(directives["default-src"], "'none'")
+        self.assertEqual(directives["connect-src"], "'self'")
+        for d in ("base-uri", "form-action", "frame-ancestors"):
+            self.assertEqual(directives[d], "'none'", d)
+        self.assertNotIn("unsafe-eval", csp)
+        self.assertNotIn("'unsafe-inline'", directives["script-src"])
+        self.assertEqual(web_mock.page_headers()["X-Content-Type-Options"], "nosniff")
+
+    def test_every_page_and_script_the_firmware_serves_carries_the_policy(self):
+        for path in ("firmware/node/main/c3_web.c", "firmware/master/main/c6_web.c"):
+            src = (ROOT / path).read_text()
+            for fn in ("get_root", "get_app_js"):
+                self.assertIn("web_auth_page_headers(req)", c_function(src, fn), f"{path}: {fn}")
+            routes = re.findall(r'\.uri = "(/[^"]*)",\s*\.method = HTTP_GET', src)
+            self.assertIn("/app.js", routes, path)
+            wired = len(re.findall(r'\.uri = "/', src)) + 2          # + web_auth's /api/session and /auth.js
+            self.assertLessEqual(wired, int(re.search(r"max_uri_handlers = (\d+)", src).group(1)), f"{path}: handlers")
+        self.assertIn("web_auth_page_headers(req)", c_function((ROOT / "components/web_auth/web_auth_esp.c").read_text(), "get_js"))
+
+    def test_the_mock_serves_the_script_with_the_policy(self):
+        sim = web_mock.Master()
+        handler = web_mock.make_handler("master", sim, web_mock.Auth("c6", "pw"), 0)
+        handler.log_message = lambda *a: None
+        server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            for path, ctype in (("/", "text/html"), ("/app.js", "application/javascript"), ("/auth.js", "application/javascript")):
+                c = http.client.HTTPConnection("127.0.0.1", server.server_address[1])
+                c.request("GET", path)
+                r = c.getresponse()
+                r.read()
+                self.assertEqual((r.status, r.getheader("Content-Type")), (200, ctype), path)
+                self.assertEqual(r.getheader("Content-Security-Policy"), web_mock.page_headers()["Content-Security-Policy"], path)
+                c.close()
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def test_switches_are_native_checkboxes_with_a_switch_role(self):
+        for name, html in self.html().items():
+            self.assertNotRegex(html, r'<button[^>]*role="switch"', f"{name}: a button posing as a switch")
+            self.assertNotIn("aria-checked", html)
+            switches = re.findall(r'<label class="switch"><input type="checkbox" switch role="switch" id="(\w+)">', html)
+            self.assertEqual(len(switches), len(re.findall(r'<label class="switch">', html)), f"{name}: a switch that is not one")
+            self.assertGreaterEqual(len(switches), 2, name)
+        self.assertEqual(sorted(re.findall(r'type="checkbox" switch role="switch" id="(\w+)"', self.html()["master"])),
+                         ["dbg_on", "mode", "pause", "role"])
+        for name, path in self.PAGES.items():
+            js = (ROOT / path).with_name("app.js").read_text()
+            self.assertNotIn("aria-checked", js)
+            self.assertIn('$("role").checked = on;', js)
+
+    def test_the_accent_colour_and_reduced_motion_are_set(self):
+        for name, html in self.html().items():
+            self.assertIn("accent-color: #2f6feb", html, name)
+            self.assertRegex(html, r"@media \(prefers-reduced-motion: reduce\) \{[^}]*transition: none", name)
+            self.assertEqual(len(re.findall(r"transition:", html)), 2, f"{name}: a transition without its reduced-motion override")
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@
 """Mock of the C6 master / C3 node web server: work on the pages without a board.
 
 Serves the real pages from disk, read at every request: edit
-firmware/<role>/main/www/index.html or components/web_auth/www/auth.js and reload
+firmware/<role>/main/www/index.html, app.js or components/web_auth/www/auth.js and reload
 the browser, no build, no flash. /api/* answers like the firmware on a simulated
 race (a healthy gate, one needing a calibration, one offline), every Raceband
 channel of every gate measured as the scanning C5 does, with its detector state (a drone
@@ -28,6 +28,16 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def page_headers():
+    """The headers the firmware puts on every page and script (WA_CSP, web_auth_page_headers): read from the C source, so a
+    page that would be blocked by the real policy is blocked by the mock too."""
+    src = (ROOT / "components/web_auth/include/web_auth_esp.h").read_text()
+    macro = re.search(r"#define WA_CSP\s+((?:\"[^\"]*\"\s*\\?\s*)+)", src).group(1)
+    return {"Content-Security-Policy": "".join(re.findall(r'"([^"]*)"', macro)),
+            "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer"}
+
 ITERATIONS = 200000       # components/web_auth/project_include.cmake
 CN_UNKNOWN = -990         # LP_CN_UNKNOWN
 ACTIVE_X10 = 150          # pass detector active_db: the VTX guard's threshold
@@ -723,11 +733,13 @@ def make_handler(role, sim, auth, latency_s):
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
-        def reply(self, status, data, ctype="application/json"):
+        def reply(self, status, data, ctype="application/json", headers=None):
             if isinstance(data, (dict, list)):
                 data = json.dumps(data).encode()
             self.send_response(status)
             self.send_header("Content-Type", ctype)
+            for k, v in (headers or {}).items():
+                self.send_header(k, v)
             self.send_header("Content-Length", str(len(data)))
             self.send_header("Cache-Control", "no-store")     # a reload always shows the file on disk
             self.end_headers()
@@ -736,9 +748,11 @@ def make_handler(role, sim, auth, latency_s):
         def do_GET(self):
             self.drain()
             if self.path == "/":
-                self.reply(200, page.read_bytes(), "text/html")
+                self.reply(200, page.read_bytes(), "text/html", page_headers())
+            elif self.path == "/app.js":
+                self.reply(200, page.with_name("app.js").read_bytes(), "application/javascript", page_headers())
             elif self.path == "/auth.js":
-                self.reply(200, js.read_bytes(), "application/javascript")
+                self.reply(200, js.read_bytes(), "application/javascript", page_headers())
             elif self.path == "/api/state":
                 with lock:
                     self.reply(200, sim.state(time.monotonic() - t0))

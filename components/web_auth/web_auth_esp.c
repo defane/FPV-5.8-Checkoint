@@ -66,8 +66,16 @@ static esp_err_t post_session(httpd_req_t *req)
     return httpd_resp_send(req, out, o);
 }
 
+void web_auth_page_headers(httpd_req_t *req)
+{
+    httpd_resp_set_hdr(req, "Content-Security-Policy", WA_CSP);
+    httpd_resp_set_hdr(req, "X-Content-Type-Options", "nosniff");
+    httpd_resp_set_hdr(req, "Referrer-Policy", "no-referrer");
+}
+
 static esp_err_t get_js(httpd_req_t *req)
 {
+    web_auth_page_headers(req);
     httpd_resp_set_type(req, "application/javascript");
     return httpd_resp_send(req, (const char *)auth_js_start, auth_js_end - auth_js_start);
 }

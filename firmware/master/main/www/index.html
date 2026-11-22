@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Checkpoint C6</title>
 <style>
-  :root { color-scheme: dark; }
+  :root { color-scheme: dark; accent-color: #2f6feb; }
   body { font-family: system-ui, sans-serif; margin: 0; background: #14171c; color: #e7ebf0; }
   header { padding: 14px 16px; background: #1b2026; font-weight: 600; font-size: 1.1rem;
            display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
@@ -28,12 +28,16 @@
   button.sm { padding: 4px 8px; font-size: .78rem; }
   button:disabled { opacity: .4; cursor: default; }
   .switch { display: inline-flex; align-items: center; gap: 8px; margin: 0; background: #2a313a; color: #e7ebf0;
-            border-radius: 999px; padding: 4px 10px 4px 4px; font-size: .78rem; }
-  .switch i { position: relative; width: 30px; height: 16px; border-radius: 999px; background: #0f1216; }
-  .switch i::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px;
-                     border-radius: 50%; background: #8b97a7; transition: left .15s; }
-  .switch[aria-checked=true] { background: #14532d; color: #86efac; }
-  .switch[aria-checked=true] i::after { left: 16px; background: #2ecc71; }
+            border-radius: 999px; padding: 4px 10px 4px 4px; font-size: .8rem; cursor: pointer; }
+  .switch:has(input:checked) { background: #14532d; color: #86efac; }
+  /* A native <input type=checkbox switch> (its role says switch whatever the browser draws), drawn the same everywhere. */
+  .switch input[type=checkbox] { appearance: none; -webkit-appearance: none; position: relative; margin: 0; flex: none;
+                                 width: 30px; height: 16px; border-radius: 999px; background: #0f1216; cursor: pointer; }
+  .switch input[type=checkbox]::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px;
+                                        border-radius: 50%; background: #8b97a7; transition: left .15s; }
+  .switch input[type=checkbox]:checked::after { left: 16px; background: #2ecc71; }
+  .switch input[type=checkbox]:focus-visible { outline: 3px solid #93c5fd; outline-offset: 2px; }
+  @media (prefers-reduced-motion: reduce) { .switch input[type=checkbox]::after { transition: none; } }
   dialog { background: #1b2026; color: #e7ebf0; border: 1px solid #2a313a; border-radius: 10px; padding: 16px;
            width: min(300px, calc(100vw - 64px)); }
   dialog::backdrop { background: rgba(0, 0, 0, .6); }
@@ -56,6 +60,7 @@
   body.simple .adv { display: none !important; }
   #dbg_log { height: 260px; overflow: auto; margin: 0; padding: 8px; background: #0f1216; border-radius: 6px;
              font: .75rem/1.35 ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; word-break: break-all; }
+  header h1 { font: inherit; margin: 0; }
   details > summary { cursor: pointer; }
   /* Gate order: the grip is a drag handle (pointer events: mouse, touch, pen); the row follows the pointer's place. */
   button.grip { background: transparent; border: 0; color: #8b97a7; padding: 2px 6px; margin-right: 2px; font-size: 1.1rem; line-height: 1;
@@ -78,62 +83,82 @@
   .h2bar { display: flex; justify-content: space-between; align-items: baseline; }
   .late { display: block; width: fit-content; margin: 2px auto 0; padding: 0 5px; }
   @media (max-width: 480px) { th, td { padding-left: 4px; padding-right: 4px; } .nowrap { font-size: .8rem; } }
-  /* Info bubbles (the same snippet on the C3 and C6 pages): a round "i" button opens the note under its row. */
-  .infobox { position: relative; }
+  /* Info bubbles (the same snippet on the C3 and C6 pages): a round "i" button opens its note, a popover placed by script. */
   button.info { margin: 0 0 0 6px; padding: 0; width: 24px; height: 24px; flex: none; border-radius: 50%;
                 border: 1px solid #8b97a7; background: transparent; color: #8b97a7; cursor: pointer;
                 font: italic 700 .85rem/22px Georgia, serif; text-align: center; vertical-align: middle; }
-  button.info:active, button.info[aria-expanded=true] { background: #2f6feb; border-color: #2f6feb; color: #fff; }
+  button.info:active, button.info.on { background: #2f6feb; border-color: #2f6feb; color: #fff; }
   button.info:focus-visible { outline: 2px solid #93c5fd; outline-offset: 2px; }
-  .note { position: absolute; z-index: 2; top: calc(100% + 8px); left: 0; right: 0; max-width: 22rem; box-sizing: border-box;
+  .note { position: fixed; inset: auto; margin: 0; z-index: 2; box-sizing: border-box; width: max-content; max-width: min(22rem, calc(100vw - 16px));
+          max-height: calc(100dvh - 16px); overflow: auto; overscroll-behavior: contain;
           padding: 10px 12px; border: 1px solid #3a4350; border-radius: 8px; background: #0e1014; color: #e7ebf0;
           font-size: .82rem; font-weight: 400; line-height: 1.4; text-align: left; box-shadow: 0 6px 18px rgba(0, 0, 0, .5); }
+  .note:not([data-placed]) { visibility: hidden; }
+  html.no-popover .note:not(.open) { display: none; }
   .note::before { content: ""; position: absolute; top: -6px; left: var(--arrow, 16px); width: 10px; height: 10px; margin-left: -6px;
                   background: #0e1014; border: solid #3a4350; border-width: 1px 0 0 1px; transform: rotate(45deg); }
+  .note.above::before { top: auto; bottom: -6px; border-width: 0 1px 1px 0; }
   .note p { margin: 0 0 6px; } .note p:last-child { margin: 0; }
+  /* A narrow card turns the gates table into cards: the header row goes, each cell says what it is (data-label). */
+  .card.scroll { container-type: inline-size; }
+  @container (width < 40rem) {
+    table.stack, table.stack tbody, table.stack tr, table.stack td { display: block; }
+    table.stack thead { display: none; }
+    table.stack tr { padding: 6px 0; border-top: 1px solid #2a313a; }
+    table.stack td { display: flex; justify-content: space-between; align-items: center; gap: 12px; border: 0; padding: 3px 8px; text-align: right; }
+    table.stack td[data-label]::before { content: attr(data-label); color: #8b97a7; font-weight: 600; text-align: left; }
+  }
+  /* Touch: bigger targets (WCAG 2.5.8 asks 24 px at least; a finger wants more). After every size rule above. */
+  @media (pointer: coarse) {
+    button, select, input[type=number], input[type=text], input[type=password] { min-block-size: 2.75rem; }
+    button { min-inline-size: 2.75rem; }
+    button.info { width: 2.25rem; height: 2.25rem; line-height: 2.1rem; }
+    button.grip { min-inline-size: 2.75rem; }
+    .switch { min-block-size: 2.75rem; }
+  }
 </style>
 </head>
 <body>
 <header>
-  <span>Checkpoint C6 — race</span>
-  <span class="bar"><span id="conn" class="pill bad" hidden>connection lost</span>
-  <button id="mode" class="switch" role="switch" aria-checked="false"><i></i><span>advanced</span></button>
+  <h1>Checkpoint C6 — race</h1>
+  <span class="bar"><span id="conn" class="pill bad" role="alert" hidden>connection lost</span>
   <a id="maint_link" class="admin-only maint-link" href="#maintenance">Maintenance</a>
-  <button id="role" class="switch" role="switch" aria-checked="false"><i></i><span>admin</span></button></span>
+  <label class="switch"><input type="checkbox" switch role="switch" id="mode"><span>advanced</span></label>
+  <label class="switch"><input type="checkbox" switch role="switch" id="role"><span>admin</span></label></span>
 </header>
 <main>
   <dialog id="login">
     <form id="login_form">
       <h3>Admin</h3>
       <input id="p" type="password" placeholder="password" autocomplete="current-password" autofocus>
-      <div class="bar" style="margin-top:12px"><span id="login_msg" class="muted"></span>
+      <div class="bar" style="margin-top:12px"><span id="login_msg" class="muted" role="status"></span>
         <button type="button" id="login_cancel" class="ghost" style="margin-left:auto">Cancel</button>
         <button id="unlock">Unlock</button></div>
     </form>
   </dialog>
 
   <div id="home">
-  <h2>Standings</h2>
-  <div class="card scroll">
-    <table class="nowrap">
-      <thead><tr><th>Ch</th><th>Status</th><th>Laps</th><th>Last lap</th><th>Best lap</th><th>Gate</th></tr></thead>
+  <h2 id="h_standings">Standings</h2>
+  <div class="card scroll" tabindex="0" role="region" aria-labelledby="h_standings">
+    <table class="nowrap"><caption class="sr-only">Standings by channel</caption>
+      <thead><tr><th scope="col">Ch</th><th scope="col">Status</th><th scope="col">Laps</th><th scope="col">Last lap</th><th scope="col">Best lap</th><th scope="col">Gate</th></tr></thead>
       <tbody id="standings"><tr><td colspan="6" class="muted">no passes yet</td></tr></tbody>
     </table>
     <div class="bar admin-only adv" style="margin-top:12px">
       <label style="margin-left:auto">Volume <input id="vol" type="range" min="0" max="100" step="5" style="vertical-align:middle;width:120px"> <b id="vol_v">—</b>%</label></div>
   </div>
 
-  <div class="h2bar"><h2>Last results</h2>
-    <button id="pause" class="switch" role="switch" aria-checked="false"><i></i><span>pause</span></button></div>
-  <div class="card scroll">
-    <table class="chans nowrap"><tbody id="results"><tr><td class="muted">no laps yet</td></tr></tbody></table>
+  <div class="h2bar"><h2 id="h_results">Last results</h2>
+    <label class="switch"><input type="checkbox" switch role="switch" id="pause"><span>pause</span></label></div>
+  <div class="card scroll" tabindex="0" role="region" aria-labelledby="h_results">
+    <table class="chans nowrap"><caption class="sr-only">Last laps of each channel</caption><tbody id="results"><tr><td class="muted">no laps yet</td></tr></tbody></table>
     <p class="muted" style="margin:10px 0 0">Seconds, each channel's newest lap on top. Click a row for its sectors, gate to gate. Pause holds the table; a badge counts the laps it is behind.</p>
   </div>
 
-  <h2 class="adv">Channels</h2>
-  <div class="card scroll adv">
-    <table class="chans">
-      <thead><tr><th>Gate</th><th>R1</th><th>R2</th><th>R3</th><th>R4</th><th>R5</th><th>R6</th><th>R7</th><th>R8</th></tr></thead>
+  <h2 class="adv" id="h_channels">Channels</h2>
+  <div class="card scroll adv" tabindex="0" role="region" aria-labelledby="h_channels">
+    <table class="chans"><caption class="sr-only">Level of each channel at each gate</caption>
+      <thead><tr><th scope="col">Gate</th><th scope="col">R1</th><th scope="col">R2</th><th scope="col">R3</th><th scope="col">R4</th><th scope="col">R5</th><th scope="col">R6</th><th scope="col">R7</th><th scope="col">R8</th></tr></thead>
       <tbody id="chans"><tr><td colspan="9" class="muted">no gate yet</td></tr></tbody>
     </table>
     <p class="muted" style="margin:10px 0 0">dB above the noise. <i class="key hit" aria-hidden="true"></i> yellow
@@ -141,18 +166,18 @@
       — not measured: the C5 is away or calibrating.</p>
   </div>
 
-  <h2 class="adv">Gates / nodes</h2>
-  <div class="card scroll adv">
+  <h2 class="adv" id="h_gates">Gates / nodes</h2>
+  <div class="card scroll adv" tabindex="0" role="region" aria-labelledby="h_gates">
     <div class="bar" style="margin-bottom:10px">Pairing: <b id="pair_state" class="off">closed</b> <span id="pair_left" class="muted"></span>
       <button id="pair_toggle" class="admin-only" title="Opens pairing for 5 minutes (it is closed at every boot); again to close it now">Toggle pairing</button>
       </div>
-    <table>
-      <thead><tr><th title="Drag a row by its handle (or focus it and press the up and down arrows) to change the order">Gate</th><th>Node</th><th>Link</th><th title="C5 calibration state, capture faults and a re-arm drop other than the fleet's (hover for firmware, uptime, heap)">Health</th><th>RSSI</th><th>Loss</th><th>Seen</th><th class="admin-only"></th></tr></thead>
+    <table class="stack"><caption class="sr-only">Gates and their nodes</caption>
+      <thead><tr><th scope="col" title="Drag a row by its handle (or focus it and press the up and down arrows) to change the order">Gate</th><th scope="col">Node</th><th scope="col">Link</th><th scope="col" title="C5 calibration state, capture faults and a re-arm drop other than the fleet's (hover for firmware, uptime, heap)">Health</th><th scope="col">RSSI</th><th scope="col">Loss</th><th scope="col">Seen</th><th scope="col" class="admin-only"></th></tr></thead>
       <tbody id="nodes"><tr><td colspan="8" class="muted">no nodes paired</td></tr></tbody>
     </table>
     <p class="muted" style="margin:10px 0 0">Gate 0 is the master's own C5.
       <span class="admin-only">Drag a gate by its <b>⠿</b> handle (or focus it and press ↑ ↓) to change the order: the gates are numbered 1, 2, 3… as listed,
-      and the race timing restarts. <span id="order_msg"></span></span></p>
+      and the race timing restarts. <span id="order_msg" role="status"></span></span></p>
     <p id="order_live" role="status" class="sr-only"></p>
   </div>
 
@@ -171,11 +196,11 @@
       <button id="cal_s2" class="ghost" disabled>2 · Measure 2 m away</button>
       <button id="cal_cancel" class="ghost" disabled>Cancel</button>
       <button id="cal_reset" class="ghost" hidden title="Drop this gate's calibrated thresholds: the fleet's are sent again">Use the fleet's thresholds</button>
-      <span id="cal_msg" class="muted"></span>
+      <span id="cal_msg" class="muted" role="status"></span>
     </div>
     <div id="cal_result" hidden>
-      <table class="chans" style="margin-top:12px">
-        <thead><tr><th>Drone</th><th title="In dB over the channel's rest: the median, the high end (p95) and the share of captures that clipped">In the passage</th><th>2 m away</th></tr></thead>
+      <table class="chans" style="margin-top:12px"><caption class="sr-only">Passage calibration measurements</caption>
+        <thead><tr><th scope="col">Drone</th><th scope="col" title="In dB over the channel's rest: the median, the high end (p95) and the share of captures that clipped">In the passage</th><th scope="col">2 m away</th></tr></thead>
         <tbody id="cal_rows"></tbody>
       </table>
       <ul id="cal_warn" style="margin:10px 0 0;padding-left:18px;font-size:.85rem"></ul>
@@ -195,12 +220,14 @@
   <h2 class="adv admin-only">Detector (every gate)</h2>
   <div class="card adv admin-only">
     <div class="bar infobox">
-      <span><label for="rearm">Re-arm drop (dB)</label><button type="button" class="info" aria-label="About the re-arm drop"
-        aria-expanded="false" aria-controls="rearm_note">i</button></span>
-      <input id="rearm" type="number" step="1" min="0" max="40">
-      <button id="rearm_save">Apply to every gate</button>
-      <span id="rearm_msg" class="muted"></span>
-      <div id="rearm_note" class="note" hidden>
+      <span><label for="rearm_gate">Re-arm drop (D, dB)</label><button type="button" class="info" aria-label="About the re-arm drop"
+        popovertarget="rearm_note">i</button></span>
+      <select id="rearm_gate" aria-label="Gate"><option value="-1">All gates</option></select>
+      <input id="rearm" type="number" step="1" min="0" max="40" aria-label="Re-arm drop D">
+      <button id="rearm_save">Apply</button>
+      <button id="rearm_reset" class="ghost" hidden title="This gate runs the fleet's D again">Use the fleet's D</button>
+      <span id="rearm_msg" class="muted" role="status"></span>
+      <div id="rearm_note" class="note" popover>
         <p>After a pass, the gate re-arms once the signal's 1 s average falls this many dB under its highest
           level since the pass; the next pass must then climb as far over the lowest level since.</p>
         <p>It lets laps count when a drone never goes far from the gate: a small indoor track, a strong VTX.</p>
@@ -211,17 +238,17 @@
           0 turns it off: the gate then re-arms only near the noise floor.</p>
       </div>
     </div>
-    <p class="muted" style="margin:10px 0 0">One value for every gate, kept by the master: sent now, then to a gate at
-      pairing, on its save, when it comes back online and when it reboots. A gate whose C5 runs another shows it next
-      to its health (<span class="pill busy">D 12</span>).</p>
+    <p class="muted" style="margin:10px 0 0">The fleet's D is one value for every gate, kept by the master: sent now, then to a gate at
+      pairing, when it comes back online and when it reboots. <b>All gates</b> sets that value and drops any gate's own D. A gate chosen alone keeps a D of its own the same way (<span class="pill">own D 12</span>) until All gates or <i>Use the fleet's D</i>.
+      A gate whose C5 runs another than it should shows it next to its health (<span class="pill busy">D 12</span>).</p>
     <div class="bar infobox" style="margin-top:14px">
-      <span><label for="gain_gate">RX gain of gate</label><button type="button" class="info" aria-label="About the RX gain"
-        aria-expanded="false" aria-controls="gain_note">i</button></span>
+      <span><label for="gain_gate">RX gain (G) of</label><button type="button" class="info" aria-label="About the RX gain"
+        popovertarget="gain_note">i</button></span>
       <select id="gain_gate"><option value="0">0 · master</option></select>
       <input id="gain_in" type="number" min="10" max="83" step="2" aria-label="RX gain">
       <button id="gain_set">Set gain</button>
-      <span id="gain_msg" class="muted"></span>
-      <div id="gain_note" class="note" hidden>
+      <span id="gain_msg" class="muted" role="status"></span>
+      <div id="gain_note" class="note" popover>
         <p>The C5's receive gain, forced (no AGC): 10 to 83, 40 by default. It sets how far a drone rises over the noise.</p>
         <p>Lower it when a strong signal clips (a VTX close to the antenna), raise it for a weak or far drone: the Passage calibration above says which.</p>
         <p><b>Recommended: 40.</b></p>
@@ -245,14 +272,14 @@
   <p><a href="#home" class="maint-link">← Back</a></p>
   <h2>Maintenance (admin)</h2>
   <p class="muted" style="font-size:.85rem;margin-top:0">For a bench or a fault, not for a race: a radio calibration blinds the gate, and the debug console stays off until it is switched on.</p>
-  <h2>Radio calibration and reboot</h2>
-  <div class="card scroll">
+  <h2 id="h_radio">Radio calibration and reboot</h2>
+  <div class="card scroll" tabindex="0" role="region" aria-labelledby="h_radio">
     <div class="muted" style="font-size:.85rem;margin-bottom:10px">Every C5 calibrates its oscillators at each boot and the chip recalibrates itself while it runs: use these when a gate says <i>cal needed</i>. Every VTX must be OFF. Gates are blind for a few seconds.</div>
     <div class="bar" style="margin-bottom:10px">
       <button id="cal_all" class="warn" title="Full calibration (console B) on every reachable gate">Calibrate all gates (B)</button>
-      <span id="cmd_msg" class="muted"></span></div>
-    <table>
-      <thead><tr><th>Gate</th><th>C5</th><th></th></tr></thead>
+      <span id="cmd_msg" class="muted" role="status"></span></div>
+    <table><caption class="sr-only">Radio calibration of each gate</caption>
+      <thead><tr><th scope="col">Gate</th><th scope="col">C5</th><th scope="col"></th></tr></thead>
       <tbody id="maint_gates"><tr><td colspan="3" class="muted">no gate yet</td></tr></tbody>
     </table>
   </div>
@@ -262,11 +289,11 @@
     <summary>Gate C5 console: log and keys</summary>
     <div class="bar">
       <label class="muted" style="font-size:.8rem">Gate <select id="dbg_gate"><option value="0">0 · master</option></select></label>
-      <button id="dbg_on" class="switch" role="switch" aria-checked="false"><i></i><span>debug mode</span></button>
+      <label class="switch"><input type="checkbox" switch role="switch" id="dbg_on"><span>debug mode</span></label>
       <span class="muted" style="font-size:.8rem">off at every boot; one gate at a time; while off its C5 sends no log and ignores keys</span>
     </div>
     <div id="dbg_body" hidden>
-    <pre id="dbg_log"></pre>
+    <pre id="dbg_log" role="log" aria-live="off" aria-label="C5 console log" tabindex="0"></pre>
     <div class="bar">
       <button id="dbg_pause" class="ghost">Pause</button>
       <button id="dbg_clear" class="ghost">Clear</button>
@@ -287,7 +314,7 @@
       <button data-keys="B" class="ghost">B</button>
     </div>
     </div>
-    <span id="dbg_msg" class="muted"></span>
+    <span id="dbg_msg" class="muted" role="status"></span>
     <div class="muted" style="margin-top:8px;font-size:.8rem">Keys are typed on the C5's console in order. Calibrations, benches, gain and antenna blind the gate: they ask first. Benches' scan recording (K S) and the engine's own prints stay on USB. A remote gate's log comes by ESP-NOW about 50 bytes at a time: a busy trace (K l) skips lines.</div>
   </details>
 
@@ -295,738 +322,6 @@
 </main>
 <footer class="muted" style="padding:0 16px 20px;text-align:center;font-size:.75rem">FPV 5.8 Checkpoint · receive engine from widscan58 (CapnBry) and esp-sdr (ESPARGOS) · GPL-3.0-only, without any warranty · license and source: <a class="muted" href="https://github.com/defane/FPV-5.8-Checkoint">github.com/defane/FPV-5.8-Checkoint</a></footer>
 <script src="/auth.js"></script>
-<script>
-const $ = id => document.getElementById(id);
-const fmt = ms => ms ? (ms/1000).toFixed(3) + " s" : "—";
-const fmtUp = ms => { let s = ms/1000|0; return s<60 ? s+"s" : s<3600 ? (s/60|0)+"m"+(s%60)+"s" : (s/3600|0)+"h"+(s%3600/60|0)+"m"; };
-const cnTxt = x => x > -990 ? (x/10).toFixed(1) : "—";
-const rssiTxt = r => r ? r + " dBm" : "—";               // 0 = no frame yet
-const lossTxt = n => { const t = (n.status_rx||0) + (n.status_lost||0);
-  return t ? Math.round(100*(n.status_lost||0)/t) + "%" : "—"; };
-const lossTitle = n => `${n.status_rx||0} status rx, ${n.status_lost||0} lost · ${n.rx_frames||0} frames total`;
-// C5 health (local or a node's): calibration badge, capture faults, then its re-arm pill (`more`), details on hover
-const calBadge = h => h.calibrating ? '<span class="pill busy">calibrating</span>'
-  : h.cal_needed ? '<span class="pill bad" title="Run Cal B with every VTX off">cal needed</span>'
-  : '<span class="pill ok">OK</span>';
-const faultsTxt = h => h.faults ? ` <span class="bad">${h.faults} faults</span>` : "";
-const healthInfo = h => `fw ${h.fw || "?"} · C5 up ${fmtUp((h.c5_uptime_s||0)*1000)} · heap min ${((h.heap_min||0)/1024).toFixed(1)} KB · gain ${h.gain} · ${h.passes} passes · ${h.faults} capture faults`;
-const healthTd = (n, more = "") => n.fw ? `<td title="${healthInfo(n)}">${calBadge(n)}${faultsTxt(n)}${more}</td>`
-  : `<td class="muted" title="no C5 status yet">—${more}</td>`;
-const CMD = { cal_full: "Cal B", cal_quick: "Cal F", reboot: "Reboot" };
-// Cal B / Cal F are off while that C5 calibrates: it would refuse (the master skips it as busy).
-const cmdBtns = busy => { const d = busy ? " disabled" : "";
-  return `<button class="ghost sm cmd" data-cmd="cal_full"${d} title="Full calibration (console B), VTXs off">Cal B</button>
-  <button class="ghost sm cmd" data-cmd="cal_quick"${d} title="Quick calibration of the current filter (console F)">Cal F</button>
-  <button class="ghost sm cmd" data-cmd="reboot">Reboot</button>`; };
-let admin = false, editing = false, rearmDirty = false;
-// A gate whose C5 echoes another re-arm drop than the fleet's (it missed the last CONFIG, or a
-// console K e/E changed it); nothing while its C5 has not told it yet (-1).
-const rearmPill = (x10, fleet) => x10 >= 0 && fleet != null && x10 !== fleet
-  ? ` <span class="pill busy" title="Its C5 runs a re-arm drop of ${x10/10} dB, not the fleet's ${fleet/10} dB. The master sends the fleet's again when the gate comes back online or reboots; an admin's Apply sends it now.">D ${x10/10}</span>` : "";
-
-// Info bubbles (the same snippet on the C3 and C6 pages): a button.info shows the .note its
-// aria-controls names. A click opens it: a mouse, a finger, or Enter/Space on the focused button.
-// A second click, a tap or click elsewhere, the focus leaving it (Tab) or Escape closes it.
-let infoOpen = null;
-const infoNote = b => document.getElementById(b.getAttribute("aria-controls"));
-function infoClose() {
-  if (!infoOpen) return;
-  infoNote(infoOpen).hidden = true;
-  infoOpen.setAttribute("aria-expanded", "false");
-  infoOpen = null;
-}
-document.addEventListener("click", e => {
-  const b = e.target.closest("button.info");
-  if (!b) return;
-  const again = b === infoOpen;
-  infoClose();
-  if (again) return;
-  const n = infoNote(b);
-  n.hidden = false;
-  b.setAttribute("aria-expanded", "true");
-  infoOpen = b;
-  const r = b.getBoundingClientRect(), nr = n.getBoundingClientRect();   // the arrow under the button
-  n.style.setProperty("--arrow", Math.round(Math.min(Math.max(r.left + r.width / 2 - nr.left, 14), nr.width - 14)) + "px");
-});
-// pointerdown, not click: a tap on plain text fires no click on iOS.
-document.addEventListener("pointerdown", e => {
-  if (infoOpen && !e.target.closest("button.info") && !infoNote(infoOpen).contains(e.target)) infoClose();
-});
-// The focus on another control (Tab): the note would cover the ones under it.
-document.addEventListener("focusin", e => {
-  if (infoOpen && e.target !== infoOpen && !infoNote(infoOpen).contains(e.target)) infoClose();
-});
-// Escape gives the focus back to the button, unless it is on another control (Safari does not
-// focus a clicked button): the user keeps their place.
-document.addEventListener("keydown", e => {
-  if (e.key !== "Escape" || !infoOpen) return;
-  const b = infoOpen, a = document.activeElement;
-  infoClose();
-  if (!a || a === document.body || a === b || infoNote(b).contains(a)) b.focus();
-});
-
-async function post(url, obj) {     // signed (auth.js): the password never goes out
-  const r = await AdminAuth.request("POST", url, JSON.stringify(obj));
-  if (r.status === 401) setAdmin(false);
-  return r;
-}
-
-// The maintenance view is the same document (#maintenance), so the admin session in memory carries over.
-function route() {
-  const m = location.hash === "#maintenance" && admin;
-  $("home").hidden = m; $("maint").hidden = !m;
-  if (m) window.scrollTo(0, 0);
-}
-window.addEventListener("hashchange", route);
-function setAdmin(on) {             // back to spectator forgets the key
-  admin = on; editing = false;
-  if (!on) { AdminAuth.logout(); rearmDirty = false; gainDirty = false; gainGate = 0; calGate = 0; calPhase = 0; infoClose(); dbgText = ""; dbgNext = 0; dbgGate = 0; $("dbg").open = false; dbgShow(false); dbgRender(); }
-  document.body.classList.toggle("is-admin", on);
-  $("role").setAttribute("aria-checked", on);
-  if (!on && location.hash === "#maintenance") location.hash = "";
-  route();
-}
-
-$("role").addEventListener("click", () => {
-  if (admin) { setAdmin(false); poll(); return; }
-  $("p").value = ""; $("login_msg").textContent = "";
-  $("login").showModal();
-});
-// One login at a time (the key derivation takes a moment); closing the dialog
-// (Cancel, Esc) abandons a login still running, and its result is ignored.
-let attempt = 0, pending = false;
-$("login_cancel").addEventListener("click", () => $("login").close());
-$("login").addEventListener("close", () => {
-  $("p").value = "";
-  if (pending) { pending = false; attempt++; AdminAuth.logout(); $("unlock").disabled = false; }
-});
-$("login_form").addEventListener("submit", async e => {
-  e.preventDefault();
-  if (pending) return;
-  const my = ++attempt;
-  pending = true; $("unlock").disabled = true; $("login_msg").textContent = "checking…";
-  let ok = false, msg = "wrong password";
-  try { ok = await AdminAuth.login($("p").value); } catch (_) { msg = "offline"; }
-  if (my !== attempt || !$("login").open) return;   // abandoned (its close event may still be queued)
-  pending = false; $("unlock").disabled = false;
-  if (ok) { setAdmin(true); $("login").close(); poll(); }
-  else { $("login_msg").textContent = msg; $("p").select(); }
-});
-
-// Simple shows what spectators came for, the standings and the results; the choice stays on this device.
-const MODE_KEY = "checkpoint.mode";
-function setSimple(simple, save) {
-  document.body.classList.toggle("simple", simple);
-  $("mode").setAttribute("aria-checked", !simple);
-  if (save) try { localStorage.setItem(MODE_KEY, simple ? "simple" : "advanced"); } catch (_) {}
-}
-try { setSimple(localStorage.getItem(MODE_KEY) !== "advanced", false); } catch (_) { setSimple(true, false); }
-$("mode").addEventListener("click", () => setSimple(!document.body.classList.contains("simple"), true));
-
-// A channel is online while a pass is recent. Its badge tells how long ago in a bubble,
-// on hover or on tap: the rows are only rebuilt when they change, so the bubble holds
-// under the mouse, and the channel tapped open is kept here.
-const ONLINE_MS = 30000;
-const chName = c => c < 8 ? "R" + (c + 1) : c;
-const statusTd = (x, up) => { const on = up - x.last_seen_ms < ONLINE_MS;
-  return `<td><span class="tip" data-ch="${x.channel}" data-seen="${x.last_seen_ms}">` +
-    `<span class="pill${on ? " ok" : ""}">${on ? "online" : "offline"}</span><span class="bubble"></span></span></td>`; };
-let shownRows = "", tipCh = null, tipUp = 0;
-function fillTips(up = tipUp) {
-  tipUp = up;
-  document.querySelectorAll("#standings .tip").forEach(t => {
-    t.classList.toggle("open", t.dataset.ch === tipCh);
-    t.lastChild.textContent = "last seen " + fmtUp(Math.max(0, up - t.dataset.seen)) + " ago";
-  });
-}
-document.addEventListener("click", e => {
-  const t = e.target.closest(".tip");
-  tipCh = t && t.dataset.ch !== tipCh ? t.dataset.ch : null;
-  fillTips();
-});
-
-// Last results: a column per channel, its own newest lap on top, so a row holds laps of
-// the same age. Sector k runs from gate k-1 to gate k, the last one closing on gate 0;
-// a missed gate leaves the two around it empty. Fetched only when a lap count changes.
-let results = { num_gates: 1, channels: [] }, resultsSig = null, openLap = null, paused = false, live = [];
-const secTxt = ms => ms ? (ms/1000).toFixed(2) : "—";
-function sectorMs(lap, k, n) {
-  const from = k === 1 ? 0 : lap.splits[k-2], to = k === n ? lap.lap_ms : lap.splits[k-1];
-  return (k === 1 || from) && to > from ? to - from : 0;
-}
-// While paused, how far a column is behind the race; fewer laps than shown means a reset.
-function lateBadge(c) {
-  if (!paused) return "";
-  const late = (live.find(x => x.channel === c.channel)?.laps ?? 0) - (c.laps[0]?.number ?? 0);
-  return late ? `<span class="pill busy late">${late > 0 ? "+" + late : "reset"}</span>` : "";
-}
-function fillResults() {
-  const n = results.num_gates, known = results.channels.map(c => c.channel);
-  const added = paused ? live.filter(x => !known.includes(x.channel)).map(x => ({ channel: x.channel, laps: [] })) : [];
-  const ch = [...results.channels, ...added].sort((a, b) => a.channel - b.channel);
-  if (!ch.length) { $("results").innerHTML = '<tr><td class="muted">no laps yet</td></tr>'; return; }
-  const cells = f => ch.map(c => `<td>${f(c)}</td>`).join("");
-  let h = `<tr><th>Lap</th>${ch.map(c => `<th>${chName(c.channel)}${lateBadge(c)}</th>`).join("")}</tr>`;
-  for (let r = 0; r < Math.max(...ch.map(c => c.laps.length)); r++) {
-    const open = n > 1 && r === openLap, lapOf = (c, f) => c.laps[r] ? f(c.laps[r]) : "";
-    h += `<tr class="lap" data-row="${r}"><td>${n > 1 ? (open ? "▾ " : "▸ ") : ""}${r ? "-" + r : "last"}</td>` +
-         `${cells(c => lapOf(c, l => secTxt(l.lap_ms)))}</tr>`;
-    if (!open) continue;
-    h += `<tr class="sub"><td>lap no.</td>${cells(c => lapOf(c, l => l.number))}</tr>`;
-    for (let k = 1; k <= n; k++)
-      h += `<tr class="sub"><td>G${k-1}→${k % n}</td>${cells(c => lapOf(c, l => secTxt(sectorMs(l, k, n))))}</tr>`;
-  }
-  $("results").innerHTML = h + `<tr class="admin-only"><td><button class="warn sm reset_ch">Reset all</button></td>` +
-    `${cells(c => `<button class="warn sm reset_ch" data-ch="${c.channel}">Reset</button>`)}</tr>`;
-}
-async function loadResults(st) {
-  live = st;
-  const sig = st.map(x => x.channel + ":" + x.laps).join();
-  if (sig === resultsSig) return;
-  if (paused) { resultsSig = sig; fillResults(); return; }   // only the badges move
-  try {
-    const r = await fetch("/api/results");
-    if (r.ok) { results = await r.json(); resultsSig = sig; fillResults(); }
-  } catch (_) {}                    // the next poll tries again
-}
-$("results").addEventListener("click", async e => {
-  const b = e.target.closest(".reset_ch");
-  if (b) {
-    const one = b.dataset.ch !== undefined;
-    if (confirm(one ? `Reset the times of ${chName(+b.dataset.ch)}?` : "Reset the times of every channel?")) {
-      await post("/api/reset", one ? { channel: +b.dataset.ch } : {}); setPaused(false); poll();
-    }
-    return;
-  }
-  const tr = e.target.closest("tr.lap");
-  if (tr && results.num_gates > 1) { openLap = +tr.dataset.row === openLap ? null : +tr.dataset.row; fillResults(); }
-});
-
-function setPaused(on) {
-  paused = on; resultsSig = null;
-  $("pause").setAttribute("aria-checked", on);
-  loadResults(live);
-}
-$("pause").addEventListener("click", () => setPaused(!paused));
-
-
-// Channels: one row per gate, R1..R8; a pass lights its cell for HIT_MS, its age
-// taken here, since a pass and the master do not share a clock.
-const HIT_MS = 3000;
-const hits = new Map();
-let seenPasses = null;
-// Each cell shows a channel's level, its dB above the noise: a VTX reads the same
-// whenever the page was opened and however long it stays on.
-const QUIET_DB = 3, RISE_HIGH = 20;
-const riseAlpha = rise => Math.min(1, Math.max(0, (rise - QUIET_DB)/(RISE_HIGH - QUIET_DB)));
-const riseTxt = rise => rise < QUIET_DB ? "0" : "+" + rise.toFixed(0);
-// Channel states (the same snippet on the C3 and C6 pages): each channel's pd_state_t, sent by
-// its C5 once a second. RISING and PEAK_PASSED (one reading) pass too fast for that; COOLDOWN
-// holds until the channel re-arms, and explains a lap not counted (a VTX left near the gate):
-// a dashed blue frame, under the yellow of a pass while that lasts.
-const STATE_TXT = ["idle", "rising", "cooldown", "cooldown"];
-const frame = (hit, st) => hit ? " hit" : st === 2 || st === 3 ? " cool" : "";
-const chTitle = (name, x10, st) => [name, x10 <= -990 && "not measured", STATE_TXT[st]].filter(Boolean).join(" · ");
-function notePasses(s) {
-  const fresh = seenPasses === null ? 0 : Math.max(0, s.total_passes - seenPasses);
-  seenPasses = s.total_passes;
-  (s.passes || []).slice(0, fresh).forEach(p => hits.set(`${p.gate}:${p.channel}`, Date.now() + HIT_MS));
-}
-const lvCell = (x10, gate, ch, st) => {
-  const cls = frame((hits.get(`${gate}:${ch}`) || 0) > Date.now(), st);
-  const title = `title="${chTitle(`Gate ${gate} · R${ch + 1}`, x10, st)}"`;
-  if (x10 <= -990) return `<td class="lv none${cls}" ${title}>—</td>`;
-  const rise = x10/10;
-  return `<td class="lv${cls}" ${title} style="background:rgba(46,204,113,${riseAlpha(rise).toFixed(2)})">${riseTxt(rise)}</td>`;
-};
-// A gate's states only while it reports (a node offline, gate 0 not linked: its levels are unknown too).
-const chanRow = (name, gate, levels, states) =>
-  `<tr><td>${name}</td>${(levels || []).map((v, ch) => lvCell(v, gate, ch, (states || [])[ch])).join("")}</tr>`;
-function fillChannels(s) {
-  notePasses(s);
-  const rows = [...(s.nodes || [])].sort((a, b) => a.gate - b.gate)
-    .map(n => chanRow(`${n.gate} ${n.mac.slice(12)}`, n.gate, n.levels, n.online && n.states));
-  const L = s.local || {};
-  $("chans").innerHTML = chanRow("0 master", 0, L.levels, s.has_local && L.states) + rows.join("");
-}
-
-async function poll() {
-  try {
-    const s = await (await fetch("/api/state")).json();
-    fillChannels(s);
-    dbgGates(s);
-    gainGates(s);
-    calGates(s);
-    $("conn").hidden = true;
-    $("pair_state").textContent = s.pairing ? "OPEN" : "closed";
-    $("pair_state").className = s.pairing ? "on" : "off";
-    $("pair_left").textContent = s.pairing ? `closes in ${Math.floor(s.pairing_left_s / 60)}:${String(s.pairing_left_s % 60).padStart(2, "0")}` : "";
-    const L = s.local || {};
-    $("l_health").innerHTML = s.has_local ? calBadge(L) + faultsTxt(L) + rearmPill(L.rearm_db_x10, s.rearm_db_x10) : "—";
-    $("l_info").textContent = s.has_local ? healthInfo(L) : "local C5 not linked (no report for 3 s)";
-    renderMaintGates(s);
-    $("l_passes").textContent = s.total_passes;
-    if (s.volume != null) { $("vol_v").textContent = s.volume; if (document.activeElement !== $("vol")) $("vol").value = s.volume; }
-    if (s.rearm_db_x10 != null && !rearmDirty && document.activeElement !== $("rearm")) $("rearm").value = s.rearm_db_x10 / 10;
-    if (s.uptime_ms != null) $("m_uptime").textContent = fmtUp(s.uptime_ms);
-    if (s.free_heap != null) {
-      const kb = s.free_heap/1024|0;
-      if (s.heap_total > 0) {
-        $("m_heap").textContent = Math.round(100*s.free_heap/s.heap_total) + "%";
-        $("m_heap").title = kb + " KB free of " + (s.heap_total/1024|0) + " KB";
-      } else { $("m_heap").textContent = kb + " KB"; }
-    }
-
-    const st = s.standings || [];
-    const rows = st.length ? st.map(x => `
-      <tr><td>${chName(x.channel)}</td>${statusTd(x, s.uptime_ms)}<td>${x.laps}</td><td>${fmt(x.last_lap_ms)}</td>
-      <td>${fmt(x.best_lap_ms)}</td><td>${x.last_gate<0?'—':x.last_gate}</td></tr>`).join("")
-      : '<tr><td colspan="6" class="muted">no passes yet</td></tr>';
-    if (rows !== shownRows) $("standings").innerHTML = shownRows = rows;
-    fillTips(s.uptime_ms);
-    loadResults(st);
-
-    if (!editing) {
-      const nodes = s.nodes || [];
-      const up = s.uptime_ms || 0;
-      const seen = n => n.online ? Math.max(0, (up - n.last_seen_ms)/1000 | 0) + "s" : "—";
-      const rearm = n => n.online ? rearmPill(n.rearm_db_x10, s.rearm_db_x10) + (n.custom ? CAL_PILL : "") : "";   // after its health
-      const byGate = [...nodes].sort((a, b) => a.gate - b.gate || a.node_id - b.node_id);
-      const ae = document.activeElement;                                   // a grip in focus keeps it over the redraw
-      const gripOf = ae && ae.classList && ae.classList.contains("grip") && $("nodes").contains(ae) ? ae.closest("tr").dataset.id : null;
-      $("nodes").innerHTML = nodes.length ? byGate.map(n => admin ? `
-        <tr data-id="${n.node_id}" data-gate="${n.gate}">
-          <td class="acts"><button type="button" class="grip" aria-label="Reorder gate ${n.gate}, node ${n.mac.slice(9)}: drag, or press up and down" aria-keyshortcuts="ArrowUp ArrowDown" title="Drag to change the order">⠿</button><b class="gnum">${n.gate}</b></td>
-          <td class="muted">${n.mac.slice(9)}</td>
-          <td class="${n.online?'on':'off'}">${n.online?'online':'offline'}</td>
-          ${healthTd(n, rearm(n))}
-          <td>${rssiTxt(n.rssi)}</td>
-          <td title="${lossTitle(n)}">${lossTxt(n)}</td>
-          <td>${seen(n)}</td>
-          <td class="admin-only acts"><button type="button" class="warn sm rm" title="Forget this gate: it must pair again">Remove</button></td>
-        </tr>` : `
-        <tr><td>${n.gate}</td><td class="muted">${n.mac.slice(9)}</td>
-          <td class="${n.online?'on':'off'}">${n.online?'online':'offline'}</td>
-          ${healthTd(n, rearm(n))}
-          <td>${rssiTxt(n.rssi)}</td>
-          <td title="${lossTitle(n)}">${lossTxt(n)}</td>
-          <td>${seen(n)}</td></tr>`).join("")
-        : '<tr><td colspan="8" class="muted">no nodes paired</td></tr>';
-      if (gripOf !== null) { const g = $("nodes").querySelector(`tr[data-id="${gripOf}"] .grip`); if (g) g.focus({ preventScroll: true }); }
-    }
-  } catch (e) { $("conn").hidden = false; }
-}
-
-$("pair_toggle").addEventListener("click", async () => {
-  await post("/api/pairing", { open: $("pair_state").className === "on" ? 0 : 1 }); poll();
-});
-
-// Calibrate/reboot a gate's C5 (gate -1 = every reachable gate). The master holds a
-// calibration when a target sees a strong signal (a VTX probably on) until forced.
-async function sendCmd(gate, cmd, force) {
-  try {
-    const r = await post("/api/command", { gate, cmd, force });
-    return r.ok ? await r.json() : { error: r.status === 401 ? "admin password needed" : "refused (" + r.status + ")" };
-  } catch (e) {   // back to spectator meanwhile: nothing to report
-    return { error: /logged out|not logged in/.test(e.message) ? "logged out" : "master not answering" };
-  }
-}
-async function command(gate, cmd) {
-  if (!confirm(cmd === "reboot" ? `Reboot the C5 of gate ${gate}? It stops detecting until it is back up.`
-      : "All VTXs must be OFF. The gate(s) stop detecting while calibrating (a few seconds). Continue?")) return;
-  let r = await sendCmd(gate, cmd, 0);
-  if (r.vtx && r.vtx.length) {
-    const g = r.vtx.map(v => `${v.gate} (${cnTxt(v.cn_x10)} dB over its rest)`).join(", ");
-    if (!confirm(`Strong signal on gate(s) ${g}: a VTX may be on. Force?`)) return;
-    r = await sendCmd(gate, cmd, 1);
-  }
-  const sent = r.sent || [], failed = r.failed || [], busy = r.busy || [];
-  const msg = CMD[cmd] + ": " + (r.error || (sent.length ? "sent to gate(s) " + sent.join(", ") : "no gate reached")
-    + (busy.length ? " · skipped, already calibrating: " + busy.join(", ") : "")
-    + (failed.length ? " · not reached (offline or no C5): " + failed.join(", ") : ""));
-  if (r.error === "logged out") { $("cmd_msg").textContent = ""; return; }
-  const bad = r.error || failed.length || busy.length || !sent.length;
-  $("cmd_msg").textContent = msg;
-  $("cmd_msg").className = bad ? "bad" : "muted";
-  if (bad) alert(msg);
-}
-$("cal_all").addEventListener("click", async () => { await command(-1, "cal_full"); poll(); });
-// Maintenance: a row per gate that has a C5 (gate 0, then each node), its calibrate/reboot buttons.
-let maintSig = "";
-function renderMaintGates(s) {
-  const L = s.local || {};
-  const rows = [...(s.has_local ? [{ gate: 0, name: "0 · master", h: L, busy: L.calibrating }] : []),
-    ...[...(s.nodes || [])].sort((a, b) => a.gate - b.gate)
-      .map(n => ({ gate: n.gate, name: `${n.gate} · ${n.mac.slice(9)}`, h: n, busy: n.online && n.calibrating, off: !n.online }))];
-  const html = rows.length ? rows.map(r => `<tr data-gate="${r.gate}"><td>${r.name}</td>` +
-    `<td>${r.off ? '<span class="muted">offline</span>' : r.h.fw ? calBadge(r.h) + faultsTxt(r.h) : '<span class="muted">—</span>'}</td>` +
-    `<td class="acts">${r.off ? "" : cmdBtns(r.busy)}</td></tr>`).join("")
-    : '<tr><td colspan="3" class="muted">no gate yet</td></tr>';
-  if (html !== maintSig) { maintSig = html; $("maint_gates").innerHTML = html; }
-}
-$("maint_gates").addEventListener("click", async e => {
-  const b = e.target.closest("button.cmd"), tr = e.target.closest("tr");
-  if (!b || !tr || !admin) return;
-  await command(+tr.dataset.gate, b.dataset.cmd); poll();
-});
-$("vol").addEventListener("input", () => { $("vol_v").textContent = $("vol").value; });
-// The fleet's re-arm drop: saved by the master and sent to every gate (refused outside 0..40 dB).
-$("rearm").addEventListener("input", () => { rearmDirty = true; });
-$("rearm_save").addEventListener("click", async () => {
-  const v = parseFloat($("rearm").value);
-  if (!(v >= 0 && v <= 40)) { $("rearm_msg").textContent = "0 to 40 dB"; $("rearm_msg").className = "bad"; return; }
-  $("rearm_msg").textContent = "sending…"; $("rearm_msg").className = "muted";
-  let msg = "refused", ok = false;
-  try {
-    const r = await post("/api/rearm", { rearm_db_x10: Math.round(v * 10) });
-    ok = r.ok && (await r.json()).ok;
-    msg = ok ? "sent to every gate" : r.status === 401 ? "admin password needed" : "refused";
-  } catch (e) { msg = /logged out|not logged in/.test(e.message) ? "" : "master not answering"; }
-  if (ok) rearmDirty = false;
-  $("rearm_msg").textContent = msg; $("rearm_msg").className = ok ? "muted" : "bad";
-  poll();
-});
-$("vol").addEventListener("change", async () => { await post("/api/volume", { volume: +$("vol").value }); });
-// Gate order: drag a row by its grip, or focus it and press the arrows; the rows are renumbered as they move, and the
-// order goes to the master once the row is dropped (/api/order, every node id, first gate first). The table is not
-// redrawn by the poll meanwhile (editing). One pointer drives a drag, Escape puts it back.
-let dragRow = null, dragPointer = null, orderBefore = "", orderTimer = null, liveTimer = null;
-const rowIds = () => [...$("nodes").children].map(tr => +tr.dataset.id);
-const rowMac = tr => tr.children[1].textContent;
-function say(text) {                                   // polite, once, after a beat (a move that refocuses is swallowed otherwise)
-  clearTimeout(liveTimer); $("order_live").textContent = "";
-  liveTimer = setTimeout(() => { $("order_live").textContent = text; }, 300);
-}
-function renumber() {
-  [...$("nodes").children].forEach((tr, i) => {
-    const g = tr.querySelector(".gnum"), grip = tr.querySelector(".grip");
-    if (g) g.textContent = i + 1;
-    if (grip) grip.setAttribute("aria-label", `Reorder gate ${i + 1}, node ${rowMac(tr)}: drag, or press up and down`);
-  });
-}
-// moveBefore keeps what lives in a row (the focused grip); append/insertBefore drops it, so the grip is focused again by the callers.
-const canMoveBefore = typeof Element !== "undefined" && "moveBefore" in Element.prototype;
-function moveRow(tr, before) {                       // before: the row it goes in front of, null = last
-  if (before === tr || tr.nextElementSibling === before) return false;
-  if (canMoveBefore) $("nodes").moveBefore(tr, before); else $("nodes").insertBefore(tr, before);
-  renumber();
-  return true;
-}
-async function commitOrder() {
-  clearTimeout(orderTimer); orderTimer = null;
-  const order = rowIds();
-  if (order.join() === orderBefore) { editing = false; renumber(); return; }
-  $("order_msg").textContent = "saving…"; $("order_msg").className = "muted";
-  let msg = "", bad = false;
-  try {
-    const r = await post("/api/order", { order });
-    const ok = r.ok && (await r.json()).ok;
-    msg = ok ? "order saved" : r.status === 401 ? "admin password needed" : "the list changed: try again";
-    bad = !ok;
-    if (ok) gatesRenumbered();
-  } catch (e) { msg = /logged out|not logged in/.test(e.message) ? "" : "master not answering"; bad = !!msg; }
-  $("order_msg").textContent = msg; $("order_msg").className = bad ? "bad" : "muted";
-  if (msg) say(msg);
-  if (!bad) setTimeout(() => { if ($("order_msg").textContent === msg) $("order_msg").textContent = ""; }, 4000);
-  editing = false;
-  poll();
-}
-// Gate numbers now name other nodes: the gate the pages' controls had chosen would act on the wrong one, so they go back to gate 0.
-function gatesRenumbered() {
-  gainGate = 0; gainDirty = false; calGate = 0; calPhase = 0; dbgGate = 0;
-  dbgShow(false); dbgReset();
-}
-function restoreOrder() {                             // Escape: the rows as they were when the drag began
-  const byId = new Map([...$("nodes").children].map(tr => [String(tr.dataset.id), tr]));
-  for (const id of orderBefore.split(",")) { const tr = byId.get(id); if (tr) moveRow(tr, null); }
-}
-$("nodes").addEventListener("pointerdown", e => {
-  const grip = e.target.closest(".grip");
-  if (!grip || !admin || e.button || dragRow) return;   // the primary button, one drag at a time
-  dragRow = grip.closest("tr"); dragPointer = e.pointerId;
-  editing = true; orderBefore = rowIds().join();
-  dragRow.classList.add("dragging");
-  document.documentElement.classList.add("gate-dragging");
-  $("nodes").setPointerCapture(e.pointerId);        // on the tbody: it is not moved, the row is
-  e.preventDefault();
-});
-$("nodes").addEventListener("pointermove", e => {
-  if (!dragRow || e.pointerId !== dragPointer) return;   // a second finger changes nothing
-  const rows = [...$("nodes").children].filter(r => r !== dragRow);
-  moveRow(dragRow, rows.find(r => { const b = r.getBoundingClientRect(); return e.clientY < b.top + b.height / 2; }) || null);
-});
-function endDrag(e, cancel) {
-  if (!dragRow || (e && e.pointerId !== dragPointer)) return;
-  const row = dragRow;
-  row.classList.remove("dragging"); document.documentElement.classList.remove("gate-dragging");
-  dragRow = dragPointer = null;
-  if (cancel) { restoreOrder(); editing = false; say("Reordering cancelled"); return; }
-  const place = rowIds().indexOf(+row.dataset.id) + 1;
-  if (rowIds().join() !== orderBefore) say(`Gate ${place} of ${rowIds().length}: ${rowMac(row)} moved to position ${place}`);
-  commitOrder();
-}
-$("nodes").addEventListener("pointerup", e => endDrag(e, false));
-$("nodes").addEventListener("pointercancel", e => endDrag(e, true));
-$("nodes").addEventListener("lostpointercapture", e => endDrag(e, false));   // capture ended some other way: drop where it stands
-document.addEventListener("keydown", e => { if (e.key === "Escape" && dragRow) { e.preventDefault(); endDrag(null, true); } });
-$("nodes").addEventListener("keydown", e => {         // a grip in focus: ↑ ↓ move its row one place, saved a moment after the last
-  const grip = e.target.closest(".grip");
-  if (!grip || !admin || (e.key !== "ArrowUp" && e.key !== "ArrowDown")) return;
-  e.preventDefault();
-  const tr = grip.closest("tr");
-  if (!editing) { editing = true; orderBefore = rowIds().join(); }
-  const moved = e.key === "ArrowUp" ? tr.previousElementSibling && moveRow(tr, tr.previousElementSibling)
-                                    : tr.nextElementSibling && moveRow(tr, tr.nextElementSibling.nextElementSibling);
-  if (moved) {
-    grip.focus({ preventScroll: true });
-    tr.scrollIntoView({ block: "nearest", inline: "nearest" });
-    const place = rowIds().indexOf(+tr.dataset.id) + 1;
-    say(`Gate ${place} of ${rowIds().length}: ${rowMac(tr)}`);
-  }
-  clearTimeout(orderTimer); orderTimer = setTimeout(commitOrder, 800);
-});
-$("nodes").addEventListener("click", async e => {
-  const tr = e.target.closest("tr"); if (!tr || !admin || !e.target.classList.contains("rm")) return;
-  const id = +tr.dataset.id, gate = tr.querySelector(".gnum").textContent, mac = tr.children[1].textContent;
-  if (!confirm(`Remove gate ${gate} (node ${mac})? It stops reporting and has to pair again. The other gates keep their numbers.`)) return;
-  try { await post("/api/node_remove", { node_id: id }); gatesRenumbered(); }
-  catch (_) { $("cmd_msg").textContent = "remove failed: master not answering"; }
-  poll();
-});
-// RX gain of one gate (a C5 forces it, saved there): the field follows the selected gate's gain until
-// the admin edits it. The VTX guard is the calibrations': a gate that sees a carrier asks first.
-let gainGate = 0, gainDirty = false;
-function gainGates(s) {
-  const gates = [...(s.has_local ? [0] : []), ...new Set((s.nodes || []).filter(n => n.online).map(n => n.gate))].sort((a, b) => a - b);
-  if (!gates.includes(gainGate)) gates.push(gainGate);          // a gate that dropped keeps its entry while selected
-  const sel = $("gain_gate");
-  const want = gates.map(g => `<option value="${g}">${g === 0 ? "0 · master" : g}</option>`).join("");
-  if (sel.innerHTML !== want) sel.innerHTML = want;
-  if (sel.value !== String(gainGate)) sel.value = gainGate;
-  const c5 = gainGate === 0 ? (s.has_local ? s.local : null) : (s.nodes || []).find(n => n.gate === gainGate && n.online);
-  const now = c5 && c5.fw ? c5.gain : null;
-  if (!gainDirty && document.activeElement !== $("gain_in") && now !== null) $("gain_in").value = now;
-  $("gain_set").disabled = !!(c5 && c5.calibrating);
-}
-$("gain_gate").addEventListener("change", () => { gainGate = +$("gain_gate").value; gainDirty = false; $("gain_msg").textContent = ""; poll(); });
-$("gain_in").addEventListener("input", () => { gainDirty = true; });
-async function sendGain(gate, gain, force) {
-  try {
-    const r = await post("/api/gain", { gate, gain, force });
-    return r.ok ? await r.json() : { error: r.status === 401 ? "admin password needed" : r.status === 400 ? "10 to 83" : "refused (" + r.status + ")" };
-  } catch (e) { return { error: /logged out|not logged in/.test(e.message) ? "logged out" : "master not answering" }; }
-}
-$("gain_set").addEventListener("click", async () => {
-  const gate = gainGate, gain = Math.round(+$("gain_in").value);
-  if (!(gain >= 10 && gain <= 83)) { $("gain_msg").textContent = "10 to 83"; $("gain_msg").className = "bad"; return; }
-  if (!confirm(`Set the RX gain of gate ${gate} to ${gain}? That gate stops detecting for a few seconds while it learns its rests again. All VTXs must be OFF.`)) return;
-  $("gain_msg").textContent = "sending…"; $("gain_msg").className = "muted";
-  let r = await sendGain(gate, gain, 0);
-  if (r.vtx && r.vtx.length) {
-    if (!confirm(`Gate ${gate} sees a strong signal (${cnTxt(r.vtx[0].cn_x10)} dB over its rest): a VTX may be on. Force the change?`)) {
-      $("gain_msg").textContent = "cancelled"; return;
-    }
-    r = await sendGain(gate, gain, 1);
-  }
-  if (r.error === "logged out") { $("gain_msg").textContent = ""; return; }
-  const sent = (r.sent || []).length, busy = (r.busy || []).length;
-  const msg = r.error || (sent ? "sent" : busy ? "not sent: the gate is calibrating" : "not reached (offline or no C5)");
-  $("gain_msg").textContent = msg; $("gain_msg").className = sent ? "muted" : "bad";
-  if (sent) { gainDirty = false; setTimeout(() => $("gain_msg").textContent = "", 4000); poll(); }
-});
-
-// Passage calibration: a gate's C5 measures a drone in the passage, then 2 m away, and proposes thresholds.
-let calGate = 0, calPhase = 0, calAt = 0, calBusy = false;
-const CAL_WARN = [
-  [1, "No drone seen in the passage (nothing stood 3 dB over the rest): check its VTX is on, its channel, and that it is in the passage. Measure again."],
-  [2, "The ADC clips in the passage: lower the gain (the gain control above), then measure again."],
-  [4, "In the passage and 2 m away the drone reads almost the same (under 6 dB apart): the thresholds are a compromise. Check the antenna sits near the line, or lower the gain."],
-  [8, "Hardly seen at 2 m: raise the gain, or check the drone was on and 2 m from the gate."],
-  [16, "Another channel stood much higher than the one measured: another drone, or the drone is not on the channel chosen (pick Any). Measure again."],
-  [32, "The C5 refused it (learning its rests, a calibration, a bench): try again in a few seconds."],
-];
-const dbh = x => (x / 2).toFixed(1);
-const CAL_PILL = ' <span class="pill" title="Thresholds from a passage calibration, not the fleet\'s">calibrated</span>';
-async function calCall(action) {
-  try {
-    const channel = action === "start1" ? +$("cal_ch_sel").value : 255;
-    const r = await post("/api/calib", { gate: calGate, action, channel });
-    return r.ok ? await r.json() : { error: r.status === 401 ? "admin password needed" : "refused (" + r.status + ")" };
-  } catch (e) { return { error: /logged out|not logged in/.test(e.message) ? "logged out" : "master not answering" }; }
-}
-function calRender(k) {
-  calPhase = k.phase;
-  const names = ["no session", "measuring in the passage…", "passage measured", "measuring 2 m away…", "both measured"];
-  const measuring = k.phase === 1 || k.phase === 3;
-  $("cal_pill").textContent = names[k.phase] + (measuring ? ` ${k.secs_left} s` : "");
-  $("cal_pill").className = "pill" + (measuring ? " busy" : k.phase === 4 ? " ok" : "");
-  $("cal_s1").disabled = measuring;
-  $("cal_ch_sel").disabled = measuring || k.phase >= 2;   // the channel is settled once step 1 is measured
-  $("cal_s2").disabled = measuring || k.phase < 2 || (k.flags & 1) !== 0;
-  $("cal_cancel").disabled = k.phase === 0;
-  const show = k.phase >= 2;
-  $("cal_result").hidden = !show;
-  if (!show) return;
-  const have2 = k.phase === 4;
-  $("cal_rows").innerHTML = `<tr><td>${k.channel < 8 ? "R" + (k.channel + 1) : "—"}</td>` +
-    `<td>median ${dbh(k.passage[1])} · p95 ${dbh(k.passage[3])}${k.passage_sat ? ` · ${k.passage_sat} % clipped` : ""}</td>` +
-    `<td>${have2 ? `median ${dbh(k.away[1])} · p95 ${dbh(k.away[3])}` : "—"}</td></tr>`;
-  $("cal_warn").innerHTML = CAL_WARN.filter(w => k.flags & w[0]).map(w => `<li>${w[1]}</li>`).join("") +
-    (k.gain_steps ? `<li>Suggested: ${k.gain_steps < 0 ? "lower" : "raise"} the gain by one step (2).</li>` : "");
-  const rec = have2 && !(k.flags & 1);
-  $("cal_rec").hidden = !rec;
-  if (rec) {
-    $("cr_min").textContent = (k.rec.min_peak / 10).toFixed(1); $("cr_act").textContent = (k.rec.active / 10).toFixed(1);
-    $("cr_hys").textContent = (k.rec.hysteresis / 10).toFixed(1); $("cr_drop").textContent = (k.rec.drop / 10).toFixed(1);
-  }
-}
-async function calDo(action, msg) {
-  if (calBusy) return;
-  calBusy = true; $("cal_msg").textContent = msg || ""; $("cal_msg").className = "muted";
-  const k = await calCall(action);
-  calBusy = false;
-  if (k.error === "logged out") { $("cal_msg").textContent = ""; return; }
-  if (k.error || !k.ok) { $("cal_msg").textContent = k.error || k.msg; $("cal_msg").className = "bad"; }
-  else $("cal_msg").textContent = action === "apply" ? "applied to the gate" : action === "reset" ? "back on the fleet's thresholds" : "";
-  if (!k.error) calRender(k);
-  calAt = Date.now();
-}
-async function calPoll() {   // a running or finished session every second, an idle one every 5 s (it may have been started elsewhere)
-  if (!admin || $("home").hidden || document.body.classList.contains("simple") || calBusy) return;
-  if (calPhase === 0 && Date.now() - calAt < 5000) return;
-  const g = calGate, k = await calCall("state");
-  if (k.error || g !== calGate) return;
-  calRender(k);
-  calAt = Date.now();
-}
-function calGates(s) {
-  const gates = [...(s.has_local ? [0] : []), ...new Set((s.nodes || []).filter(n => n.online).map(n => n.gate))].sort((a, b) => a - b);
-  if (!gates.includes(calGate)) gates.push(calGate);
-  const sel = $("cal_gate");
-  const want = gates.map(g => `<option value="${g}">${g === 0 ? "0 · master" : g}</option>`).join("");
-  if (sel.innerHTML !== want) sel.innerHTML = want;
-  if (sel.value !== String(calGate)) sel.value = calGate;
-  const nd = (s.nodes || []).find(n => n.gate === calGate && n.online);
-  $("cal_reset").hidden = !(nd && nd.custom);       // a remote gate running thresholds of its own
-}
-$("cal_gate").addEventListener("change", () => { calGate = +$("cal_gate").value; calPhase = 0; calAt = 0; $("cal_msg").textContent = ""; calRender({ phase: 0, flags: 0, passage: [], away: [], rec: {}, secs_left: 0 }); calPoll(); });
-$("cal_s1").addEventListener("click", () => calDo("start1", "starting…"));
-$("cal_s2").addEventListener("click", () => calDo("start2", "starting…"));
-$("cal_cancel").addEventListener("click", () => calDo("cancel"));
-$("cal_reset").addEventListener("click", () => {
-  if (confirm(`Gate ${calGate} goes back to the fleet's thresholds (its calibration is dropped)?`)) calDo("reset", "sending…");
-});
-$("cal_apply").addEventListener("click", () => {
-  if (confirm(`Apply these thresholds to gate ${calGate}? They replace its min peak, active, hysteresis and drop (saved on its C5).`)) calDo("apply", "sending…");
-});
-setInterval(calPoll, 1000);
-
-// Debug: the C5's console text (POST /api/log from the position we have) and its keys.
-const DBG_MAX = 60000;
-let dbgNext = 0, dbgText = "", dbgPaused = false, dbgBusy = false, dbgOn = false, dbgGate = 0;
-function dbgShow(on) {
-  dbgOn = on; $("dbg_on").setAttribute("aria-checked", on); $("dbg_body").hidden = !on;
-}
-// The gate the panel talks to; its log, position and switch are that gate's (one is in debug mode at a time).
-function dbgReset() { dbgText = ""; dbgNext = 0; dbgRender(); }
-async function dbgSwitch(on) {   // on: true/false to set it, undefined to ask
-  const gate = dbgGate;
-  const r = await AdminAuth.request("POST", "/api/debug", JSON.stringify(on === undefined ? { gate } : { on: on ? 1 : 0, gate }));
-  if (r.status === 401) { setAdmin(false); return; }
-  if (!r.ok || gate !== dbgGate) return;
-  const j = await r.json();
-  if (!!j.debug !== dbgOn) dbgReset();
-  dbgShow(!!j.debug);
-  if (on && !j.ok) $("dbg_msg").textContent = "gate offline";
-}
-// The selector lists gate 0 and each online remote gate (state's nodes); the choice stays while it can.
-function dbgGates(s) {
-  const gates = [0, ...[...new Set((s.nodes || []).filter(n => n.online).map(n => n.gate))].sort((a, b) => a - b)];
-  const sel = $("dbg_gate");
-  if (!gates.includes(dbgGate)) gates.push(dbgGate);   // a gate that dropped keeps its entry while selected
-  const want = gates.map(g => `<option value="${g}">${g === 0 ? "0 · master" : g}</option>`).join("");
-  if (sel.innerHTML !== want) sel.innerHTML = want;
-  if (sel.value !== String(dbgGate)) sel.value = dbgGate;
-}
-$("dbg_gate").addEventListener("change", () => {
-  const was = dbgOn;
-  dbgGate = +$("dbg_gate").value;
-  dbgShow(false); dbgReset();
-  $("dbg_msg").textContent = "";
-  // A debug mode that was on follows to the new gate (the old one goes off); otherwise it is only asked,
-  // so a mere choice never starts one.
-  dbgSwitch(was ? true : undefined).catch(() => { $("dbg_msg").textContent = "failed"; });
-});
-$("dbg_on").addEventListener("click", () => { dbgSwitch(!dbgOn).catch(() => { $("dbg_msg").textContent = "failed"; }); });
-function dbgRender() {
-  const f = $("dbg_filter").value.toLowerCase();
-  const lines = dbgText.split("\n");
-  const shown = f ? lines.filter(l => l.toLowerCase().includes(f)) : lines;
-  const box = $("dbg_log"), stick = box.scrollTop + box.clientHeight >= box.scrollHeight - 8;
-  box.textContent = shown.join("\n");
-  if (stick) box.scrollTop = box.scrollHeight;
-}
-async function dbgPoll() {
-  if (!admin || $("maint").hidden || !$("dbg").open || !dbgOn || dbgPaused || dbgBusy) return;
-  dbgBusy = true;
-  try {
-    const gate = dbgGate;
-    const r = await AdminAuth.request("POST", "/api/log", JSON.stringify({ since: dbgNext, gate }));
-    if (r.status === 401) { setAdmin(false); return; }
-    if (!r.ok) return;
-    const j = await r.json();
-    if (j.gate !== dbgGate) return;   // the selector moved while this was in flight
-    if (!j.debug) { dbgShow(false); return; }   // the C6 rebooted, or the gate's node left debug mode: off again
-    if (j.next < dbgNext) dbgText += "\n[C6 restarted]\n";
-    if (j.lost) dbgText += "\n[log: older lines were lost]\n";
-    dbgNext = j.next;
-    if (j.text) {
-      dbgText += j.text;
-      if (dbgText.length > DBG_MAX) dbgText = dbgText.slice(dbgText.length - DBG_MAX);
-      dbgRender();
-    }
-  } catch (_) { /* offline: the next tick retries */ }
-  finally { dbgBusy = false; }
-}
-async function dbgKeys(keys, force) {
-  const r = await AdminAuth.request("POST", "/api/key", JSON.stringify({ keys, force, gate: dbgGate }));
-  if (r.status === 401) { setAdmin(false); return { ok: false, msg: "password required" }; }
-  return r.ok ? r.json() : { ok: false, msg: "failed (" + r.status + ")" };
-}
-async function dbgSend(keys) {
-  if (!keys) return;
-  $("dbg_msg").textContent = "sending…";
-  try {
-    let r = await dbgKeys(keys, 0);
-    if (r.vtx || r.blind) {
-      const why = r.vtx ? `The gate sees a strong signal (${(r.cn_x10 / 10).toFixed(1)} dB over its rest): a VTX may be on. ` : "";
-      if (!confirm(why + `"${keys}" blinds the gate (no detection) for a few seconds or the length of a bench; all VTXs should be OFF. Send?`)) {
-        $("dbg_msg").textContent = "cancelled"; return;
-      }
-      r = await dbgKeys(keys, 1);
-    }
-    $("dbg_msg").textContent = r.ok ? "sent" : (r.msg || "failed");
-    if (r.ok) { setTimeout(() => $("dbg_msg").textContent = "", 2000); setTimeout(dbgPoll, 300); }
-  } catch (e) { $("dbg_msg").textContent = "failed"; }
-}
-$("dbg_send").addEventListener("click", () => { dbgSend($("dbg_keys").value); });
-$("dbg_keys").addEventListener("keydown", e => { if (e.key === "Enter") dbgSend($("dbg_keys").value); });
-document.querySelectorAll("button[data-keys]").forEach(b => b.addEventListener("click", () => dbgSend(b.dataset.keys)));
-$("dbg_pause").addEventListener("click", () => {
-  dbgPaused = !dbgPaused; $("dbg_pause").textContent = dbgPaused ? "Resume" : "Pause";
-});
-$("dbg_clear").addEventListener("click", () => { dbgText = ""; dbgRender(); });
-$("dbg_filter").addEventListener("input", dbgRender);
-$("dbg_copy").addEventListener("click", async () => {
-  try { await navigator.clipboard.writeText(dbgText); $("dbg_msg").textContent = "copied"; }
-  catch (_) { $("dbg_msg").textContent = "copy: select the log by hand"; }
-  setTimeout(() => $("dbg_msg").textContent = "", 2000);
-});
-$("dbg").addEventListener("toggle", () => { if ($("dbg").open) dbgSwitch().catch(() => {}); });
-
-AdminAuth.restore().then(ok => { if (ok) { setAdmin(true); poll(); } });   // the key this tab kept (sessionStorage)
-poll(); setInterval(poll, 1000);
-setInterval(dbgPoll, 1000);
-</script>
+<script src="/app.js"></script>
 </body>
 </html>

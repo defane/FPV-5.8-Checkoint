@@ -124,6 +124,17 @@ with no change on the gate side.
   username, any length): the header's admin toggle opens a password
   dialog; turning it off forgets it. An empty password disables
   admin auth. See "Signed admin requests" below.
+- **The pages' code and policy:** each page is `www/index.html` plus its script `www/app.js` (and `/auth.js`),
+  all embedded and served by the firmware. Every page and script carries a **Content-Security-Policy**
+  (`WA_CSP` in `web_auth_esp.h`, `web_auth_page_headers()`): scripts only from the page's own origin
+  (`script-src 'self'`: no inline script, no `eval`; the pages hold no `on...=` attribute), connections to its own origin only
+  (`connect-src 'self'`), no framing, no form post, no base URL; styles may be inline (a style cannot run
+  code); plus `nosniff` and `no-referrer`. `tools/web_mock.py` sends the same headers (read from the C macro), so a page
+  the real policy would block is blocked in `make web-master` too. The pages use the platform's own controls: the four switches
+  (admin, advanced, pause, debug mode) are `<input type="checkbox" switch role="switch">` drawn the same in every browser, the "i"
+  notes are popovers (light dismiss, Escape and focus return are the browser's; the script only places the note under its button, or
+  above, inside the window; a browser without the Popover API falls back to a click toggle), `accent-color` follows the theme, and
+  the switch's glide stops under `prefers-reduced-motion`. A page with no `popover` support, or an older one, still works.
 - **Signed admin requests** (`components/web_auth`): the password never crosses
   the Wi-Fi and the firmware never holds it. The build turns it into
   K = PBKDF2-HMAC-SHA256(password, salt, 200000), 32 bytes in `admin_hash.h`,

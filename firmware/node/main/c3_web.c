@@ -14,12 +14,22 @@ static const char *TAG = "c3_web";
 
 extern const uint8_t index_html_start[] asm("_binary_index_html_start");
 extern const uint8_t index_html_end[]   asm("_binary_index_html_end");
+extern const uint8_t app_js_start[] asm("_binary_app_js_start");
+extern const uint8_t app_js_end[]   asm("_binary_app_js_end");
 
 static esp_err_t get_root(httpd_req_t *req)
 {
+    web_auth_page_headers(req);              /* CSP: no inline script, so the page's code is /app.js */
     httpd_resp_set_type(req, "text/html");
     return httpd_resp_send(req, (const char *)index_html_start,
                            index_html_end - index_html_start - 1);
+}
+
+static esp_err_t get_app_js(httpd_req_t *req)
+{
+    web_auth_page_headers(req);
+    httpd_resp_set_type(req, "application/javascript");
+    return httpd_resp_send(req, (const char *)app_js_start, app_js_end - app_js_start);
 }
 
 /* The C5's firmware id comes off the wire: keep it a valid JSON string by
@@ -394,7 +404,7 @@ void c3_web_start(void)
     web_auth_init(s_admin_key, ADMIN_SALT, ADMIN_ITERATIONS, ADMIN_AUTH_OPEN);
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.lru_purge_enable = true;
-    cfg.max_uri_handlers = 14;
+    cfg.max_uri_handlers = 15;   /* 13 here + web_auth's 2 */
     cfg.stack_size = 6144;       /* the signature's PSA HMAC under the handlers: ~3.5 KB of the 4 KB default */
     httpd_handle_t srv = NULL;
     if (httpd_start(&srv, &cfg) != ESP_OK) { ESP_LOGE(TAG, "httpd start failed"); return; }
@@ -404,7 +414,9 @@ void c3_web_start(void)
     const httpd_uri_t authu = { .uri = "/api/auth", .method = HTTP_GET, .handler = get_auth };
     const httpd_uri_t conf = { .uri = "/api/config", .method = HTTP_POST, .handler = post_config };
     const httpd_uri_t cmd = { .uri = "/api/command", .method = HTTP_POST, .handler = post_command };
+    const httpd_uri_t appjs = { .uri = "/app.js", .method = HTTP_GET, .handler = get_app_js };
     httpd_register_uri_handler(srv, &root);
+    httpd_register_uri_handler(srv, &appjs);
     httpd_register_uri_handler(srv, &state);
     httpd_register_uri_handler(srv, &authu);
     httpd_register_uri_handler(srv, &conf);

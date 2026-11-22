@@ -16,11 +16,20 @@ static const char *TAG = "c6_web";
 
 extern const uint8_t index_html_start[] asm("_binary_index_html_start");
 extern const uint8_t index_html_end[]   asm("_binary_index_html_end");
+extern const uint8_t app_js_start[] asm("_binary_app_js_start");
+extern const uint8_t app_js_end[]   asm("_binary_app_js_end");
 
 static esp_err_t get_root(httpd_req_t *req) {
+    web_auth_page_headers(req);                 /* CSP: no inline script, so the page's code is /app.js */
     httpd_resp_set_type(req, "text/html");
     return httpd_resp_send(req, (const char *)index_html_start,
                            index_html_end - index_html_start - 1);
+}
+
+static esp_err_t get_app_js(httpd_req_t *req) {
+    web_auth_page_headers(req);
+    httpd_resp_set_type(req, "application/javascript");
+    return httpd_resp_send(req, (const char *)app_js_start, app_js_end - app_js_start);
 }
 
 /* Snapshots for the handlers: too large for the httpd stack (c6_fleet_t is
@@ -614,12 +623,13 @@ void c6_web_start(void) {
     web_auth_init(s_admin_key, ADMIN_SALT, ADMIN_ITERATIONS, ADMIN_AUTH_OPEN);
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.lru_purge_enable = true;
-    cfg.max_uri_handlers = 18;   /* 16 here + web_auth's 2 */
+    cfg.max_uri_handlers = 20;   /* 18 here + web_auth's 2 */
     cfg.stack_size = 6144;       /* the signature's PSA HMAC under post_command: ~3.5 KB of the 4 KB default */
     httpd_handle_t srv = NULL;
     if (httpd_start(&srv, &cfg) != ESP_OK) { ESP_LOGE(TAG, "httpd start failed"); return; }
     const httpd_uri_t uris[] = {
         { .uri = "/",             .method = HTTP_GET,  .handler = get_root },
+        { .uri = "/app.js",       .method = HTTP_GET,  .handler = get_app_js },
         { .uri = "/api/state",    .method = HTTP_GET,  .handler = get_state },
         { .uri = "/api/results",  .method = HTTP_GET,  .handler = get_results },
         { .uri = "/api/auth",     .method = HTTP_GET,  .handler = get_auth },

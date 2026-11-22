@@ -200,8 +200,8 @@ firmware/port menu when an arg is omitted), plus `make monitor`, `make variants`
 overlay on the role's `sdkconfig.defaults` and builds in its own dir. flash/monitor fall back to esptool / a serial terminal on the
 already-built image when ESP-IDF is not installed (build it elsewhere, flash
 here). `make web-master` / `make web-node` (`tools/web_mock.py`) serve the C6/C3
-pages from disk against a simulated `/api`, so a page edit needs no build or
-flash; a new `/api/state` field or a changed POST buffer goes in the mock too
+pages from disk (`www/index.html` + `app.js`, the CSP allows no inline script) against a simulated
+`/api`, so a page edit needs no build or flash; a new `/api/state` field or a changed POST buffer goes in the mock too
 (`test/test_web_mock.py` fails otherwise).
 
 After editing `firmware/detector/sdkconfig*.defaults`, run `tools/fw.sh clean` (`make
@@ -242,7 +242,7 @@ cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/web_auth/include \
   test_web_auth.c ../components/web_auth/web_auth.c -o /tmp/t && /tmp/t
 cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/checkpoint test_hop_stats.c -lm -o /tmp/t && /tmp/t
 node test_web_auth.mjs   # auth.js (page side of web_auth)
-node test_web_bubble.mjs # the C3/C6 pages' info bubbles (one snippet; mouse, touch, keyboard)
+node test_web_bubble.mjs # the C3/C6 pages' info bubbles (popover notes, one snippet; placement, fallback)
 python3 test_web_mock.py # tools/web_mock.py against the firmware's /api/state and buffers
 python3 test_pcb.py      # hardware/ boards against the firmware's Kconfig pin defaults
 python3 test_scan_analyze.py   # tools/scan_analyze.py on synthetic recordings
