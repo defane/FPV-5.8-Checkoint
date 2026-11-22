@@ -131,10 +131,9 @@
 
   <h2 class="adv">Gates / nodes</h2>
   <div class="card scroll adv">
-    <div class="bar" style="margin-bottom:10px">Pairing: <b id="pair_state" class="off">closed</b>
-      <button id="pair_toggle" class="admin-only">Toggle pairing</button>
-      <button id="cal_all" class="admin-only warn" title="Full calibration (console B) on every reachable gate">Calibrate all gates (B)</button>
-      <span id="cmd_msg" class="muted"></span></div>
+    <div class="bar" style="margin-bottom:10px">Pairing: <b id="pair_state" class="off">closed</b> <span id="pair_left" class="muted"></span>
+      <button id="pair_toggle" class="admin-only" title="Opens pairing for 5 minutes (it is closed at every boot); again to close it now">Toggle pairing</button>
+      </div>
     <table>
       <thead><tr><th>Gate</th><th>Node</th><th>Link</th><th title="C5 calibration state, capture faults and a re-arm drop other than the fleet's (hover for firmware, uptime, heap)">Health</th><th>RSSI</th><th>Loss</th><th>Seen</th><th class="admin-only"></th></tr></thead>
       <tbody id="nodes"><tr><td colspan="8" class="muted">no nodes paired</td></tr></tbody>
@@ -469,6 +468,7 @@ async function poll() {
     $("conn").hidden = true;
     $("pair_state").textContent = s.pairing ? "OPEN" : "closed";
     $("pair_state").className = s.pairing ? "on" : "off";
+    $("pair_left").textContent = s.pairing ? `closes in ${Math.floor(s.pairing_left_s / 60)}:${String(s.pairing_left_s % 60).padStart(2, "0")}` : "";
     const L = s.local || {};
     $("l_health").innerHTML = s.has_local ? calBadge(L) + faultsTxt(L) + rearmPill(L.rearm_db_x10, s.rearm_db_x10) : "—";
     $("l_info").textContent = s.has_local ? healthInfo(L) : "local C5 not linked (no report for 3 s)";
@@ -522,7 +522,7 @@ async function poll() {
 }
 
 $("pair_toggle").addEventListener("click", async () => {
-  await post("/api/pairing", { open: $("pair_state").textContent !== "OPEN" ? 1 : 0 }); poll();
+  await post("/api/pairing", { open: $("pair_state").className === "on" ? 0 : 1 }); poll();
 });
 
 // Calibrate/reboot a gate's C5 (gate -1 = every reachable gate). The master holds a

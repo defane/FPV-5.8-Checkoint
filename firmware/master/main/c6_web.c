@@ -84,7 +84,7 @@ static esp_err_t get_state(httpd_req_t *req) {
     const c6_snapshot_t *s = &s_snap;
     const c6_fleet_t *f = &s_fleet;
 
-    /* Worst case (every field at its widest, every list full) 10587 B: header + local 487 (its
+    /* Worst case (every field at its widest, every list full) 10607 B: header + local 487 (+20 for pairing_left_s) (its
      * states 27 and levels 59, the fleet's and gate 0's re-arm drop), 15 nodes 7304 (487 with
      * its comma, states and levels included), 8 standings 1031, 24 passes 1727, the lists'
      * brackets 38; sized so it never truncates. */
@@ -93,9 +93,9 @@ static esp_err_t get_state(httpd_req_t *req) {
     char states[STATES_LEN];
     int o = 0;
     o += snprintf(body + o, sizeof body - o,
-                  "{\"pairing\":%s,\"num_gates\":%u,\"has_local\":%s,"
+                  "{\"pairing\":%s,\"pairing_left_s\":%u,\"num_gates\":%u,\"has_local\":%s,"
                   "\"local\":{\"cn_x10\":%ld,\"states\":[%s],",
-                  f->pairing ? "true" : "false", f->num_gates, s->has_local ? "true" : "false",
+                  f->pairing ? "true" : "false", f->pairing_left_s, f->num_gates, s->has_local ? "true" : "false",
                   (long)l->cn_x10, put_states(states, s->has_local ? l->states : 0u));
     o += put_levels(body + o, sizeof body - o, s->has_local ? l->levels : NULL);
     o += put_health(body + o, sizeof body - o, l->passes, l->flags, l->gain, l->uptime_s,

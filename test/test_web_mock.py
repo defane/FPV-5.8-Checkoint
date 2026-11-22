@@ -265,6 +265,24 @@ class Protocol(unittest.TestCase):
         self.assertIn("STATUS", out["text"])
         self.assertEqual(self.signed(sid, 5, "POST", "/api/key", b'{"keys":"`"}')[0], 400)
 
+    def test_pairing_is_closed_at_boot_and_closes_by_itself(self):
+        """c6_hub.c: closed at every boot, opened for PAIRING_OPEN_MS (5 min), again to close it now."""
+        hub = (ROOT / "firmware/master/main/c6_hub.c").read_text()
+        self.assertRegex(hub, r"static bool\s+s_pairing;")
+        minutes = re.search(r"PAIRING_OPEN_MS \((\d+)u \* 60u \* 1000u\)", hub)
+        self.assertEqual(float(minutes.group(1)) * 60, web_mock.Master.PAIRING_OPEN_S)
+        sim = web_mock.Master()
+        self.assertEqual((sim.state(10.0)["pairing"], sim.state(10.0)["pairing_left_s"]), (False, 0))
+        sim.set_pairing({"open": 1}, 100.0)
+        st = sim.state(101.0)
+        self.assertEqual((st["pairing"], st["pairing_left_s"]), (True, 299))
+        self.assertTrue(sim.state(399.0)["pairing"])
+        st = sim.state(400.0)
+        self.assertEqual((st["pairing"], st["pairing_left_s"]), (False, 0), "closed by itself after 5 minutes")
+        sim.set_pairing({"open": 1}, 500.0)
+        sim.set_pairing({"open": 0}, 510.0)
+        self.assertFalse(sim.state(511.0)["pairing"], "the toggle closes it at once")
+
     def test_reset_of_one_channel(self):
         status, data = self.call("GET", "/api/results")
         self.assertEqual(status, 200)

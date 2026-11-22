@@ -305,6 +305,7 @@ class Master(ConsoleDebug):
     def __init__(self, vtx=False):
         self.init_debug()
         self.vtx, self.pairing, self.volume, self.join_at = vtx, False, 60, None
+        self.pairing_until = 0.0
         self.rearm = REARM_X10                            # the fleet's re-arm drop (c6_store)
         self.local = Gate(0, 0, 7.0, vtx)
         self.nodes = []
@@ -384,7 +385,8 @@ class Master(ConsoleDebug):
                   "rx_frames": int(t * 6), "status_rx": int(t * 2), "status_lost": n.status_lost,
                   "mac": n.mac, "levels": n.levels(t) if n.online else [CN_UNKNOWN] * 8,
                   **n.health(t)} for n in self.nodes]
-        return {"pairing": self.pairing, "num_gates": 1 + len(self.nodes), "has_local": lo.up(t),
+        left = self.pairing_left(t)                       # closes it first when its 5 minutes are over
+        return {"pairing": self.pairing, "pairing_left_s": left, "num_gates": 1 + len(self.nodes), "has_local": lo.up(t),
                 "local": {"cn_x10": lo.cn_x10(t), "states": lo.states(t), "levels": lo.levels(t),
                           **lo.health(t)},
                 "total_passes": self.total, "volume": self.volume, "rearm_db_x10": self.rearm,
@@ -399,8 +401,17 @@ class Master(ConsoleDebug):
     def node_by_id(self, b):
         return next((n for n in self.nodes if n.node_id == b.get("node_id")), None)
 
+    PAIRING_OPEN_S = 300.0                            # PAIRING_OPEN_MS in c6_hub.c
+
+    def pairing_left(self, t):
+        """Seconds until an open pairing closes by itself (pairing_open() in c6_hub.c), 0 when closed."""
+        if self.pairing and t >= self.pairing_until:
+            self.pairing = False
+        return int(self.pairing_until - t + 0.999) if self.pairing else 0
+
     def set_pairing(self, b, t):
         self.pairing = bool(b.get("open"))
+        self.pairing_until = t + self.PAIRING_OPEN_S
         self.join_at = t + 4.0 if self.pairing else None
         return {"ok": True}
 

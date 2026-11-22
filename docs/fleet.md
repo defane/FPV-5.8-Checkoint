@@ -23,8 +23,8 @@ with no change on the gate side.
 - **Protocols:** `components/link_proto` v5 (C5↔bridge UART: `CONFIG_*` with the
   detector settings, the relative re-arm drop included, `EVENT_PASS` with the pass's age,
   `STATS` with the 8 channels' levels, each channel's detector state, the strongest rise
-  (the calibration guard's) and the C5's health, `COMMAND`, `LOG` console text, `KEY` console keystrokes, `DEBUG`);
-  `components/fleet_proto` v5 (C6↔C3 ESP-NOW: pairing, time beacons, `CONFIG` (the gate
+  (the calibration guard's) and the C5's health, `COMMAND`, `GAIN`, `LOG` console text, `KEY` console keystrokes, `DEBUG`);
+  `components/fleet_proto` v6 (C6↔C3 ESP-NOW: pairing, time beacons, `CONFIG` (the gate
   and its detector settings, link_proto's `lp_config_t` as it goes to the C5, re-arm drop
   included), `GATE_PASS`, `NODE_STATUS` relaying the C5's `STATS` and the re-arm drop its
   last `CONFIG_STATE` echoed, `COMMAND`, and `DEBUG`/`KEY`/`LOG_REQ`/`LOG_CHUNK` for a remote gate's debug mode); `components/espnow_link` (transport);
@@ -49,7 +49,10 @@ with no change on the gate side.
   engine, **centralized sound**, and an **admin web** (AP) to pair, order the
   gates and see the timings. Every C5 sweeps R1 to R8, so a gate has no channel: a pass
   carries the channel it was seen on.
-- **Pairing:** C6 web → *pairing open*; an unpaired C3 broadcasts a
+- **Pairing:** **closed at every boot**: the admin presses *Toggle pairing* on the C6 web and it
+  stays open **5 minutes**, then closes by itself (the page counts it down; pressing again closes it
+  at once; `pairing_left_s` in `/api/state`). Only a new node needs it: paired ones reconnect
+  with pairing closed. An unpaired C3 broadcasts a
   `PAIR_REQUEST`; the C6 assigns it a gate (`PAIR_ACCEPT` + `CONFIG`),
   persisted on both sides. The channel those frames still carry is ignored. A node only asks
   while it boots, so with pairing closed it ends up degraded: open pairing, then reboot it.

@@ -47,6 +47,7 @@ typedef struct {
 
 typedef struct {
     bool          pairing;
+    uint16_t      pairing_left_s;   /* seconds until an open pairing closes by itself, 0 when closed */
     uint8_t       num_gates;
     uint8_t       num_nodes;
     uint8_t       volume;        /* centralized audio volume, 0..100 % */
@@ -60,6 +61,7 @@ typedef struct {
 
 void c6_hub_start(void);                       /* after Wi-Fi AP is up */
 void c6_hub_local_pass(uint8_t channel, int32_t peak_db_x10, uint32_t at_ms);
+/* Pairing is closed at every boot. true opens it for 5 minutes (again from now if already open), false closes it. */
 void c6_hub_set_pairing(bool open);
 void c6_hub_set_volume(uint8_t pct);           /* 0..100 %, applied + saved in NVS */
 /* The fleet's relative re-arm drop *10 (0..LP_REARM_MAX_X10, else false): saved (c6_store), sent

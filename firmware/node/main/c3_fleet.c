@@ -189,7 +189,7 @@ bool c3_fleet_try_online(uint32_t timeout_ms) {
         ESP_LOGW(TAG, "paired master %02x:%02x:%02x:%02x:%02x:%02x not heard", s_c6[0], s_c6[1], s_c6[2],
                  s_c6[3], s_c6[4], s_c6[5]);
     else
-        ESP_LOGW(TAG, "not paired: open pairing on the master, then reboot this node");
+        ESP_LOGW(TAG, "not paired: open pairing on the master (5 min), then reboot this node");
     return s_master_seen;
 }
 

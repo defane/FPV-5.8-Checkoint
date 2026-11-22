@@ -23,12 +23,14 @@ static const char *TAG = "c6_hub";
 #define NVS_NS        "c6fleet"
 #define BEACON_MS     2000u
 #define NODE_LIVE_MS  8000u     /* no traffic this long -> offline */
+#define PAIRING_OPEN_MS (5u * 60u * 1000u)   /* an opened pairing closes by itself after this */
 
 static SemaphoreHandle_t s_lock;
 static race_timing_t     s_rt;
 static c6_node_t         s_nodes[C6_MAX_NODES];
 static uint8_t           s_num_nodes;
-static bool              s_pairing = true;    /* open at boot for bring-up */
+static bool              s_pairing;           /* closed at every boot: an admin opens it, for PAIRING_OPEN_MS */
+static uint32_t          s_pairing_until;     /* now_ms() when an open pairing closes again */
 static uint32_t          s_beacon_seq;
 
 static uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
@@ -104,6 +106,12 @@ static lp_config_t default_config(void) {
         .volume_pct = 60, .muted = 0,
     };
     return c;
+}
+
+/* Is pairing open? It closes by itself PAIRING_OPEN_MS after it was opened. s_lock held. */
+static bool pairing_open(void) {
+    if (s_pairing && (int32_t)(now_ms() - s_pairing_until) >= 0) s_pairing = false;
+    return s_pairing;
 }
 
 /* ---- NVS node table ---- */
@@ -186,7 +194,7 @@ static void handle_pair(const uint8_t mac[6], const fp_pair_request_t *req) {
     xSemaphoreTake(s_lock, portMAX_DELAY);
     c6_node_t *n = find_by_mac(mac);
     if (!n) {
-        if (!s_pairing || s_num_nodes >= C6_MAX_NODES) { xSemaphoreGive(s_lock); return; }
+        if (!pairing_open() || s_num_nodes >= C6_MAX_NODES) { xSemaphoreGive(s_lock); return; }
         n = &s_nodes[s_num_nodes];
         /* Link counters and C5 health start zeroed; next free gate (gate 0 is the local C5). */
         *n = (c6_node_t){ .node_id = s_num_nodes, .gate_index = num_gates(),
@@ -340,7 +348,7 @@ static void beacon_task(void *arg) {
         for (unsigned i = 0; i < s_num_nodes; i++)
             if (!s_nodes[i].online) offline = true;
         const uint8_t num = s_num_nodes;
-        const bool pairing = s_pairing;
+        const bool pairing = pairing_open();
         xSemaphoreGive(s_lock);
 
         /* Status LED: magenta while pairing with no gates yet, blue if a paired
@@ -392,8 +400,8 @@ void c6_hub_start(void) {
 
     xTaskCreate(beacon_task, "c6_beacon", 3072, NULL, 4, NULL);
     xTaskCreate(dbg_task, "c6_dbg", 3072, NULL, 3, NULL);
-    ESP_LOGI(TAG, "fleet hub: %u node(s), %u gate(s), pairing %s",
-             s_num_nodes, num_gates(), s_pairing ? "open" : "closed");
+    ESP_LOGI(TAG, "fleet hub: %u node(s), %u gate(s), pairing closed (the admin web opens it for %u min)",
+             s_num_nodes, num_gates(), PAIRING_OPEN_MS / 60000u);
 }
 
 void c6_hub_local_pass(uint8_t channel, int32_t peak_db_x10, uint32_t at_ms) {
@@ -406,6 +414,7 @@ void c6_hub_local_pass(uint8_t channel, int32_t peak_db_x10, uint32_t at_ms) {
 void c6_hub_set_pairing(bool open) {
     xSemaphoreTake(s_lock, portMAX_DELAY);
     s_pairing = open;
+    s_pairing_until = now_ms() + PAIRING_OPEN_MS;
     xSemaphoreGive(s_lock);
 }
 
@@ -511,7 +520,8 @@ int32_t c6_hub_vtx_threshold_x10(void) { return default_config().active_db_x10; 
 
 void c6_hub_snapshot(c6_fleet_t *out) {
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    out->pairing = s_pairing;
+    out->pairing = pairing_open();
+    out->pairing_left_s = out->pairing ? (s_pairing_until - now_ms() + 999u) / 1000u : 0u;
     out->num_gates = num_gates();
     out->num_nodes = s_num_nodes;
     out->volume = (uint8_t)audio_player_volume();
