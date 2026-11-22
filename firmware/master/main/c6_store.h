@@ -21,7 +21,8 @@ typedef struct {
     bool        has_local;   /* in a snapshot: a local STATS within C6_LOCAL_LIVE_MS */
     lp_config_t local_cfg;   /* the local C5's detector config (its CONFIG_STATE echo) */
     bool        has_local_cfg;
-    uint16_t    rearm_x10;   /* the fleet's re-arm drop *10, 0..LP_REARM_MAX_X10: every gate's */
+    uint16_t    rearm_x10;   /* the fleet's re-arm drop *10, 0..LP_REARM_MAX_X10: the default of every gate */
+    int32_t     rearm0_x10;  /* gate 0's own D *10, -1 = the fleet's */
     uint32_t    total_passes;
     uint8_t     n_passes;    /* valid entries, newest first */
     c6_pass_t   passes[C6_EVENTS];
@@ -38,3 +39,7 @@ void c6_store_snapshot(c6_snapshot_t *out);
  * nothing changed) outside 0..LP_REARM_MAX_X10. */
 uint16_t c6_store_rearm_x10(void);
 bool c6_store_set_rearm_x10(int32_t x10);
+/* Gate 0's own D (the master's local C5), -1 when it runs the fleet's: saved. False outside -1, 0..LP_REARM_MAX_X10. */
+int32_t c6_store_rearm0_x10(void);
+bool c6_store_set_rearm0_x10(int32_t x10);
+int32_t c6_store_rearm_want0_x10(void);   /* the D gate 0 should run: its own, else the fleet's */

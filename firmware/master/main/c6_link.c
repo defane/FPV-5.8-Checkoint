@@ -47,14 +47,15 @@ static void send_config_req(void) {
  * next one, and the page shows the difference. */
 static void sync_rearm(const lp_config_t *echo) {
     s_rearm_sync = false;
-    const uint16_t want = c6_store_rearm_x10();
+    const int32_t want = c6_store_rearm_want0_x10();   /* gate 0's own D, else the fleet's */
     if (echo->rearm_db_x10 == want) return;
     lp_config_t c = *echo;
     c.rearm_db_x10 = want;
     uint8_t buf[LP_MAX_FRAME];
     const size_t n = lp_encode_config(buf, sizeof buf, LP_MSG_CONFIG_SET, &c);
     if (n) uart_write_bytes(LINK_UART, (const char *)buf, n);
-    ESP_LOGI(TAG, "local C5 re-arm drop %ld -> %u (x10, the fleet's)", (long)echo->rearm_db_x10, want);
+    ESP_LOGI(TAG, "local C5 re-arm drop %ld -> %ld (x10, %s)", (long)echo->rearm_db_x10, (long)want,
+             c6_store_rearm0_x10() >= 0 ? "its own" : "the fleet's");
 }
 
 static void send_frame(const uint8_t *b, size_t n) {

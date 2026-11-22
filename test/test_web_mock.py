@@ -136,7 +136,7 @@ class Firmware(unittest.TestCase):
         src = (ROOT / SOURCES[web_mock.Master]).read_text()
         routes = dict(re.findall(r'\.uri = "(/api/\w+)",\s*\.method = HTTP_POST,\s*\.handler = (\w+)', src))
         posts = page_posts(page)
-        self.assertEqual(posts.get("/api/rearm"), {"rearm_db_x10"})
+        self.assertEqual(posts.get("/api/rearm"), {"rearm_db_x10", "gate"})
         for uri, keys in posts.items():
             self.assertIn(uri, routes, "a POST the firmware does not route")
             self.assertIn(uri, web_mock.Master.ADMIN, "a POST the mock does not serve")
@@ -580,6 +580,84 @@ class MasterOrder(unittest.TestCase):
         page = (ROOT / "firmware/master/main/www/index.html").read_text()
         self.assertNotIn('class="save"', page)
         self.assertNotIn('"/api/node",', page)
+
+
+class MasterPerGate(unittest.TestCase):
+    """D (the re-arm drop) and G (the RX gain) for every gate or one: c6_hub_set_rearm(_gate), post_gain's run_on_gates."""
+
+    def setUp(self):
+        self.sim = web_mock.Master()
+        self.sim.state(60.0)
+        for g in [self.sim.local] + self.sim.nodes:           # nothing near a gate: no VTX guard in these tests
+            g.next_pass, g.last_pass = 160.0, -40.0
+
+    def want(self, gate):
+        s = self.sim.state(60.0)
+        d = s["local"] if gate == 0 else next(n for n in s["nodes"] if n["gate"] == gate)
+        return d["rearm_want_x10"], d["rearm_own"]
+
+    def test_d_for_one_gate_changes_only_that_gate(self):
+        fleet = self.sim.rearm
+        self.assertEqual(self.sim.set_rearm({"rearm_db_x10": 90, "gate": 2}, 60.0), {"ok": True})
+        self.assertEqual(self.want(2), (90, True))
+        self.assertEqual((self.want(0), self.want(1)), ((fleet, False), (fleet, False)))
+        self.assertEqual(self.sim.rearm, fleet, "the fleet's D is untouched")
+        self.assertEqual(self.sim.nodes[1].rearm, 90, "its C5 now runs it")
+        self.assertEqual(self.sim.set_rearm({"rearm_db_x10": 70, "gate": 0}, 60.0), {"ok": True})
+        self.assertEqual(self.want(0), (70, True), "gate 0 keeps its own in its own store")
+
+    def test_all_gates_drops_every_own_d(self):
+        self.sim.set_rearm({"rearm_db_x10": 90, "gate": 2}, 60.0)
+        self.sim.set_rearm({"rearm_db_x10": 70, "gate": 0}, 60.0)
+        self.assertEqual(self.sim.set_rearm({"rearm_db_x10": 200}, 60.0), {"ok": True})
+        self.assertEqual([self.want(g) for g in (0, 1, 2)], [(200, False)] * 3)
+        self.assertEqual(self.sim.nodes[1].rearm, 200)
+
+    def test_minus_one_gives_a_gate_the_fleet_d_again(self):
+        self.sim.set_rearm({"rearm_db_x10": 90, "gate": 1}, 60.0)
+        self.assertEqual(self.sim.set_rearm({"rearm_db_x10": -1, "gate": 1}, 60.0), {"ok": True})
+        self.assertEqual(self.want(1), (self.sim.rearm, False))
+        self.assertEqual(self.sim.nodes[0].rearm, self.sim.rearm)
+
+    def test_d_refuses_what_it_cannot_do(self):
+        for body in ({"rearm_db_x10": 401, "gate": 1}, {"rearm_db_x10": -2, "gate": 1}, {"rearm_db_x10": 90, "gate": 9},
+                     {"rearm_db_x10": -1}, {"gate": 1}, {"rearm_db_x10": 90, "gate": 16}):
+            self.assertEqual(self.sim.set_rearm(body, 60.0), {"ok": False}, body)
+
+    def test_an_own_d_follows_its_node_when_the_order_changes(self):
+        self.sim.set_rearm({"rearm_db_x10": 90, "gate": 1}, 60.0)
+        node = self.sim.nodes[0]
+        self.sim.order({"order": list(reversed([n.node_id for n in self.sim.nodes]))}, 61.0)
+        self.assertNotEqual(node.gate, 1)
+        self.assertEqual(self.want(node.gate), (90, True), "the D stays with the node, not with the number")
+
+    def test_an_own_d_survives_a_passage_calibration(self):
+        self.sim.set_rearm({"rearm_db_x10": 90, "gate": 1}, 60.0)
+        for action, dt in (("start1", 0), ("state", 6), ("start2", 0), ("state", 6), ("apply", 0), ("reset", 0)):
+            self.sim.calib({"gate": 1, "action": action}, 60.0 + dt * (action == "state") + 12 * (action in ("start2", "apply", "reset")))
+        self.assertEqual(self.want(1), (90, True))
+
+    def test_g_for_every_gate_reaches_each_reachable_one(self):
+        out = self.sim.gain({"gate": -1, "gain": 50}, 60.0)
+        self.assertEqual(out["ok"], True)
+        self.assertEqual((out["sent"], out["failed"], out["busy"]), ([0, 1, 2], [], []), "every reachable gate; gate 3's node is offline")
+        self.assertEqual([self.sim.local.gain, self.sim.nodes[0].gain, self.sim.nodes[1].gain], [50, 50, 50])
+        self.assertNotEqual(self.sim.nodes[2].gain, 50, "an offline node is not reached")
+        self.assertEqual(self.sim.gain({"gate": 3, "gain": 50}, 60.0)["failed"], [3], "asked by name, it is listed as failed")
+
+    def test_g_for_every_gate_asks_when_one_sees_a_carrier_and_skips_a_calibrating_one(self):
+        self.sim.nodes[0].next_pass, self.sim.nodes[0].last_pass = 60.0, 60.0     # a drone at gate 1 right now
+        out = self.sim.gain({"gate": -1, "gain": 40}, 60.0)
+        self.assertFalse(out["ok"])
+        self.assertEqual([v["gate"] for v in out["vtx"]], [1], "only the gate that sees it is listed")
+        self.assertNotEqual(self.sim.local.gain, 40, "nothing was sent before the admin forces it")
+        self.sim.nodes[1].run("cal_quick", 60.0)
+        out = self.sim.gain({"gate": -1, "gain": 40, "force": 1}, 60.0)
+        self.assertEqual((out["sent"], out["busy"]), ([0, 1], [2]))
+
+    def test_the_widest_body_fits_the_firmware_buffers(self):
+        self.assertLess(len('{"rearm_db_x10":400,"gate":15}'), web_mock.Master.ADMIN["/api/rearm"][1])
+        self.assertLess(len('{"gate":-1,"gain":83,"force":1}'), web_mock.Master.ADMIN["/api/gain"][1])
 
 
 class MasterCalib(unittest.TestCase):

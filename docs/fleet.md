@@ -94,11 +94,17 @@ with no change on the gate side.
   frame: it is too short for a page that polls every second, and the green already shows
   it. Peak passed lasts one reading and is framed and named as cooldown. A tile's or cell's
   tooltip names the channel and its state (`Gate 2 · R5 · cooldown`).
-- **Re-arm drop (fleet):** the C6 keeps one relative re-arm drop for every gate (NVS, 16 dB
-  until an admin sets one; what it does: [detector.md](detector.md#setting-d)). The advanced
-  view's *Detector (every gate)* card sets it (admin only), with the same info bubble as the
-  C3's: what it does, the recommended 16 dB and how to tune it. `POST /api/rearm`
-  `{"rearm_db_x10": 0..400}` → `{"ok": true}`, or `{"ok": false}` out of range. The online
+- **Re-arm drop (D):** the C6 keeps one relative re-arm drop as the fleet's default (NVS, 16 dB
+  until an admin sets one; what it does: [detector.md](detector.md#setting-d)), and a gate may have a **D of its own**.
+  The advanced view's *Detector (every gate)* card sets it (admin only), with the same info bubble as the
+  C3's: what it does, the recommended 16 dB and how to tune it, for *All gates* or for one gate chosen in its menu.
+  **All gates** sets the fleet's D and drops every gate's own D, so every gate runs it; **a gate alone** keeps a D of its own
+  (gate 0 in `c6_store`, a remote gate by its nodes' MACs in the `ovr2` record the calibrated thresholds share, as separate
+  flags, so one never erases the other), merged into every `CONFIG` it is sent; *Use the fleet's D* drops it. A gate with its own D
+  shows an *own D* pill beside its health, and the *D 12* pill now means its C5 echoes another D than the one it should run.
+  `POST /api/rearm` `{"rearm_db_x10": 0..400, "gate": 0..15}` (no `gate`: all; `-1` for the value with a gate: the fleet's again) →
+  `{"ok": true}`, or `{"ok": false}` out of range or for a gate nobody paired. `/api/state` gives each gate `rearm_want_x10`
+  (the D it should run) and `rearm_own`. The online
   remote gates get it at once in their `CONFIG`, and a remote gate again at pairing, on its
   save, when it comes back online and when its C3 boots ("Back online" below). Its C3 keeps
   the last `CONFIG` (RAM) and gives it to its C5 again when that C5 says `HELLO`: one sent
@@ -222,13 +228,14 @@ page for a gate with no master.
   `{"ok": false, "msg": "no C5 linked"}`.
 - **RX gain** (admin): the C5 forces its gain (no AGC, 40 by default, saved in its NVS), set from the
   web in the *Detector* card on the C6, under the re-arm drop (a gate selector, a field that follows the gate's
-  current gain, *Set gain*) and in the degraded C3's *Detector* card. It goes as `GAIN` (`link_proto`) to
+  current gain, *Set gain*; the menu's *All gates* sends it to every reachable gate at once, each C5 keeping its own,
+  so a gate that joins later keeps its own) and in the degraded C3's *Detector* card (labelled *G*, as the re-arm drop is *D*). It goes as `GAIN` (`link_proto`) to
   a C5, relayed by `FP_MSG_GAIN` to a remote gate (from its master's MAC only, as `COMMAND`), and the C5
   does what the console's `K g/G` does, to that index: clamped to 10..the PHY's maximum (83), saved,
   the rests learnt again (a bench refuses it: `CHECKPOINT gain refused=busy`). It blinds the gate for
   about 3 s and the rests are learnt at the new gain, so it has the **calibrations' guard**: the page
   asks, then a gate seeing a strong signal is refused unless forced, and a gate calibrating is skipped
-  (*busy*). **API:** C6 `POST /api/gain` `{"gate": 0..15, "gain": 10..83, "force": 0|1}` → `{"ok": true,
+  (*busy*). **API:** C6 `POST /api/gain` `{"gate": 0..15 or -1 (every reachable gate), "gain": 10..83, "force": 0|1}` → `{"ok": true,
   "sent": [...], "failed": [...], "busy": [...]}` or `{"ok": false, "vtx": [...]}`; the degraded C3's
   `POST /api/gain` `{"gain": ..., "force": 0|1}` → `{"ok": true}`, `{"ok": false, "vtx": true, "cn_x10": x}`
   or `{"ok": false, "msg": "no C5 linked"}`. The new gain shows in the next `STATS`.

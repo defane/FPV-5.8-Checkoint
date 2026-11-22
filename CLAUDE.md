@@ -135,8 +135,8 @@ that much over the lowest 1 s average since: docs/detector.md "Relative re-arm")
 refractory, stale, D) are editable from the console (`K`+key:
 `components/checkpoint/cp_console.c` and `checkpoint.c`; D is `e`/`E`) and over the link
 (the bridges' `CONFIG_SET`, `lp_config_t`, echoed as `CONFIG_STATE`; the degraded C3's page
-sets them all, D with an info bubble; the C6 keeps one D for every gate, its admin sets it in
-the advanced view), saved in NVS namespace
+sets them all, D with an info bubble; the C6 keeps a fleet D, its admin sets it in the advanced view
+for all gates or one gate, which then keeps a D of its own), saved in NVS namespace
 `checkpoint` key `prefs` (`checkpoint_prefs_t`, `PREFS_VERSION` 4, a version-3 record read
 with the build's D — bump it on a layout or meaning change). Parameter table (defaults +
 console keys): **`docs/detector.md`**.

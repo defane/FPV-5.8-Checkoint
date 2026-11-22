@@ -39,6 +39,8 @@ typedef struct {
     lp_calib_t calib;        /* the C5's passage-calibration state, last relayed */
     uint32_t calib_ms;       /* when it came, 0 = none yet or the node rebooted since */
     bool     custom;         /* a snapshot's: this node has thresholds from a passage calibration (not the fleet's) */
+    bool     rearm_own;      /* a snapshot's: this node has a re-arm drop of its own (not the fleet's) */
+    uint16_t rearm_want_x10; /* a snapshot's: the D it should run, its own or the fleet's */
 } c6_node_t;
 
 typedef struct {
@@ -71,6 +73,10 @@ void c6_hub_set_volume(uint8_t pct);           /* 0..100 %, applied + saved in N
  * now to every online remote gate in its CONFIG (and from then on at pairing, a gate's save and
  * back online) and to gate 0 (c6_link_sync_rearm). */
 bool c6_hub_set_rearm(int32_t x10);
+/* D of one gate only: its own value *10, or -1 to run the fleet's again; saved (gate 0 in c6_store, a remote gate by its
+ * nodes' MACs) and sent now. False for a value out of range or a gate with no node. c6_hub_set_rearm (the fleet's, "every
+ * gate") drops every gate's own D first. */
+bool c6_hub_set_rearm_gate(uint8_t gate, int32_t x10);
 /* The order of the remote gates: ids lists every paired node's id, first gate first; they get gates 1..N in that
  * order (gate 0 stays the local C5), each online one its new CONFIG. False, nothing changed, unless ids is a
  * permutation of all the paired nodes' ids (the page's list may be stale). A change restarts the race timing; the

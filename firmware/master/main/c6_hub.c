@@ -114,12 +114,15 @@ static bool pairing_open(void) {
     return s_pairing;
 }
 
-/* ---- per-gate thresholds from a passage calibration (an override of the fleet's detector config) ----
- * Only the four thresholds a calibration sets; D and alpha stay the fleet's. Keyed by MAC (node ids can
- * repeat after a removal), in their own NVS key so the node table's record never changes. Merged into
- * default_config() at every push (send_config), so a re-pair, a back-online CONFIG or a change of D
- * never erases it. */
-typedef struct __attribute__((packed)) { uint8_t mac[6]; int16_t active, hysteresis, drop, min_peak; } ovr_rec_t;
+/* ---- what one gate runs of its own instead of the fleet's detector config (an override) ----
+ * Two independent parts, each behind a flag: the four thresholds a passage calibration set, and a re-arm drop D
+ * of the gate's own. Everything else stays the fleet's. Keyed by MAC (node ids can repeat after a removal, and the
+ * setting follows the node when the order changes), in its own NVS key ("ovr2": an older layout is never misread) so
+ * the node table's record never changes. Merged into default_config() at every push (send_config), so a re-pair, a
+ * back-online CONFIG or a change of the fleet's D never erases it; setting the fleet's D for "all" clears every own D. */
+#define OVR_THR   1u   /* active / hysteresis / drop / min_peak are from a calibration */
+#define OVR_REARM 2u   /* rearm is the gate's own D */
+typedef struct __attribute__((packed)) { uint8_t mac[6], flags; int16_t active, hysteresis, drop, min_peak, rearm; } ovr_rec_t;
 static ovr_rec_t s_ovr[C6_MAX_NODES];
 static uint8_t   s_num_ovr;
 
@@ -132,8 +135,8 @@ static ovr_rec_t *find_ovr(const uint8_t mac[6]) {            /* s_lock held */
 static void ovr_save(void) {                                   /* s_lock held */
     nvs_handle_t h;
     if (nvs_open(NVS_NS, NVS_READWRITE, &h) != ESP_OK) return;
-    if (s_num_ovr) nvs_set_blob(h, "ovr", s_ovr, s_num_ovr * sizeof(ovr_rec_t));
-    else nvs_erase_key(h, "ovr");
+    if (s_num_ovr) nvs_set_blob(h, "ovr2", s_ovr, s_num_ovr * sizeof(ovr_rec_t));
+    else nvs_erase_key(h, "ovr2");
     nvs_commit(h);
     nvs_close(h);
 }
@@ -142,19 +145,42 @@ static void ovr_load(void) {
     nvs_handle_t h;
     if (nvs_open(NVS_NS, NVS_READONLY, &h) != ESP_OK) return;
     size_t len = sizeof s_ovr;
-    if (nvs_get_blob(h, "ovr", s_ovr, &len) == ESP_OK && len % sizeof(ovr_rec_t) == 0) s_num_ovr = (uint8_t)(len / sizeof(ovr_rec_t));
+    if (nvs_get_blob(h, "ovr2", s_ovr, &len) == ESP_OK && len % sizeof(ovr_rec_t) == 0) s_num_ovr = (uint8_t)(len / sizeof(ovr_rec_t));
     nvs_close(h);
 }
 
-static void ovr_set(const uint8_t mac[6], const lp_calib_t *k) {   /* s_lock held */
+static ovr_rec_t *ovr_get(const uint8_t mac[6]) {              /* the node's record, made if none; s_lock held */
     ovr_rec_t *o = find_ovr(mac);
-    if (!o && s_num_ovr < C6_MAX_NODES) { o = &s_ovr[s_num_ovr++]; memcpy(o->mac, mac, 6); }
+    if (!o && s_num_ovr < C6_MAX_NODES) { o = &s_ovr[s_num_ovr++]; memset(o, 0, sizeof *o); memcpy(o->mac, mac, 6); }
+    return o;
+}
+
+/* Clear the flags in `bits` of a node's record; the record goes when no flag is left. s_lock held; saves. */
+static void ovr_clear(const uint8_t mac[6], uint8_t bits) {
+    ovr_rec_t *o = find_ovr(mac);
     if (!o) return;
+    o->flags &= (uint8_t)~bits;
+    if (!o->flags) *o = s_ovr[--s_num_ovr];
+    ovr_save();
+}
+
+static void ovr_set_thr(const uint8_t mac[6], const lp_calib_t *k) {   /* s_lock held */
+    ovr_rec_t *o = ovr_get(mac);
+    if (!o) return;
+    o->flags |= OVR_THR;
     o->active = k->active_db_x10; o->hysteresis = k->hysteresis_db_x10; o->drop = k->drop_db_x10; o->min_peak = k->min_peak_db_x10;
     ovr_save();
 }
 
-static bool ovr_drop(const uint8_t mac[6]) {                    /* s_lock held */
+static void ovr_set_rearm(const uint8_t mac[6], int16_t x10) {         /* s_lock held */
+    ovr_rec_t *o = ovr_get(mac);
+    if (!o) return;
+    o->flags |= OVR_REARM;
+    o->rearm = x10;
+    ovr_save();
+}
+
+static bool ovr_drop(const uint8_t mac[6]) {                    /* the whole record: the node is removed. s_lock held */
     ovr_rec_t *o = find_ovr(mac);
     if (!o) return false;
     *o = s_ovr[--s_num_ovr];
@@ -246,10 +272,11 @@ static void send_config(const uint8_t mac[6], uint8_t gate_index, uint8_t channe
     fp_config_t cfg = { .gate_index = gate_index, .channel = channel, .enable = 1, .det = default_config() };
     xSemaphoreTake(s_lock, portMAX_DELAY);          /* never held by a caller of this */
     const ovr_rec_t *o = find_ovr(mac);
-    if (o) {                                        /* this gate's thresholds from a passage calibration */
+    if (o && (o->flags & OVR_THR)) {                /* this gate's thresholds from a passage calibration */
         cfg.det.active_db_x10 = o->active; cfg.det.hysteresis_db_x10 = o->hysteresis;
         cfg.det.drop_db_x10 = o->drop; cfg.det.min_peak_db_x10 = o->min_peak;
     }
+    if (o && (o->flags & OVR_REARM)) cfg.det.rearm_db_x10 = o->rearm;   /* ... and its own D */
     xSemaphoreGive(s_lock);
     uint8_t buf[FP_MAX_FRAME];
     size_t m = fp_encode_config(buf, sizeof buf, &cfg);
@@ -543,13 +570,13 @@ bool c6_hub_set_order(const uint8_t *ids, unsigned n) {
     return true;
 }
 
-bool c6_hub_set_rearm(int32_t x10) {
-    if (!c6_store_set_rearm_x10(x10)) return false;   /* saved: default_config() carries it from now on */
+/* Send every online node on the given gate (or every online node, gate < 0) its CONFIG; s_lock not held. */
+static unsigned push_configs(int gate) {
     struct { uint8_t mac[6], gate, channel; } to[C6_MAX_NODES];   /* small: the web task's stack */
     unsigned n = 0;
     xSemaphoreTake(s_lock, portMAX_DELAY);
     for (unsigned i = 0; i < s_num_nodes; i++)
-        if (s_nodes[i].online) {
+        if (s_nodes[i].online && (gate < 0 || s_nodes[i].gate_index == gate)) {
             memcpy(to[n].mac, s_nodes[i].mac, 6);
             to[n].gate = s_nodes[i].gate_index;
             to[n].channel = s_nodes[i].channel;
@@ -557,8 +584,44 @@ bool c6_hub_set_rearm(int32_t x10) {
         }
     xSemaphoreGive(s_lock);
     for (unsigned i = 0; i < n; i++) send_config(to[i].mac, to[i].gate, to[i].channel);   /* offline: when back */
+    return n;
+}
+
+/* D for every gate: the fleet's value, and every gate's own D is dropped first, so none keeps another. */
+bool c6_hub_set_rearm(int32_t x10) {
+    if (x10 < 0 || x10 > LP_REARM_MAX_X10) return false;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    for (unsigned i = 0; i < s_num_nodes; i++) ovr_clear(s_nodes[i].mac, OVR_REARM);
+    xSemaphoreGive(s_lock);
+    (void)c6_store_set_rearm0_x10(-1);
+    if (!c6_store_set_rearm_x10(x10)) return false;   /* saved: default_config() carries it from now on */
+    const unsigned n = push_configs(-1);
     c6_link_sync_rearm();
-    ESP_LOGI(TAG, "fleet re-arm drop %ld (x10): sent to %u online node(s) and gate 0", (long)x10, n);
+    ESP_LOGI(TAG, "fleet re-arm drop %ld (x10), every gate's own dropped: sent to %u online node(s) and gate 0", (long)x10, n);
+    return true;
+}
+
+/* D for one gate only: x10 its own value, or -1 for the fleet's again. Gate 0 keeps it in c6_store, a remote gate on
+ * each of its nodes by MAC (offline ones too: they take it when back). False for a value out of range or a gate with no
+ * node. */
+bool c6_hub_set_rearm_gate(uint8_t gate, int32_t x10) {
+    if (x10 < -1 || x10 > LP_REARM_MAX_X10) return false;
+    if (gate == 0u) {
+        if (!c6_store_set_rearm0_x10(x10)) return false;
+        c6_link_sync_rearm();
+        return true;
+    }
+    bool any = false;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    for (unsigned i = 0; i < s_num_nodes; i++)
+        if (s_nodes[i].gate_index == gate) {
+            any = true;
+            if (x10 < 0) ovr_clear(s_nodes[i].mac, OVR_REARM); else ovr_set_rearm(s_nodes[i].mac, (int16_t)x10);
+        }
+    xSemaphoreGive(s_lock);
+    if (!any) return false;
+    const unsigned n = push_configs(gate);
+    ESP_LOGI(TAG, "gate %u re-arm drop %ld (x10, -1 the fleet's): sent to %u online node(s)", gate, (long)x10, n);
     return true;
 }
 
@@ -704,7 +767,7 @@ bool c6_hub_calib_apply(uint8_t gate_index) {
     xSemaphoreTake(s_lock, portMAX_DELAY);
     for (unsigned i = 0; i < s_num_nodes; i++)
         if (s_nodes[i].gate_index == gate_index && s_nodes[i].online) {
-            ovr_set(s_nodes[i].mac, &k);
+            ovr_set_thr(s_nodes[i].mac, &k);
             memcpy(to[n].mac, s_nodes[i].mac, 6); to[n].gate = s_nodes[i].gate_index; to[n].channel = s_nodes[i].channel;
             n++;
         }
@@ -724,7 +787,7 @@ bool c6_hub_calib_reset(uint8_t gate_index) {
     xSemaphoreTake(s_lock, portMAX_DELAY);
     for (unsigned i = 0; i < s_num_nodes; i++)
         if (s_nodes[i].gate_index == gate_index) {
-            dropped |= ovr_drop(s_nodes[i].mac);
+            { const ovr_rec_t *o = find_ovr(s_nodes[i].mac); dropped |= o && (o->flags & OVR_THR); ovr_clear(s_nodes[i].mac, OVR_THR); }
             if (s_nodes[i].online) {
                 memcpy(to[n].mac, s_nodes[i].mac, 6); to[n].gate = s_nodes[i].gate_index; to[n].channel = s_nodes[i].channel;
                 n++;
@@ -752,7 +815,10 @@ void c6_hub_snapshot(c6_fleet_t *out) {
     out->heap_total = heap_caps_get_total_size(MALLOC_CAP_INTERNAL);
     for (unsigned i = 0; i < s_num_nodes; i++) {
         out->nodes[i] = s_nodes[i];
-        out->nodes[i].custom = find_ovr(s_nodes[i].mac) != NULL;
+        const ovr_rec_t *o = find_ovr(s_nodes[i].mac);
+        out->nodes[i].custom = o && (o->flags & OVR_THR);
+        out->nodes[i].rearm_own = o && (o->flags & OVR_REARM);
+        out->nodes[i].rearm_want_x10 = out->nodes[i].rearm_own ? (uint16_t)o->rearm : c6_store_rearm_x10();
     }
     out->num_standings = s_rt.num_channels;
     for (unsigned i = 0; i < s_rt.num_channels; i++) {

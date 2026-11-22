@@ -97,6 +97,7 @@ class Gate:
         self.passes = self.faults = 0
         self.cal_needed, self.gain, self.heap_min = False, 42, 61000
         self.rearm = REARM_X10                       # the re-arm drop its C5 echoes
+        self.own_rearm = None                        # a D of its own (the C6 keeps it by MAC), None = the fleet's
         self.cal_until = self.down_until = self.booted = 0.0
         self.__dict__.update(health)
 
@@ -466,12 +467,13 @@ class Master(PassageCalib, ConsoleDebug):
                   "cn_x10": n.cn_x10(t) if n.online else CN_UNKNOWN, "states": n.states(t) if n.online else [0] * 8,
                   "last_seen_ms": int(t * 1000) - 300 if n.online else 12000, "rssi": n.rssi,
                   "rx_frames": int(t * 6), "status_rx": int(t * 2), "status_lost": n.status_lost,
-                  "custom": n.gate in self.applied, "mac": n.mac, "levels": n.levels(t) if n.online else [CN_UNKNOWN] * 8,
+                  "custom": n.gate in self.applied, "rearm_want_x10": self.want_rearm(n), "rearm_own": n.own_rearm is not None,
+                  "mac": n.mac, "levels": n.levels(t) if n.online else [CN_UNKNOWN] * 8,
                   **n.health(t)} for n in self.nodes]
         left = self.pairing_left(t)                       # closes it first when its 5 minutes are over
         return {"pairing": self.pairing, "pairing_left_s": left, "num_gates": 1 + len(self.nodes), "has_local": lo.up(t),
                 "local": {"cn_x10": lo.cn_x10(t), "states": lo.states(t), "levels": lo.levels(t),
-                          **lo.health(t)},
+                          **lo.health(t), "rearm_want_x10": self.want_rearm(lo), "rearm_own": lo.own_rearm is not None},
                 "total_passes": self.total, "volume": self.volume, "rearm_db_x10": self.rearm,
                 "uptime_ms": int(t * 1000),
                 "free_heap": 182000 + random.randint(-2000, 2000), "heap_total": 330000, "nodes": nodes,
@@ -526,34 +528,73 @@ class Master(PassageCalib, ConsoleDebug):
         self.volume = b.get("volume", 60)
         return {"ok": True}
 
+    def want_rearm(self, g):
+        """The D a gate should run: its own, else the fleet's (rearm_want_x10 in c6_web.c)."""
+        return g.own_rearm if g.own_rearm is not None else self.rearm
+
     def set_rearm(self, b, t):
-        """post_rearm() / c6_hub_set_rearm(): saved, sent to gate 0 and every online node."""
-        x10 = b.get("rearm_db_x10", -1)
-        if not isinstance(x10, int) or not 0 <= x10 <= 400:
+        """post_rearm() / c6_hub_set_rearm(_gate)(): without "gate" the fleet's D, every gate's own dropped, sent to gate 0 and every
+        online node; with "gate" that gate's own D alone (-1: the fleet's again), kept by its nodes whether online or not."""
+        x10, gate = b.get("rearm_db_x10"), b.get("gate", -1)
+        if not isinstance(x10, int) or not isinstance(gate, int) or gate >= 16:
             return {"ok": False}
-        self.rearm = x10
-        for g in [self.local] + [n for n in self.nodes if n.online]:
-            g.rearm = x10
+        if gate < 0:
+            if not 0 <= x10 <= 400:
+                return {"ok": False}
+            self.rearm = x10
+            for g in [self.local] + self.nodes:
+                g.own_rearm = None
+            for g in [self.local] + [n for n in self.nodes if n.online]:
+                g.rearm = x10
+            return {"ok": True}
+        gates = [self.local] if gate == 0 else [n for n in self.nodes if n.gate == gate]
+        if not -1 <= x10 <= 400 or not gates:
+            return {"ok": False}
+        for g in gates:
+            g.own_rearm = None if x10 < 0 else x10
+            if g is self.local or g.online:
+                g.rearm = self.want_rearm(g)
         return {"ok": True}
 
+    def targets(self, gate, t):
+        """run_on_gates() in c6_web.c: {gate: [Gates behind it]} for one gate or, -1, every reachable one; None for a gate nobody paired."""
+        by = {}
+        if gate in (0, -1) and self.local.up(t):
+            by[0] = [self.local]
+        for n in self.nodes:
+            if gate in (-1, n.gate) and n.online:
+                by.setdefault(n.gate, []).append(n)
+        if gate >= 0 and gate not in by and gate != 0 and not any(n.gate == gate for n in self.nodes):
+            return None
+        if gate == 0 and 0 not in by:
+            by[0] = []                                    # gate 0 asked by name, its C5 absent: it lands in "failed"
+        if gate > 0 and gate not in by:
+            by[gate] = []                                 # a node of that gate, offline
+        return by
+
     def gain(self, b, t):
-        """post_gain() in c6_web.c: None for its 400s."""
-        gate, gain, force = b.get("gate", -1), b.get("gain", -1), b.get("force", 0)
-        if not (0 <= gate < 16 and GAIN_MIN <= gain <= GAIN_MAX):
+        """post_gain() in c6_web.c: None for its 400s. gate -1: every reachable gate, the guards on all of them."""
+        gate, gain, force = b.get("gate", -2), b.get("gain", -1), b.get("force", 0)
+        if not (-1 <= gate < 16 and GAIN_MIN <= gain <= GAIN_MAX):
             return None
-        mine = [n for n in self.nodes if n.gate == gate]
-        if gate != 0 and not mine:
+        by = self.targets(gate, t)
+        if by is None:
             return None
-        reach = [self.local] if gate == 0 and self.local.up(t) else [n for n in mine if n.online]
-        cn = max([g.cn_x10(t) for g in reach] or [CN_UNKNOWN])
-        if not force and cn > ACTIVE_X10:
-            return {"ok": False, "vtx": [{"gate": gate, "cn_x10": cn}]}
-        busy = any(g.calibrating(t) for g in reach)
-        sent = bool(reach) and not busy
-        for g in reach if sent else []:
-            g.set_gain(gain, t)
-        return {"ok": True, "sent": [gate] if sent else [], "failed": [] if sent or busy else [gate],
-                "busy": [gate] if busy else []}
+        vtx = [{"gate": g, "cn_x10": max(x.cn_x10(t) for x in gs)} for g, gs in sorted(by.items())
+               if gs and max(x.cn_x10(t) for x in gs) > ACTIVE_X10]
+        if vtx and not force:
+            return {"ok": False, "vtx": vtx}
+        sent, failed, busy = [], [], []
+        for g, gs in sorted(by.items()):
+            if any(x.calibrating(t) for x in gs):
+                busy.append(g)
+            elif gs:
+                for x in gs:
+                    x.set_gain(gain, t)
+                sent.append(g)
+            else:
+                failed.append(g)
+        return {"ok": True, "sent": sent, "failed": failed, "busy": busy}
 
     def command(self, b, t):
         """post_command() in c6_web.c: None for its 400s."""
