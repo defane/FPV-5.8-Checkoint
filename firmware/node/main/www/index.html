@@ -59,6 +59,7 @@
   #dbg_log { height: 260px; overflow: auto; margin: 0; padding: 8px; background: #0f1216; border-radius: 6px;
              font: .75rem/1.35 ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; word-break: break-all; }
   details > summary { cursor: pointer; }
+  a.maint-link { color: #93c5fd; font-size: .85rem; text-decoration: none; border: 1px solid #2a313a; border-radius: 999px; padding: 4px 10px; }
   .admin-only { display: none; }
   body.is-admin .admin-only { display: revert; }
   .field { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 8px 0; font-size: .92rem; }
@@ -81,7 +82,7 @@
 <body>
 <header style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
   <span>Checkpoint C3 <span id="link" class="pill">…</span></span>
-  <span class="bar"><button id="role" class="switch" role="switch" aria-checked="false"><i></i><span>admin</span></button></span>
+  <span class="bar"><a id="maint_link" class="admin-only maint-link" href="#maintenance">Maintenance</a><button id="role" class="switch" role="switch" aria-checked="false"><i></i><span>admin</span></button></span>
 </header>
 <main>
   <dialog id="login">
@@ -94,6 +95,7 @@
     </form>
   </dialog>
 
+  <div id="home">
   <h2>Live</h2>
   <div class="card row">
     <div class="stat"><b><span id="s_det" class="pill">—</span></b><span>detector</span></div>
@@ -119,12 +121,7 @@
     </div>
     <div class="muted" style="margin-top:10px;font-size:.85rem;word-break:break-all">firmware <span id="h_fw" style="color:#e7ebf0">—</span></div>
     <div class="admin-only">
-      <div class="bar">
-        <button data-cmd="cal_full">Full calibration (B)</button>
-        <button data-cmd="cal_quick">Quick calibration (F)</button>
-        <button data-cmd="reboot" class="danger">Reboot C5</button>
-      </div>
-      <span id="cmd_msg" class="muted"></span>
+      <div class="muted" style="margin-top:8px;font-size:.8rem">Radio calibration, reboot and the debug console are on the <a href="#maintenance" class="maint-link-inline" style="color:#93c5fd">Maintenance</a> page.</div>
     </div>
   </div>
 
@@ -158,8 +155,27 @@
   </div>
   </div>
 
-  <div class="admin-only">
-  <h2>Debug (admin)</h2>
+  <h2>Recent passes</h2>
+  <ul id="events" class="card"></ul>
+  </div>
+
+  <div id="maint" hidden>
+  <p><a href="#home" class="maint-link" id="maint_back">← Back</a></p>
+  <h2>Maintenance (admin)</h2>
+  <p class="muted" style="font-size:.85rem;margin-top:0">For a bench or a fault, not for a race: the radio calibration blinds the gate, and the debug console stays off until it is switched on.</p>
+  <h2>Radio calibration</h2>
+  <div class="card">
+    <div class="muted" style="font-size:.85rem;margin-bottom:10px">The C5 calibrates every oscillator at each boot and the chip recalibrates itself while it runs: use these when the health card says <i>calibration needed</i>. Every VTX must be OFF.</div>
+    <div class="bar">
+      <button data-cmd="cal_full">Full calibration (B)</button>
+      <button data-cmd="cal_quick">Quick calibration (F)</button>
+      <button data-cmd="reboot" class="danger">Reboot C5</button>
+    </div>
+    <span id="cmd_msg" class="muted"></span>
+  </div>
+
+  <div>
+  <h2>Debug</h2>
   <details id="dbg" class="card">
     <summary>C5 console: log and keys</summary>
     <div class="bar">
@@ -193,8 +209,7 @@
   </details>
   </div>
 
-  <h2>Recent passes</h2>
-  <ul id="events" class="card"></ul>
+  </div>
 </main>
 <footer class="muted" style="padding:0 16px 20px;text-align:center;font-size:.75rem">FPV 5.8 Checkpoint · receive engine from widscan58 (CapnBry) and esp-sdr (ESPARGOS), forked from C5VRX by Twotoz and the C5VRX contributors · GPL-3.0-only, without any warranty · license and source: <a class="muted" href="https://github.com/defane/FPV-5.8-Checkoint">github.com/defane/FPV-5.8-Checkoint</a></footer>
 <script src="/auth.js"></script>
@@ -246,11 +261,20 @@ document.addEventListener("keydown", e => {
   if (!a || a === document.body || a === b || infoNote(b).contains(a)) b.focus();
 });
 
+// The maintenance view is the same document (#maintenance), so the admin session in memory carries over.
+function route() {
+  const m = location.hash === "#maintenance" && admin;
+  $("home").hidden = m; $("maint").hidden = !m;
+  if (m) window.scrollTo(0, 0);
+}
+window.addEventListener("hashchange", route);
 function setAdmin(on) {             // back to spectator forgets the key and unsaved detector edits
   admin = on;
   if (!on) { AdminAuth.logout(); dirty = false; infoClose(); dbgText = ""; dbgNext = 0; $("dbg").open = false; dbgShow(false); dbgRender(); }
   document.body.classList.toggle("is-admin", on);
   $("role").setAttribute("aria-checked", on);
+  if (!on && location.hash === "#maintenance") location.hash = "";
+  route();
 }
 
 $("role").addEventListener("click", () => {
@@ -441,7 +465,7 @@ function dbgRender() {
   if (stick) box.scrollTop = box.scrollHeight;
 }
 async function dbgPoll() {
-  if (!admin || !$("dbg").open || !dbgOn || dbgPaused || dbgBusy) return;
+  if (!admin || $("maint").hidden || !$("dbg").open || !dbgOn || dbgPaused || dbgBusy) return;
   dbgBusy = true;
   try {
     const r = await AdminAuth.request("POST", "/api/log", JSON.stringify({ since: dbgNext }));

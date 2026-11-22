@@ -180,7 +180,13 @@ page for a gate with no master.
   (fleet)" above). The degraded C3's page has its *C5 health* card, and its *Live* card
   sums it up in a *detector* badge: `no C5 yet`, `C5 silent`, `calibrating`, `calibration
   needed` or `OK`.
-- **Commands** (admin): *Cal B* = the console's `B` (recalibrate every LO, then verify
+- **Maintenance page** (admin, a link in the header of the C6 and of the degraded C3 page; the same
+  document at `#maintenance`, so the login carries over): the radio calibrations and reboot, and the
+  debug console below. They are kept off the everyday page: the C5 calibrates its oscillators at every
+  boot and the chip recalibrates itself while it runs, so *Cal B/F* are for a gate that says
+  *calibration needed*, and the debug console is for a bench. The C6 lists each gate (0, then the
+  nodes) with its calibration badge, *Cal B*, *Cal F*, *Reboot*, and *Calibrate all gates (B)*.
+- **Commands** (admin, from the Maintenance page): *Cal B* = the console's `B` (recalibrate every LO, then verify
   its image rejection, up to 3 tries per LO), *Cal F* = `F` (recalibrate every LO),
   *Reboot*; on the C6 also *Calibrate all gates (B)*. They post the same `sdr_rx`
   recalibration request as the console (`sdr_rx_request_recal()`, applied by the scan
@@ -211,7 +217,7 @@ page for a gate with no master.
 
 For development: the C5's console text and its keys, over the web of the board its UART is wired to (a degraded C3, or the C6 for its own gate 0), without a USB cable.
 **Off by default, at every boot**: an admin switches it on with the "debug mode" switch of the
-**Debug** panel (`POST /api/debug` `{"on": 0|1}`, a `DEBUG` frame to the C5; the C3 repeats it with
+**Debug** panel of the *Maintenance* page (`POST /api/debug` `{"on": 0|1}`, a `DEBUG` frame to the C5; the C3 repeats it with
 every `STATS` while on, and the C5 switches off on a `HELLO`, i.e. when the C3 reboots). While it is
 off the C5 mirrors nothing (no `LOG` traffic), the C3 keeps no text and `/api/key` refuses.
 On: the C5 mirrors what its console prints (`cp_printf`: `PASS`, `CHECKPOINT ...`, `K` menus, `T`,
@@ -226,8 +232,7 @@ blind the gate (`F`, `B`, `K` + `s z x n p S g G i`) are refused first with `{"b
 Not mirrored: the `K S` scan-recording rows and what the engine (`sdr_rx`) and the USB heartbeat
 print. Logging out of the page leaves debug mode on until the board reboots.
 
-**The C6 master's page** has the same panel (advanced view, admin, *Debug* under "Master & local
-gate (0)"), with the same three routes (`/api/debug`, `/api/log`, `/api/key`) and a **gate**
+**The C6 master's page** has the same panel (admin, *Maintenance* page), with the same three routes (`/api/debug`, `/api/log`, `/api/key`) and a **gate**
 selector (gate 0 and each online remote gate); every body carries `"gate"` (default 0). **One gate
 is in debug mode at a time**: switching one on switches the previous one off, and the page's choice
 of gate moves the debug mode along if it was on. A blind key's VTX guard uses that gate's C/N: gate

@@ -57,6 +57,7 @@
   #dbg_log { height: 260px; overflow: auto; margin: 0; padding: 8px; background: #0f1216; border-radius: 6px;
              font: .75rem/1.35 ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; word-break: break-all; }
   details > summary { cursor: pointer; }
+  a.maint-link { color: #93c5fd; font-size: .85rem; text-decoration: none; border: 1px solid #2a313a; border-radius: 999px; padding: 4px 10px; }
   select { background: #0f1216; color: #e7ebf0; border: 1px solid #2a313a; border-radius: 6px; padding: 5px; }
   .tip { position: relative; display: inline-block; cursor: pointer; }
   .bubble { display: none; position: absolute; z-index: 1; left: 0; bottom: calc(100% + 6px); padding: 4px 8px;
@@ -88,6 +89,7 @@
   <span>Checkpoint C6 — race</span>
   <span class="bar"><span id="conn" class="pill bad" hidden>connection lost</span>
   <button id="mode" class="switch" role="switch" aria-checked="false"><i></i><span>advanced</span></button>
+  <a id="maint_link" class="admin-only maint-link" href="#maintenance">Maintenance</a>
   <button id="role" class="switch" role="switch" aria-checked="false"><i></i><span>admin</span></button></span>
 </header>
 <main>
@@ -101,6 +103,7 @@
     </form>
   </dialog>
 
+  <div id="home">
   <h2>Standings</h2>
   <div class="card scroll">
     <table class="nowrap">
@@ -172,13 +175,28 @@
     <div class="stat"><b id="m_uptime">—</b><span>uptime</span></div>
     <div class="stat"><b id="m_heap">—</b><span>free RAM</span></div>
     <div id="l_info" class="muted" style="flex-basis:100%; font-size:.8rem">local C5 not seen</div>
-    <div id="local_cmds" class="bar admin-only" style="flex-basis:100%">Gate 0 C5:
-      <button class="ghost sm cmd" data-cmd="cal_full" data-gate="0" title="Full calibration (console B), VTXs off">Cal B</button>
-      <button class="ghost sm cmd" data-cmd="cal_quick" data-gate="0" title="Quick calibration of the current filter (console F)">Cal F</button>
-      <button class="ghost sm cmd" data-cmd="reboot" data-gate="0">Reboot</button></div>
   </div>
-  <h2 class="adv admin-only">Debug (admin)</h2>
-  <details id="dbg" class="card adv admin-only">
+  <p class="muted admin-only" style="font-size:.85rem">Radio calibration, reboots and the debug console are on the <a href="#maintenance" class="maint-link">Maintenance</a> page.</p>
+  </div>
+
+  <div id="maint" hidden>
+  <p><a href="#home" class="maint-link">← Back</a></p>
+  <h2>Maintenance (admin)</h2>
+  <p class="muted" style="font-size:.85rem;margin-top:0">For a bench or a fault, not for a race: a radio calibration blinds the gate, and the debug console stays off until it is switched on.</p>
+  <h2>Radio calibration and reboot</h2>
+  <div class="card scroll">
+    <div class="muted" style="font-size:.85rem;margin-bottom:10px">Every C5 calibrates its oscillators at each boot and the chip recalibrates itself while it runs: use these when a gate says <i>cal needed</i>. Every VTX must be OFF. Gates are blind for a few seconds.</div>
+    <div class="bar" style="margin-bottom:10px">
+      <button id="cal_all" class="warn" title="Full calibration (console B) on every reachable gate">Calibrate all gates (B)</button>
+      <span id="cmd_msg" class="muted"></span></div>
+    <table>
+      <thead><tr><th>Gate</th><th>C5</th><th></th></tr></thead>
+      <tbody id="maint_gates"><tr><td colspan="3" class="muted">no gate yet</td></tr></tbody>
+    </table>
+  </div>
+
+  <h2>Debug</h2>
+  <details id="dbg" class="card">
     <summary>Gate C5 console: log and keys</summary>
     <div class="bar">
       <label class="muted" style="font-size:.8rem">Gate <select id="dbg_gate"><option value="0">0 · master</option></select></label>
@@ -211,6 +229,7 @@
     <div class="muted" style="margin-top:8px;font-size:.8rem">Keys are typed on the C5's console in order. Calibrations, benches, gain and antenna blind the gate: they ask first. Benches' scan recording (K S) and the engine's own prints stay on USB. A remote gate's log comes by ESP-NOW about 50 bytes at a time: a busy trace (K l) skips lines.</div>
   </details>
 
+  </div>
 </main>
 <footer class="muted" style="padding:0 16px 20px;text-align:center;font-size:.75rem">FPV 5.8 Checkpoint · receive engine from widscan58 (CapnBry) and esp-sdr (ESPARGOS), forked from C5VRX by Twotoz and the C5VRX contributors · GPL-3.0-only, without any warranty · license and source: <a class="muted" href="https://github.com/defane/FPV-5.8-Checkoint">github.com/defane/FPV-5.8-Checkoint</a></footer>
 <script src="/auth.js"></script>
@@ -290,11 +309,20 @@ async function post(url, obj) {     // signed (auth.js): the password never goes
   return r;
 }
 
+// The maintenance view is the same document (#maintenance), so the admin session in memory carries over.
+function route() {
+  const m = location.hash === "#maintenance" && admin;
+  $("home").hidden = m; $("maint").hidden = !m;
+  if (m) window.scrollTo(0, 0);
+}
+window.addEventListener("hashchange", route);
 function setAdmin(on) {             // back to spectator forgets the key
   admin = on; editing = false;
   if (!on) { AdminAuth.logout(); rearmDirty = false; infoClose(); dbgText = ""; dbgNext = 0; dbgGate = 0; $("dbg").open = false; dbgShow(false); dbgRender(); }
   document.body.classList.toggle("is-admin", on);
   $("role").setAttribute("aria-checked", on);
+  if (!on && location.hash === "#maintenance") location.hash = "";
+  route();
 }
 
 $("role").addEventListener("click", () => {
@@ -472,7 +500,7 @@ async function poll() {
     const L = s.local || {};
     $("l_health").innerHTML = s.has_local ? calBadge(L) + faultsTxt(L) + rearmPill(L.rearm_db_x10, s.rearm_db_x10) : "—";
     $("l_info").textContent = s.has_local ? healthInfo(L) : "local C5 not linked (no report for 3 s)";
-    document.querySelectorAll('#local_cmds button[data-cmd^="cal_"]').forEach(b => { b.disabled = !!(s.has_local && L.calibrating); });
+    renderMaintGates(s);
     $("l_passes").textContent = s.total_passes;
     if (s.volume != null) { $("vol_v").textContent = s.volume; if (document.activeElement !== $("vol")) $("vol").value = s.volume; }
     if (s.rearm_db_x10 != null && !rearmDirty && document.activeElement !== $("rearm")) $("rearm").value = s.rearm_db_x10 / 10;
@@ -508,7 +536,7 @@ async function poll() {
           <td>${rssiTxt(n.rssi)}</td>
           <td title="${lossTitle(n)}">${lossTxt(n)}</td>
           <td>${seen(n)}</td>
-          <td class="admin-only acts"><button class="save">Save</button> <button class="ghost rm">✕</button> ${cmdBtns(n.online && n.calibrating)}</td>
+          <td class="admin-only acts"><button class="save">Save</button> <button class="ghost rm">✕</button></td>
         </tr>` : `
         <tr><td>${n.gate}</td><td class="muted">${n.mac.slice(9)}</td>
           <td class="${n.online?'on':'off'}">${n.online?'online':'offline'}</td>
@@ -555,9 +583,23 @@ async function command(gate, cmd) {
   if (bad) alert(msg);
 }
 $("cal_all").addEventListener("click", async () => { await command(-1, "cal_full"); poll(); });
-$("local_cmds").addEventListener("click", async e => {
-  const b = e.target.closest("button.cmd"); if (!b || !admin) return;
-  await command(+b.dataset.gate, b.dataset.cmd); poll();
+// Maintenance: a row per gate that has a C5 (gate 0, then each node), its calibrate/reboot buttons.
+let maintSig = "";
+function renderMaintGates(s) {
+  const L = s.local || {};
+  const rows = [...(s.has_local ? [{ gate: 0, name: "0 · master", h: L, busy: L.calibrating }] : []),
+    ...[...(s.nodes || [])].sort((a, b) => a.gate - b.gate)
+      .map(n => ({ gate: n.gate, name: `${n.gate} · ${n.mac.slice(9)}`, h: n, busy: n.online && n.calibrating, off: !n.online }))];
+  const html = rows.length ? rows.map(r => `<tr data-gate="${r.gate}"><td>${r.name}</td>` +
+    `<td>${r.off ? '<span class="muted">offline</span>' : r.h.fw ? calBadge(r.h) + faultsTxt(r.h) : '<span class="muted">—</span>'}</td>` +
+    `<td class="acts">${r.off ? "" : cmdBtns(r.busy)}</td></tr>`).join("")
+    : '<tr><td colspan="3" class="muted">no gate yet</td></tr>';
+  if (html !== maintSig) { maintSig = html; $("maint_gates").innerHTML = html; }
+}
+$("maint_gates").addEventListener("click", async e => {
+  const b = e.target.closest("button.cmd"), tr = e.target.closest("tr");
+  if (!b || !tr || !admin) return;
+  await command(+tr.dataset.gate, b.dataset.cmd); poll();
 });
 $("vol").addEventListener("input", () => { $("vol_v").textContent = $("vol").value; });
 // The fleet's re-arm drop: saved by the master and sent to every gate (refused outside 0..40 dB).
@@ -590,9 +632,6 @@ $("nodes").addEventListener("click", async e => {
     try { await post("/api/node_remove", { node_id: id }); }
     catch (_) { $("cmd_msg").textContent = "remove failed: master not answering"; }
     finally { editing = false; }
-    poll();
-  } else if (e.target.classList.contains("cmd")) {   // the saved gate, not the edited input
-    try { await command(+tr.dataset.gate, e.target.dataset.cmd); } finally { editing = false; }
     poll();
   }
 });
@@ -642,7 +681,7 @@ function dbgRender() {
   if (stick) box.scrollTop = box.scrollHeight;
 }
 async function dbgPoll() {
-  if (!admin || document.body.classList.contains("simple") || !$("dbg").open || !dbgOn || dbgPaused || dbgBusy) return;
+  if (!admin || $("maint").hidden || !$("dbg").open || !dbgOn || dbgPaused || dbgBusy) return;
   dbgBusy = true;
   try {
     const gate = dbgGate;

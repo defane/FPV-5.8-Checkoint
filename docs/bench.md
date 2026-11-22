@@ -454,7 +454,7 @@ its LO. So redo on IPEX a `K` `S` recording with passes close to the antenna and
 decide from them whether the IPEX lead needs a fixed attenuator (a PI pad, see
 [For later: hardware attenuation](#for-later-hardware-attenuation-for-a-more-precise-pass-point)).
 
-**B10, link.** From the C3's web page: *Cal F*, *Cal B*, *Reboot*. Then the download key
+**B10, link.** From the C3's *Maintenance* page (admin, the link in its header): *Cal F*, *Cal B*, *Reboot*. Then the download key
 (`` ` ``) while the detector scans, 5 times: `python tools/flash.py PORT` sends it through
 `tools/enter_download.py`, then flashes.
 
@@ -462,7 +462,7 @@ Debug mode (off at boot): on the C3's page, unlock as admin, open *Debug*, switc
 the `PASS` and `CHECKPOINT` lines appear within about 1 s; `T` prints the status, `K` the menu,
 `Ka` lowers the smoothing (the log shows the new `set alpha=`); `F` asks before it blinds the gate.
 Switched off (or after a C3 reboot): no log, and a key is refused. Same on the C6's page (advanced
-view, admin, *Debug* under "Master & local gate (0)"): gate 0 first, then pick a remote gate (it must be
+*Maintenance* page, admin, *Debug*): gate 0 first, then pick a remote gate (it must be
 online) in the *Gate* selector: the log and the keys are that gate's C5's, one gate at a time (choosing
 another moves the debug mode). Pass: a pass of that gate prints within about 1 s, `T` answers within
 about 1 s (ESP-NOW round trip), `F` asks first. Close the panel or leave the page: 10 s later the node's
