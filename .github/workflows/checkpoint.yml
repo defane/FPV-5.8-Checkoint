@@ -114,6 +114,25 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Set up the compiler cache
+        shell: bash
+        run: |
+          # ccache keeps the compiled objects between runs: only what a commit changed is compiled again.
+          # compiler_check=content because ESP-IDF rewrites build/specs/picolibc.specs at every configure and
+          # ccache would hash its date (every file would miss); the build directory is the same on every run.
+          command -v ccache >/dev/null || { apt-get update -qq && apt-get install -y -qq ccache; }
+          {
+            echo "IDF_CCACHE_ENABLE=1"
+            echo "CCACHE_DIR=$GITHUB_WORKSPACE/.ccache"
+            echo "CCACHE_COMPILERCHECK=content"
+            echo "CCACHE_MAXSIZE=400M"
+          } >> "$GITHUB_ENV"
+      - name: Restore the compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-${{ github.job }}-${{ github.event.pull_request.head.sha || github.sha }}
+          restore-keys: ccache-${{ github.job }}-
       - name: Build opt-in XIAO PSRAM image
         shell: bash
         run: |
@@ -121,6 +140,10 @@ jobs:
           cd firmware/detector
           idf.py -B build-psram -DSDKCONFIG=sdkconfig.psram \
             "-DSDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.psram.defaults" build
+      - name: Compiler cache statistics
+        if: always()
+        shell: bash
+        run: ccache -s || true
   build:
     runs-on: ubuntu-latest
     container: espressif/idf:v6.0.2
@@ -141,6 +164,25 @@ jobs:
           else
             echo "version=${V%.*}.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
           fi
+      - name: Set up the compiler cache
+        shell: bash
+        run: |
+          # ccache keeps the compiled objects between runs: only what a commit changed is compiled again.
+          # compiler_check=content because ESP-IDF rewrites build/specs/picolibc.specs at every configure and
+          # ccache would hash its date (every file would miss); the build directory is the same on every run.
+          command -v ccache >/dev/null || { apt-get update -qq && apt-get install -y -qq ccache; }
+          {
+            echo "IDF_CCACHE_ENABLE=1"
+            echo "CCACHE_DIR=$GITHUB_WORKSPACE/.ccache"
+            echo "CCACHE_COMPILERCHECK=content"
+            echo "CCACHE_MAXSIZE=400M"
+          } >> "$GITHUB_ENV"
+      - name: Restore the compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-${{ github.job }}-${{ github.event.pull_request.head.sha || github.sha }}
+          restore-keys: ccache-${{ github.job }}-
       - name: Build Checkpoint C5 detector
         shell: bash
         run: |
@@ -160,6 +202,10 @@ jobs:
           . "$IDF_PATH/export.sh"
           cd firmware/master
           idf.py build
+      - name: Compiler cache statistics
+        if: always()
+        shell: bash
+        run: ccache -s || true
       - name: Package firmware for web flashing
         shell: bash
         run: |
