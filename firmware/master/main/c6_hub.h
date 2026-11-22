@@ -89,7 +89,7 @@ bool c6_hub_send_gain(uint8_t gate_index, uint8_t gain);
 /* Passage calibration of a gate's C5 (link_proto CALIB_*, docs/detector.md): start a step (0 ends the
  * session, 1 passage, 2 away), read its latest state, apply the proposed thresholds. Gate 0 is the
  * local C5. False when the gate's C5 cannot be reached or there is nothing to apply. */
-bool c6_hub_calib_start(uint8_t gate_index, uint8_t step);
+bool c6_hub_calib_start(uint8_t gate_index, uint8_t step, uint8_t channel);   /* channel: 0..7 or LP_CALIB_ANY (step 1) */
 bool c6_hub_calib_get(uint8_t gate_index, lp_calib_t *out);
 bool c6_hub_calib_apply(uint8_t gate_index);
 /* A remote gate back on the fleet's thresholds: its calibration override is dropped and the fleet's

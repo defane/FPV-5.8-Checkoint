@@ -130,14 +130,14 @@ bool c3_link_calib_get(lp_calib_t *out) {
     return at && out->phase != LP_CALIB_NONE && now_ms() - at <= 4000u;
 }
 
-void c3_link_calib_start(uint8_t step) {
+void c3_link_calib_start(uint8_t step, uint8_t channel) {
     if (step == 0) {
         portENTER_CRITICAL(&s_calib_mux);
         s_calib_ms = 0;                                      /* ended: the page stops showing it */
         portEXIT_CRITICAL(&s_calib_mux);
     }
     uint8_t b[LP_MAX_FRAME];
-    enqueue(b, lp_encode_calib_start(b, sizeof b, step));   /* 0 (nothing sent) over step 2 */
+    enqueue(b, lp_encode_calib_start(b, sizeof b, step, channel));   /* 0 (nothing sent) over step 2 or a bad channel */
 }
 
 void c3_link_send_gain(uint8_t gain) {

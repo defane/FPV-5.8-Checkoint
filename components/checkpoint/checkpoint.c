@@ -344,9 +344,9 @@ void checkpoint_link_get_stats(lp_stats_t *out)
  * runs: "command=cal_full refused=busy"); the gate is blind until it and the relearn end. */
 void checkpoint_link_command(uint8_t cmd) { cp_command(cmd, "link"); }
 
-void checkpoint_link_calib_start(uint8_t step)
+void checkpoint_link_calib_start(uint8_t step, uint8_t channel)
 {
-    if (s_cp) cp_calib_request(s_cp, step);
+    if (s_cp) cp_calib_request(s_cp, step, channel);
 }
 
 bool checkpoint_link_get_calib(lp_calib_t *out)

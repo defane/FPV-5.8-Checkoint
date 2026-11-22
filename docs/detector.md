@@ -378,6 +378,12 @@ VTX guard):
 1. **In the passage:** hold the drone where it flies through, 5 s (`LP_CALIB_SECS`).
 2. **2 m away** along the track, 5 s: the limit of what must not count.
 
+**The channel is chosen at step 1:** *Any* (the default) measures the channel that stands highest in the passage,
+so the drone needs no setting; a channel R1 to R8 measures that one (`CALIB_START`'s channel, `LP_CALIB_ANY` for any),
+useful when two VTXs are on, or when a stronger signal than the drone's stands in the passage. If another channel
+then stands 6 dB higher than the one asked, the page warns that the drone may be elsewhere. Step 2 reads the
+channel step 1 settled on.
+
 The scan task samples every channel's smoothed rise (`sd_rise_db`, the level the thresholds compare)
 once per rotation into a histogram (2 KB on the heap, freed after each step: `cp_calib.c`, host-tested
 statistics and solver in `components/pass_detector/pass_calib.c`). The drone is the channel that stands

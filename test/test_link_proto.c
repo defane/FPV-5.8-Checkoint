@@ -375,14 +375,27 @@ int main(void) {
     }
 
     {   /* CALIB_START / CALIB_STATE: the passage calibration */
-        size_t n = lp_encode_calib_start(buf, sizeof buf, 2);
+        size_t n = lp_encode_calib_start(buf, sizeof buf, 1, 4);
         int g = run(buf, n, got, 4);
-        CHECK(g == 1 && got[0].type == LP_MSG_CALIB_START && got[0].calib_step == 2, "calib start roundtrip");
-        CHECK(lp_encode_calib_start(buf, sizeof buf, 3) == 0, "calib step 3 refused");
-        uint8_t f[7] = { LP_SOF, LP_VERSION, LP_MSG_CALIB_START, 1, 9 };
-        uint16_t crc = lp_crc16(&f[1], 4);
-        f[5] = (uint8_t)crc; f[6] = (uint8_t)(crc >> 8);
+        CHECK(g == 1 && got[0].type == LP_MSG_CALIB_START && got[0].calib_req.step == 1 && got[0].calib_req.channel == 4,
+              "calib start roundtrip with a channel");
+        n = lp_encode_calib_start(buf, sizeof buf, 1, LP_CALIB_ANY);
+        CHECK(run(buf, n, got, 4) == 1 && got[0].calib_req.channel == LP_CALIB_ANY, "any channel roundtrips");
+        CHECK(lp_encode_calib_start(buf, sizeof buf, 3, 0) == 0, "calib step 3 refused");
+        CHECK(lp_encode_calib_start(buf, sizeof buf, 1, 8) == 0 && lp_encode_calib_start(buf, sizeof buf, 1, 254) == 0,
+              "a channel past R8 other than 'any' refused");
+        uint8_t f[8] = { LP_SOF, LP_VERSION, LP_MSG_CALIB_START, 2, 9, 0 };
+        uint16_t crc = lp_crc16(&f[1], 5);
+        f[6] = (uint8_t)crc; f[7] = (uint8_t)(crc >> 8);
         CHECK(run(f, sizeof f, got, 4) == 0, "calib step out of range dropped (valid CRC)");
+        uint8_t f2[8] = { LP_SOF, LP_VERSION, LP_MSG_CALIB_START, 2, 1, 9 };
+        crc = lp_crc16(&f2[1], 5);
+        f2[6] = (uint8_t)crc; f2[7] = (uint8_t)(crc >> 8);
+        CHECK(run(f2, sizeof f2, got, 4) == 0, "calib channel out of range dropped (valid CRC)");
+        uint8_t f3[7] = { LP_SOF, LP_VERSION, LP_MSG_CALIB_START, 1, 1 };
+        crc = lp_crc16(&f3[1], 4);
+        f3[5] = (uint8_t)crc; f3[6] = (uint8_t)(crc >> 8);
+        CHECK(run(f3, sizeof f3, got, 4) == 0, "the one-byte calib start of an older build dropped");
 
         lp_calib_t c = { .phase = LP_CALIB_DONE, .secs_left = 0, .flags = 0x0006, .channel = 5,
                          .gate = { 30, 40, 50, 52, 60 }, .gate_sat_pct = 7, .away = { -2, 10, 20, 24, 30 },

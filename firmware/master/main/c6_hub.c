@@ -609,17 +609,17 @@ static unsigned gate_macs(uint8_t gate, uint8_t macs[][6]) {
     return n;
 }
 
-bool c6_hub_calib_start(uint8_t gate_index, uint8_t step) {
+bool c6_hub_calib_start(uint8_t gate_index, uint8_t step, uint8_t channel) {
     if (step > 2u) return false;
     if (gate_index == 0u) {
         if (!c6_store_has_local()) return false;
-        c6_link_calib_start(step);
+        c6_link_calib_start(step, channel);
         return true;
     }
     uint8_t macs[C6_MAX_NODES][6];
     const unsigned n = gate_macs(gate_index, macs);
     uint8_t buf[FP_MAX_FRAME];
-    const size_t m = fp_encode_calib_start(buf, sizeof buf, step);
+    const size_t m = fp_encode_calib_start(buf, sizeof buf, step, channel);
     bool sent = false;
     for (unsigned i = 0; m && i < n; i++) {
         if (espnow_link_send(macs[i], buf, m) == ESP_OK) sent = true;
@@ -664,7 +664,7 @@ bool c6_hub_calib_apply(uint8_t gate_index) {
         }
     xSemaphoreGive(s_lock);
     for (unsigned i = 0; i < n; i++) send_config(to[i].mac, to[i].gate, to[i].channel);
-    (void)c6_hub_calib_start(gate_index, 0);                         /* the proposal is applied: end the session */
+    (void)c6_hub_calib_start(gate_index, 0, LP_CALIB_ANY);                         /* the proposal is applied: end the session */
     ESP_LOGI(TAG, "gate %u thresholds from its passage calibration: active %d hyst %d drop %d min_peak %d (x10), %u node(s)",
              gate_index, (int)k.active_db_x10, (int)k.hysteresis_db_x10, (int)k.drop_db_x10, (int)k.min_peak_db_x10, n);
     return n > 0;

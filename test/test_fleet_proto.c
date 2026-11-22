@@ -265,9 +265,17 @@ int main(void) {
 
     /* CALIB_START / CALIB_STATE: the passage calibration, relayed. */
     {
-        size_t n = fp_encode_calib_start(buf, sizeof buf, 1);
-        CHECK(fp_decode(buf, n, &m) && m.type == FP_MSG_CALIB_START && m.calib_step == 1, "calib start roundtrip");
-        CHECK(fp_encode_calib_start(buf, sizeof buf, 3) == 0, "calib step 3 refused");
+        size_t n = fp_encode_calib_start(buf, sizeof buf, 1, 6);
+        CHECK(fp_decode(buf, n, &m) && m.type == FP_MSG_CALIB_START && m.calib_req.step == 1 && m.calib_req.channel == 6,
+              "calib start roundtrip with a channel");
+        n = fp_encode_calib_start(buf, sizeof buf, 2, LP_CALIB_ANY);
+        CHECK(fp_decode(buf, n, &m) && m.calib_req.channel == LP_CALIB_ANY, "any channel roundtrips");
+        CHECK(fp_encode_calib_start(buf, sizeof buf, 3, 0) == 0 && fp_encode_calib_start(buf, sizeof buf, 1, 8) == 0,
+              "calib step 3, or a channel past R8, refused");
+        uint8_t cs[7] = { FP_VERSION, FP_MSG_CALIB_START, 1, 9 };
+        uint16_t ccrc = lp_crc16(cs, 4);
+        cs[4] = (uint8_t)ccrc; cs[5] = (uint8_t)(ccrc >> 8);
+        CHECK(!fp_decode(cs, 6, &m), "calib channel out of range rejected (valid CRC)");
         lp_calib_t c = { .phase = LP_CALIB_DONE, .flags = 0x0004, .channel = 2, .gate = { 30, 40, 50, 52, 60 },
                          .gate_sat_pct = 3, .away = { -2, 10, 20, 24, 30 }, .active_db_x10 = 105, .hysteresis_db_x10 = 40,
                          .drop_db_x10 = 30, .min_peak_db_x10 = 125, .gain_steps = 1 };

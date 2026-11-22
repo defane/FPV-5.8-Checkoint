@@ -71,7 +71,7 @@ static void handle_msg(const lp_msg_t *m) {
         checkpoint_link_command(m->command);
         break;
     case LP_MSG_CALIB_START:    /* the bridge's web: a passage-calibration step, or its end */
-        checkpoint_link_calib_start(m->calib_step);
+        checkpoint_link_calib_start(m->calib_req.step, m->calib_req.channel);
         break;
     case LP_MSG_GAIN:           /* the bridge's admin set the RX gain: as K g/G, to that index */
         checkpoint_link_set_gain(m->gain);

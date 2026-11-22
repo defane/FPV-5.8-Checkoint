@@ -222,7 +222,7 @@ static esp_err_t post_command(httpd_req_t *req)
 
 /* Passage calibration of the C5 (admin; docs/detector.md): with a drone's VTX on, in the passage then 2 m away, it
  * measures its channels and proposes thresholds. POST {"action": "state" | "start1" | "start2" | "cancel" |
- * "apply"} answers the session like the C6's /api/calib (c6_web.c post_calib; "gate" is always 0 here). It never
+ * "apply", "channel": 0..7 (start1: the channel to measure; absent or anything else: any, the one standing highest)} answers the session like the C6's /api/calib (c6_web.c post_calib; "gate" is always 0 here). It never
  * blinds the gate, so no VTX guard; a pass rung in step 1 is real. "apply" sets the four thresholds in the stored
  * config (saved, pushed to the C5) and ends the session. */
 static esp_err_t post_calib(httpd_req_t *req)
@@ -238,10 +238,11 @@ static esp_err_t post_calib(httpd_req_t *req)
     lp_calib_t k;
     if (strcmp(action, "start1") == 0 || strcmp(action, "start2") == 0) {
         ok = c3_link_c5_alive();
-        if (ok) c3_link_calib_start(action[5] == '1' ? 1 : 2);
+        const int32_t ch = json_i(buf, "channel", LP_CALIB_ANY);   /* step 1's: R1..R8 as 0..7, else any */
+        if (ok) c3_link_calib_start(action[5] == '1' ? 1 : 2, ch >= 0 && ch < (int32_t)LP_LEVELS ? (uint8_t)ch : LP_CALIB_ANY);
         else msg = "no C5 linked";
     } else if (strcmp(action, "cancel") == 0) {
-        c3_link_calib_start(0);
+        c3_link_calib_start(0, LP_CALIB_ANY);
     } else if (strcmp(action, "apply") == 0) {
         ok = c3_link_calib_get(&k) && k.phase == LP_CALIB_DONE && k.min_peak_db_x10 > 0;
         if (ok) {
@@ -253,7 +254,7 @@ static esp_err_t post_calib(httpd_req_t *req)
             c.min_peak_db_x10 = k.min_peak_db_x10;
             c3_store_set_config(&c, true);
             c3_link_push_config(&c);
-            c3_link_calib_start(0);
+            c3_link_calib_start(0, LP_CALIB_ANY);
             ESP_LOGW(TAG, "thresholds from the passage calibration: active %d hyst %d drop %d min_peak %d (x10)",
                      (int)c.active_db_x10, (int)c.hysteresis_db_x10, (int)c.drop_db_x10, (int)c.min_peak_db_x10);
         } else msg = "nothing to apply";

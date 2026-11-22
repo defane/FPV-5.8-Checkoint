@@ -325,7 +325,7 @@ class PassageCalib:
         left = max(0, int(s["end"] - t + 0.999)) if s["phase"] in (1, 3) else 0
         ph = s["phase"]
         return {"ok": True, "msg": "", "gate": gate, "phase": ph, "secs_left": left, "flags": s["flags"],
-                "channel": (self.c5_of(gate) or self.local).channel if ph >= 2 else 255,
+                "channel": (s.get("want", 255) if s.get("want", 255) < 8 else (self.c5_of(gate) or self.local).channel) if ph >= 2 else 255,
                 "passage": CAL_PASSAGE if ph >= 2 else [0] * 5, "passage_sat": 0,
                 "away": CAL_AWAY if ph == 4 else [0] * 5,
                 "rec": CAL_REC if ph == 4 else {"active": 0, "hysteresis": 0, "drop": 0, "min_peak": 0}, "gain_steps": 0}
@@ -348,6 +348,9 @@ class PassageCalib:
             if s["phase"] in (1, 3) or reach.calibrating(t) or (step == 2 and s["phase"] not in (2, 4)):
                 s["flags"] |= 32                                    # PC_BUSY: refused, the session goes on
             else:
+                if step == 1:
+                    ch = b.get("channel", 255)
+                    s["want"] = ch if isinstance(ch, int) and 0 <= ch < 8 else 255      # LP_CALIB_ANY
                 s.update(phase=step if step == 1 else 3, end=t + CAL_SECS, flags=0)
         elif action == "cancel":
             s.update(phase=0, flags=0)

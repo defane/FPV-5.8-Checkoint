@@ -158,9 +158,10 @@ size_t lp_encode_debug(uint8_t *buf, size_t cap, bool on) {
     return frame(buf, cap, LP_MSG_DEBUG, &pl, 1u);
 }
 
-size_t lp_encode_calib_start(uint8_t *buf, size_t cap, uint8_t step) {
-    if (step > 2u) return 0;
-    return frame(buf, cap, LP_MSG_CALIB_START, &step, 1u);
+size_t lp_encode_calib_start(uint8_t *buf, size_t cap, uint8_t step, uint8_t channel) {
+    if (step > 2u || (channel >= LP_LEVELS && channel != LP_CALIB_ANY)) return 0;
+    const uint8_t pl[2] = { step, channel };
+    return frame(buf, cap, LP_MSG_CALIB_START, pl, sizeof pl);
 }
 
 void lp_calib_pack(uint8_t pl[LP_CALIB_LEN], const lp_calib_t *c) {
@@ -322,9 +323,10 @@ static bool decode_payload(uint8_t type, uint8_t len, const uint8_t *p,
         out->debug = p[0];
         return true;
     case LP_MSG_CALIB_START:
-        if (len != 1u || p[0] > 2u) return false;
+        if (len != 2u || p[0] > 2u || (p[1] >= LP_LEVELS && p[1] != LP_CALIB_ANY)) return false;
         out->type = LP_MSG_CALIB_START;
-        out->calib_step = p[0];
+        out->calib_req.step = p[0];
+        out->calib_req.channel = p[1];
         return true;
     case LP_MSG_CALIB_STATE:
         if (!lp_calib_unpack(p, len, &out->calib)) return false;

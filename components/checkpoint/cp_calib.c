@@ -28,10 +28,11 @@ static void end_session(cp_t *cp)
     publish(cp, &none);
 }
 
-void cp_calib_request(cp_t *cp, uint8_t step)
+void cp_calib_request(cp_t *cp, uint8_t step, uint8_t channel)
 {
     if (step > 2u) return;
     portENTER_CRITICAL(&cp_mux);
+    cp->calib.req_ch = channel < PC_CHANNELS ? channel : LP_CALIB_ANY;
     cp->calib.req = step == 0 ? 3u : step;
     portEXIT_CRITICAL(&cp_mux);
 }
@@ -43,7 +44,7 @@ static bool can_measure(const cp_t *cp, int64_t now_us)
            !cp->bench_running && !cp->bench_req && cp->recal_req < 0 && !cp->gain_dirty && !cp->relearn_pending;
 }
 
-static void start(cp_t *cp, uint8_t step, int64_t now_us)
+static void start(cp_t *cp, uint8_t step, uint8_t channel, int64_t now_us)
 {
     cp_calib_t *c = &cp->calib;
     lp_calib_t st = c->st;
@@ -61,6 +62,7 @@ static void start(cp_t *cp, uint8_t step, int64_t now_us)
         return;
     }
     pc_hist_clear(c->hist);
+    if (step == 1) c->want_ch = channel;
     if (step == 1) memset(&st, 0, sizeof st);
     else { memset(st.away, 0, sizeof st.away); st.active_db_x10 = st.hysteresis_db_x10 = st.drop_db_x10 = st.min_peak_db_x10 = 0; st.gain_steps = 0; }
     if (step == 1) st.channel = 255;
@@ -77,13 +79,14 @@ static void start(cp_t *cp, uint8_t step, int64_t now_us)
 void cp_calib_apply(cp_t *cp, int64_t now_us)
 {
     cp_calib_t *c = &cp->calib;
-    uint8_t req;
+    uint8_t req, ch;
     portENTER_CRITICAL(&cp_mux);
     req = c->req;
+    ch = c->req_ch;
     c->req = 0;
     portEXIT_CRITICAL(&cp_mux);
     if (req == 3u) { end_session(cp); return; }
-    if (req == 1u || req == 2u) { start(cp, req, now_us); return; }
+    if (req == 1u || req == 2u) { start(cp, req, ch, now_us); return; }
     if (c->active && !c->measuring && now_us > c->idle_us) end_session(cp);   /* nobody came back */
 }
 
@@ -98,7 +101,8 @@ static void finish(cp_t *cp)
     lp_calib_t st = c->st;
     pc_stats_t s;
     if (c->measuring == 1) {
-        const unsigned ch = pc_strongest(c->hist);
+        const unsigned top = pc_strongest(c->hist);
+        const unsigned ch = c->want_ch < PC_CHANNELS ? c->want_ch : top;   /* the channel asked, else the one standing highest */
         pc_stats(c->hist, ch, &c->gate);
         st.channel = (uint8_t)ch;
         st.gate[0] = c->gate.p10; st.gate[1] = c->gate.p50; st.gate[2] = c->gate.p90; st.gate[3] = c->gate.p95; st.gate[4] = c->gate.max;
@@ -106,6 +110,10 @@ static void finish(cp_t *cp)
         st.phase = LP_CALIB_MEASURED1;
         st.flags = c->gate.p95 < (int)(2.0f * PC_SEEN_DB) ? PC_NO_DRONE : 0u;
         if (c->gate.sat_pct >= PC_CLIP_PCT) st.flags |= PC_CLIPPING;
+        if (top != ch) {                      /* a channel was asked and another stands 6 dB higher: the drone is elsewhere */
+            pc_stats(c->hist, top, &s);
+            if (s.p95 >= c->gate.p95 + 12) st.flags |= PC_OTHER_CHANNEL;
+        }
     } else {
         pc_stats_t top;
         pc_result_t r;

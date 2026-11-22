@@ -433,7 +433,8 @@ static esp_err_t post_gain(httpd_req_t *req) {
  * channels' smoothed rise and proposes thresholds (link_proto CALIB_*, docs/detector.md). It never
  * blinds the gate and the VTX stays ON, so there is no VTX guard; a pass rung during step 1 is real
  * (sound, a lap): the page says to reset that channel. POST {"gate":0..15,"action":"state" | "start1" |
- * "start2" | "cancel" | "apply" | "reset" (a remote gate back on the fleet's thresholds)} answers the session as {"ok","msg"?,"gate","phase" (0 none, 1 measuring
+ * "start2" | "cancel" | "apply" | "reset" (a remote gate back on the fleet's thresholds), "channel"?: 0..7 for start1, the
+ * channel to measure, else any: the one standing highest} answers the session as {"ok","msg"?,"gate","phase" (0 none, 1 measuring
  * in the passage, 2 measured, 3 measuring away, 4 done),"secs_left","flags" (pass_calib.h PC_*),
  * "channel" (255 before step 1),"passage":[p10,p50,p90,p95,max] and "away":[...] (half dB),"passage_sat"
  * (% of clipped captures),"rec":{"active","hysteresis","drop","min_peak"} (dB x10, phase 4),
@@ -459,9 +460,11 @@ static esp_err_t post_calib(httpd_req_t *req) {
     }
     bool ok = true;
     const char *msg = "";
-    if (strcmp(action, "start1") == 0) ok = c6_hub_calib_start((uint8_t)gate, 1);
-    else if (strcmp(action, "start2") == 0) ok = c6_hub_calib_start((uint8_t)gate, 2);
-    else if (strcmp(action, "cancel") == 0) { c6_hub_calib_start((uint8_t)gate, 0); }
+    const int32_t chv = json_i(buf, "channel", LP_CALIB_ANY);      /* step 1's: R1..R8 as 0..7, else any */
+    const uint8_t ch = chv >= 0 && chv < (int32_t)LP_LEVELS ? (uint8_t)chv : LP_CALIB_ANY;
+    if (strcmp(action, "start1") == 0) ok = c6_hub_calib_start((uint8_t)gate, 1, ch);
+    else if (strcmp(action, "start2") == 0) ok = c6_hub_calib_start((uint8_t)gate, 2, LP_CALIB_ANY);
+    else if (strcmp(action, "cancel") == 0) { c6_hub_calib_start((uint8_t)gate, 0, LP_CALIB_ANY); }
     else if (strcmp(action, "apply") == 0) { ok = c6_hub_calib_apply((uint8_t)gate); if (!ok) msg = "nothing to apply"; }
     else if (strcmp(action, "reset") == 0) { ok = c6_hub_calib_reset((uint8_t)gate); if (!ok) msg = gate == 0 ? "gate 0 keeps its own settings" : "no such gate"; }
     else if (strcmp(action, "state") != 0) {

@@ -161,6 +161,7 @@
       Step 1: hold the drone <b>in the passage</b>, where it flies through, for 5 s. Step 2: hold it <b>2 m away</b> along the track, for 5 s.
       The thresholds proposed put a pass between what it reads at 2 m and in the passage. A pass may ring during step 1 (sound, a lap): reset that channel after.</p>
     <div class="bar">
+      <label class="muted">Channel <select id="cal_ch_sel" title="The drone's channel; Any measures the one that stands highest in the passage"><option value="255">Any (the strongest)</option><option value="0">R1</option><option value="1">R2</option><option value="2">R3</option><option value="3">R4</option><option value="4">R5</option><option value="5">R6</option><option value="6">R7</option><option value="7">R8</option></select></label>
       <button id="cal_s1" class="ghost">1 · Measure in the passage</button>
       <button id="cal_s2" class="ghost" disabled>2 · Measure 2 m away</button>
       <button id="cal_cancel" class="ghost" disabled>Cancel</button>
@@ -728,14 +729,15 @@ const CAL_WARN = [
   [2, "The ADC clips in the passage: lower the gain (the gain control above), then measure again."],
   [4, "In the passage and 2 m away the drone reads almost the same (under 6 dB apart): the thresholds are a compromise. Check the antenna sits near the line, or lower the gain."],
   [8, "Hardly seen at 2 m: raise the gain, or check the drone was on and 2 m from the gate."],
-  [16, "Another channel stood much higher at 2 m: another drone? Measure step 2 again with the same one."],
+  [16, "Another channel stood much higher than the one measured: another drone, or the drone is not on the channel chosen (pick Any). Measure again."],
   [32, "The C5 refused it (learning its rests, a calibration, a bench): try again in a few seconds."],
 ];
 const dbh = x => (x / 2).toFixed(1);
 const CAL_PILL = ' <span class="pill" title="Thresholds from a passage calibration, not the fleet\'s">calibrated</span>';
 async function calCall(action) {
   try {
-    const r = await post("/api/calib", { gate: calGate, action });
+    const channel = action === "start1" ? +$("cal_ch_sel").value : 255;
+    const r = await post("/api/calib", { gate: calGate, action, channel });
     return r.ok ? await r.json() : { error: r.status === 401 ? "admin password needed" : "refused (" + r.status + ")" };
   } catch (e) { return { error: /logged out|not logged in/.test(e.message) ? "logged out" : "master not answering" }; }
 }
@@ -746,6 +748,7 @@ function calRender(k) {
   $("cal_pill").textContent = names[k.phase] + (measuring ? ` ${k.secs_left} s` : "");
   $("cal_pill").className = "pill" + (measuring ? " busy" : k.phase === 4 ? " ok" : "");
   $("cal_s1").disabled = measuring;
+  $("cal_ch_sel").disabled = measuring || k.phase >= 2;   // the channel is settled once step 1 is measured
   $("cal_s2").disabled = measuring || k.phase < 2 || (k.flags & 1) !== 0;
   $("cal_cancel").disabled = k.phase === 0;
   const show = k.phase >= 2;

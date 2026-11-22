@@ -9,7 +9,7 @@ void c6_link_send_command(lp_cmd_t cmd);   /* LP_MSG_COMMAND to the local C5 */
 /* Passage calibration of the local C5 (link_proto CALIB_*): step 0 ends the session, 1 passage, 2 away.
  * get: the C5's latest state of it, false without a session. apply: the C5's proposed thresholds as
  * a CONFIG_SET over its echoed config, then the session ends; false without a finished proposal. */
-void c6_link_calib_start(uint8_t step);
+void c6_link_calib_start(uint8_t step, uint8_t channel);   /* channel: 0..7 or LP_CALIB_ANY (step 1) */
 bool c6_link_calib_get(lp_calib_t *out);
 bool c6_link_calib_apply(void);
 void c6_link_send_gain(uint8_t gain);      /* LP_MSG_GAIN to the local C5: LP_GAIN_MIN..LP_GAIN_MAX, it relearns its rests */

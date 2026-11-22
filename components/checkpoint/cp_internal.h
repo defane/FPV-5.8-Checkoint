@@ -32,6 +32,8 @@
 /* The passage calibration's session (cp_calib.c): posted by the link, run by the scan task. */
 typedef struct {
     volatile uint8_t req;        /* posted under cp_mux: 1 step 1, 2 step 2, 3 end the session; 0 none */
+    volatile uint8_t req_ch;     /* the channel posted with step 1: 0..7, or LP_CALIB_ANY */
+    uint8_t want_ch;             /* the session's: 0..7 measured as asked, LP_CALIB_ANY the one standing highest */
     lp_calib_t st;               /* what the link reports, under cp_mux */
     bool active;                 /* a session exists */
     uint8_t measuring;           /* 1 or 2 while a measurement runs, else 0 */
@@ -116,7 +118,7 @@ unsigned cp_feed_hop(scan_detector_t *sd, const sdr_hop_t *h, pd_event_t ev[SDR_
 
 /* cp_calib.c: the passage calibration (docs/detector.md). The link posts, the scan task runs it: it
  * samples each channel's smoothed rise once per rotation for LP_CALIB_SECS s, never blinds the gate. */
-void cp_calib_request(cp_t *cp, uint8_t step);              /* [any] 0 ends the session, 1 passage, 2 away */
+void cp_calib_request(cp_t *cp, uint8_t step, uint8_t channel);   /* [any] 0 ends the session, 1 passage, 2 away; channel: step 1's */
 void cp_calib_apply(cp_t *cp, int64_t now_us);              /* [scan] between two hops: take the request, time out */
 void cp_calib_capture(cp_t *cp, bool saturated);            /* [scan] one capture of a measurement */
 void cp_calib_rotation(cp_t *cp, int64_t now_us);           /* [scan] each rotation: sample, end the window */

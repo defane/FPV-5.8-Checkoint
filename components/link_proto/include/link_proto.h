@@ -39,7 +39,7 @@ typedef enum {
     LP_MSG_DEBUG = 11,       /* bridge -> C5: debug mode on/off (off by default: no LOG, KEY ignored) */
     LP_MSG_KEY = 10,         /* bridge -> C5: console keystrokes ("Ka", "T", "F" ...), debug mode */
     LP_MSG_GAIN = 12,        /* bridge -> C5: force this RX gain index (console K g/G, saved, rests relearnt) */
-    LP_MSG_CALIB_START = 13, /* bridge -> C5: a passage-calibration step (1 passage, 2 away) or 0 to end it */
+    LP_MSG_CALIB_START = 13, /* bridge -> C5: a passage-calibration step (1 passage, 2 away) or 0 to end it, and the channel to measure */
     LP_MSG_CALIB_STATE = 14, /* C5 -> bridge: the calibration session, every STATS period while one exists */
 } lp_type_t;
 
@@ -50,6 +50,7 @@ typedef enum { LP_ROLE_C5 = 1, LP_ROLE_C3 = 2 } lp_role_t;
  * It does not blind the gate, so the VTX stays ON. A session starts with CALIB_START step 1, goes on
  * with step 2 (and may redo either), and ends on step 0, on the bridge applying the proposal or
  * after LP_CALIB_IDLE_S s with nothing asked; CALIB_STATE is sent every STATS period meanwhile. */
+#define LP_CALIB_ANY    255u   /* CALIB_START step 1: any channel, the one that stands highest in the passage */
 #define LP_CALIB_SECS   5u
 #define LP_CALIB_IDLE_S 600u
 typedef enum {
@@ -194,7 +195,7 @@ typedef struct {
         lp_text_t   data;       /* LOG / KEY */
         uint8_t     debug;      /* DEBUG: 0 off, 1 on */
         uint8_t     gain;       /* GAIN: LP_GAIN_MIN..LP_GAIN_MAX */
-        uint8_t     calib_step; /* CALIB_START: 0 end, 1 passage, 2 away */
+        struct { uint8_t step, channel; } calib_req;   /* CALIB_START: step 0 end, 1 passage, 2 away; channel 0..7 or LP_CALIB_ANY (step 1) */
         lp_calib_t  calib;      /* CALIB_STATE */
     };
 } lp_msg_t;
@@ -210,7 +211,7 @@ size_t lp_encode_command(uint8_t *buf, size_t cap, lp_cmd_t cmd);   /* 0 for an 
 /* 0 when len is 0 or over LP_TEXT_MAX / LP_KEY_MAX. */
 size_t lp_encode_log(uint8_t *buf, size_t cap, const char *text, size_t len);
 size_t lp_encode_debug(uint8_t *buf, size_t cap, bool on);
-size_t lp_encode_calib_start(uint8_t *buf, size_t cap, uint8_t step);   /* 0 over 2 */
+size_t lp_encode_calib_start(uint8_t *buf, size_t cap, uint8_t step, uint8_t channel);   /* 0 for a step over 2 or a channel over 7 other than LP_CALIB_ANY */
 size_t lp_encode_calib_state(uint8_t *buf, size_t cap, const lp_calib_t *c);   /* 0 for a phase over DONE */
 size_t lp_encode_gain(uint8_t *buf, size_t cap, uint8_t gain);   /* 0 outside LP_GAIN_MIN..LP_GAIN_MAX */
 size_t lp_encode_key(uint8_t *buf, size_t cap, const char *keys, size_t len);

@@ -168,9 +168,9 @@ void c6_link_send_command(lp_cmd_t cmd) {
     ESP_LOGI(TAG, "local C5 command %d (1=cal_full 2=cal_quick 3=reboot)", (int)cmd);
 }
 
-void c6_link_calib_start(uint8_t step) {
+void c6_link_calib_start(uint8_t step, uint8_t channel) {
     uint8_t buf[LP_MAX_FRAME];
-    const size_t n = lp_encode_calib_start(buf, sizeof buf, step);
+    const size_t n = lp_encode_calib_start(buf, sizeof buf, step, channel);
     if (!n) return;
     uart_write_bytes(LINK_UART, (const char *)buf, n);
     if (step == 0) {
@@ -204,7 +204,7 @@ bool c6_link_calib_apply(void) {
     const size_t n = lp_encode_config(buf, sizeof buf, LP_MSG_CONFIG_SET, &c);
     if (!n) return false;
     uart_write_bytes(LINK_UART, (const char *)buf, n);
-    c6_link_calib_start(0);
+    c6_link_calib_start(0, LP_CALIB_ANY);
     ESP_LOGI(TAG, "local C5 thresholds from the passage calibration: active %d hyst %d drop %d min_peak %d (x10)",
              (int)c.active_db_x10, (int)c.hysteresis_db_x10, (int)c.drop_db_x10, (int)c.min_peak_db_x10);
     return true;

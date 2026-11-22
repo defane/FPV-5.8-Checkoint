@@ -120,8 +120,8 @@ static void on_msg(const uint8_t mac[6], const fp_msg_t *msg, int8_t rssi) {
      * CONFIG sent while we were off is lost), which would drop it silently. */
     case FP_MSG_CALIB_START:
         if (ours) {
-            ESP_LOGI(TAG, "master passage calibration step %u -> C5", msg->calib_step);
-            c3_link_calib_start(msg->calib_step);
+            ESP_LOGI(TAG, "master passage calibration step %u (channel %u) -> C5", msg->calib_req.step, msg->calib_req.channel);
+            c3_link_calib_start(msg->calib_req.step, msg->calib_req.channel);
         }
         break;
     case FP_MSG_GAIN:

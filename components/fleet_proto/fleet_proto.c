@@ -144,9 +144,10 @@ size_t fp_encode_gain(uint8_t *buf, size_t cap, const fp_gain_t *m) {
     const uint8_t pl[2] = { m->gate_index, m->gain };
     return frame(buf, cap, FP_MSG_GAIN, pl, sizeof pl);
 }
-size_t fp_encode_calib_start(uint8_t *buf, size_t cap, uint8_t step) {
-    if (step > 2u) return 0;
-    return frame(buf, cap, FP_MSG_CALIB_START, &step, 1u);
+size_t fp_encode_calib_start(uint8_t *buf, size_t cap, uint8_t step, uint8_t channel) {
+    if (step > 2u || (channel >= LP_LEVELS && channel != LP_CALIB_ANY)) return 0;
+    const uint8_t pl[2] = { step, channel };
+    return frame(buf, cap, FP_MSG_CALIB_START, pl, sizeof pl);
 }
 size_t fp_encode_calib_state(uint8_t *buf, size_t cap, const lp_calib_t *c) {
     if (c->phase > LP_CALIB_DONE) return 0;
@@ -268,8 +269,9 @@ bool fp_decode(const uint8_t *buf, size_t n, fp_msg_t *out) {
         out->heartbeat.uptime_ms = get_u32(p + 1);
         return true;
     case FP_MSG_CALIB_START:
-        if (len != 1 || p[0] > 2) return false;
-        out->calib_step = p[0];
+        if (len != 2 || p[0] > 2 || (p[1] >= LP_LEVELS && p[1] != LP_CALIB_ANY)) return false;
+        out->calib_req.step = p[0];
+        out->calib_req.channel = p[1];
         return true;
     case FP_MSG_CALIB_STATE:
         return lp_calib_unpack(p, len, &out->calib);

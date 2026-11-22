@@ -557,6 +557,18 @@ class MasterCalib(unittest.TestCase):
         self.assertEqual(self.call("state")["phase"], 0, "applying ends the session")
         self.assertEqual(self.call("apply"), {**self.call("state"), "ok": False, "msg": "nothing to apply"})
 
+    def test_the_channel_is_any_or_the_one_asked(self):
+        self.sim.calib({"gate": 0, "action": "start1"}, self.t)
+        self.assertEqual(self.sim.calib({"gate": 0, "action": "state"}, self.t + 6)["channel"], self.sim.local.channel,
+                         "no channel given: any, the drone's own")
+        self.sim.calib({"gate": 0, "action": "cancel"}, self.t + 6)
+        self.sim.calib({"gate": 0, "action": "start1", "channel": 5}, self.t + 7)
+        self.assertEqual(self.sim.calib({"gate": 0, "action": "state"}, self.t + 13)["channel"], 5, "R6 asked, R6 measured")
+        self.sim.calib({"gate": 0, "action": "cancel"}, self.t + 13)
+        self.sim.calib({"gate": 0, "action": "start1", "channel": 9}, self.t + 14)
+        self.assertEqual(self.sim.calib({"gate": 0, "action": "state"}, self.t + 20)["channel"], self.sim.local.channel,
+                         "a channel past R8 means any")
+
     def test_step_2_needs_step_1_and_cancel_ends_it(self):
         self.assertEqual(self.call("start2")["flags"] & 32, 32, "step 2 first: refused")
         self.call("start1")
@@ -629,10 +641,10 @@ class NodeCalib(unittest.TestCase):
     def test_page_sends_what_the_firmware_reads(self):
         page = (ROOT / "firmware/node/main/www/index.html").read_text()
         src = (ROOT / SOURCES[web_mock.Node]).read_text()
-        self.assertIn('"/api/calib", JSON.stringify({ action })', page)
-        self.assertEqual(c_reads(c_function(src, "post_calib"), src), {"action"})
-        self.assertLessEqual({"action"}, mock_reads(web_mock.Node, "calib"))
-        self.assertLess(len('{"action":"start1"}'), web_mock.Node.ADMIN["/api/calib"][1])
+        self.assertIn('"/api/calib", JSON.stringify({ action, channel })', page)
+        self.assertEqual(c_reads(c_function(src, "post_calib"), src), {"action", "channel"})
+        self.assertLessEqual({"action", "channel"}, mock_reads(web_mock.Node, "calib"))
+        self.assertLess(len('{"action":"start1","channel":255}'), web_mock.Node.ADMIN["/api/calib"][1])
 
 
 if __name__ == "__main__":

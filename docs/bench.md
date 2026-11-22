@@ -459,7 +459,7 @@ decide from them whether the IPEX lead needs a fixed attenuator (a PI pad, see
 `tools/enter_download.py`, then flashes.
 
 Passage calibration (admin; C6 page *Passage calibration*, a gate at a time; the degraded C3 page has the same card; a remote gate: *calibrated* pill after Apply, *Use the fleet's thresholds* to undo, kept over a node reboot): with a VTX ON, step 1 with the
-drone hovering in the passage, step 2 at 2 m along the track. Pass: each step counts down 5 s, the drone's
+drone hovering in the passage, step 2 at 2 m along the track. Pass: each step counts down 5 s (try *Any* and the drone's own channel; a wrong channel warns), the drone's
 channel reads in both, the proposal puts `min_peak` above the away p95 and under the passage p10, *Apply*
 changes the C5's thresholds (`CHECKPOINT set` on its console) and survives a reboot; no drone, clipping and
 a drone too close to the line show their warning; the gate keeps detecting meanwhile (a pass rings during step
