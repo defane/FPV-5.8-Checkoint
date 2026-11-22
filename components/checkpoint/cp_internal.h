@@ -14,6 +14,8 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "link_proto.h"
+#include "pass_calib.h"
 #include "pass_detector.h"
 #include "scan_detector.h"
 #include "sdr_rx.h"
@@ -26,6 +28,18 @@
                                      * a channel without a reading this long reads unknown in STATS */
 #define CP_GAIN_MIN      10u
 #define CP_GAIN_STEP     2u
+
+/* The passage calibration's session (cp_calib.c): posted by the link, run by the scan task. */
+typedef struct {
+    volatile uint8_t req;        /* posted under cp_mux: 1 step 1, 2 step 2, 3 end the session; 0 none */
+    lp_calib_t st;               /* what the link reports, under cp_mux */
+    bool active;                 /* a session exists */
+    uint8_t measuring;           /* 1 or 2 while a measurement runs, else 0 */
+    pc_hist_t *hist;             /* heap, only while measuring */
+    int64_t end_us;              /* the running measurement's end */
+    int64_t idle_us;             /* the session ends then if nothing is asked */
+    pc_stats_t gate;             /* step 1's, kept for the solver */
+} cp_calib_t;
 
 typedef struct {
     scan_detector_t sd;
@@ -49,6 +63,7 @@ typedef struct {
     uint16_t trace_sat[SDR_RX_MAX_HOPS];                   /* K l: saturated captures per hop since the last line */
     uint32_t held_at_trace[SDR_RX_CHANNELS];               /* sd.held as the last K l line printed */
     uint32_t held_at_pass[SDR_RX_CHANNELS];                /* sd.held as the channel's last pass printed */
+    cp_calib_t calib;                                      /* the passage calibration session */
     uint32_t readings, rotations, passes;
     bool has_last; pd_event_t last;
 } cp_t;
@@ -98,6 +113,14 @@ void cp_on_pass(cp_t *cp, const pd_event_t *e);
 /* [scan] One hop's readings into sd: sd_feed_hop (CONFIG_CHECKPOINT_PAIR_GUARD) or sd_feed each.
  * A bit per reading that completed a pass (ev[i]); *held a bit per reading the guard held. */
 unsigned cp_feed_hop(scan_detector_t *sd, const sdr_hop_t *h, pd_event_t ev[SDR_RX_PER_HOP], unsigned *held);
+
+/* cp_calib.c: the passage calibration (docs/detector.md). The link posts, the scan task runs it: it
+ * samples each channel's smoothed rise once per rotation for LP_CALIB_SECS s, never blinds the gate. */
+void cp_calib_request(cp_t *cp, uint8_t step);              /* [any] 0 ends the session, 1 passage, 2 away */
+void cp_calib_apply(cp_t *cp, int64_t now_us);              /* [scan] between two hops: take the request, time out */
+void cp_calib_capture(cp_t *cp, bool saturated);            /* [scan] one capture of a measurement */
+void cp_calib_rotation(cp_t *cp, int64_t now_us);           /* [scan] each rotation: sample, end the window */
+bool cp_calib_get(cp_t *cp, lp_calib_t *out);               /* [link] false without a session */
 
 /* cp_console.c */
 TaskHandle_t cp_console_task(void);

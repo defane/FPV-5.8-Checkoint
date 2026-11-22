@@ -14,6 +14,9 @@
 #define LINK_READ_MS  100u
 
 static const char *TAG = "c6_link";
+static portMUX_TYPE s_cal_mux = portMUX_INITIALIZER_UNLOCKED;
+static lp_calib_t s_calib;                  /* the local C5's passage-calibration state */
+static bool s_calib_have;
 static volatile bool s_rearm_sync = true;   /* push the fleet's drop at the next CONFIG_STATE */
 
 /* Debug mode: the local C5's console text (LOG frames) in a ring, sanitized for the page's JSON. */
@@ -78,8 +81,20 @@ static void handle_msg(const lp_msg_t *m) {
         c6_store_set_local_config(&m->config);
         if (s_rearm_sync) sync_rearm(&m->config);
         break;
+    case LP_MSG_CALIB_STATE:
+        portENTER_CRITICAL(&s_cal_mux);
+        s_calib = m->calib;
+        s_calib_have = true;
+        portEXIT_CRITICAL(&s_cal_mux);
+        break;
     case LP_MSG_HELLO:        /* the C5 (re)booted: learn its config now, not at the next poll */
-        if (m->role == LP_ROLE_C5) { s_rearm_sync = true; send_config_req(); }
+        if (m->role == LP_ROLE_C5) {
+            s_rearm_sync = true;
+            send_config_req();
+            portENTER_CRITICAL(&s_cal_mux);
+            s_calib_have = false;            /* its session did not survive the reboot */
+            portEXIT_CRITICAL(&s_cal_mux);
+        }
         break;
     default: break;
     }
@@ -149,6 +164,48 @@ void c6_link_send_command(lp_cmd_t cmd) {
     if (!n) return;   /* unknown cmd */
     uart_write_bytes(LINK_UART, (const char *)buf, n);
     ESP_LOGI(TAG, "local C5 command %d (1=cal_full 2=cal_quick 3=reboot)", (int)cmd);
+}
+
+void c6_link_calib_start(uint8_t step) {
+    uint8_t buf[LP_MAX_FRAME];
+    const size_t n = lp_encode_calib_start(buf, sizeof buf, step);
+    if (!n) return;
+    uart_write_bytes(LINK_UART, (const char *)buf, n);
+    if (step == 0) {
+        portENTER_CRITICAL(&s_cal_mux);
+        s_calib_have = false;
+        portEXIT_CRITICAL(&s_cal_mux);
+    }
+    ESP_LOGI(TAG, "local C5 passage calibration step %u", step);
+}
+
+bool c6_link_calib_get(lp_calib_t *out) {
+    portENTER_CRITICAL(&s_cal_mux);
+    *out = s_calib;
+    const bool have = s_calib_have && s_calib.phase != LP_CALIB_NONE;
+    portEXIT_CRITICAL(&s_cal_mux);
+    return have;
+}
+
+bool c6_link_calib_apply(void) {
+    lp_calib_t k;
+    static c6_snapshot_t snap;            /* ~1 KB: not on the web task's stack; one caller at a time (httpd) */
+    if (!c6_link_calib_get(&k) || k.phase != LP_CALIB_DONE || k.min_peak_db_x10 <= 0) return false;
+    c6_store_snapshot(&snap);
+    if (!snap.has_local_cfg) return false;   /* its echoed settings are the base: nothing else of them changes */
+    lp_config_t c = snap.local_cfg;
+    c.active_db_x10 = k.active_db_x10;
+    c.hysteresis_db_x10 = k.hysteresis_db_x10;
+    c.drop_db_x10 = k.drop_db_x10;
+    c.min_peak_db_x10 = k.min_peak_db_x10;
+    uint8_t buf[LP_MAX_FRAME];
+    const size_t n = lp_encode_config(buf, sizeof buf, LP_MSG_CONFIG_SET, &c);
+    if (!n) return false;
+    uart_write_bytes(LINK_UART, (const char *)buf, n);
+    c6_link_calib_start(0);
+    ESP_LOGI(TAG, "local C5 thresholds from the passage calibration: active %d hyst %d drop %d min_peak %d (x10)",
+             (int)c.active_db_x10, (int)c.hysteresis_db_x10, (int)c.drop_db_x10, (int)c.min_peak_db_x10);
+    return true;
 }
 
 void c6_link_send_gain(uint8_t gain) {

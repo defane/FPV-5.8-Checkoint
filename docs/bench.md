@@ -458,6 +458,13 @@ decide from them whether the IPEX lead needs a fixed attenuator (a PI pad, see
 (`` ` ``) while the detector scans, 5 times: `python tools/flash.py PORT` sends it through
 `tools/enter_download.py`, then flashes.
 
+Passage calibration (admin; C6 page *Passage calibration*, a gate at a time): with a VTX ON, step 1 with the
+drone hovering in the passage, step 2 at 2 m along the track. Pass: each step counts down 5 s, the drone's
+channel reads in both, the proposal puts `min_peak` above the away p95 and under the passage p10, *Apply*
+changes the C5's thresholds (`CHECKPOINT set` on its console) and survives a reboot; no drone, clipping and
+a drone too close to the line show their warning; the gate keeps detecting meanwhile (a pass rings during step
+1). Record the numbers: they confirm or retune the rules in docs/detector.md.
+
 RX gain from the web (admin; C3 page *C5 health*, C6 *Gates / nodes*): set 36 then 40 again on a
 gate with every VTX off. Pass: it asks first; the gate shows *calibrating* for about 3 s, then the
 *gain* field and the `STATS` gain follow, the console prints `CHECKPOINT gain=36/83 (saved...)`, and it

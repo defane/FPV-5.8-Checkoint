@@ -16,6 +16,8 @@ static uint32_t get_u32(const uint8_t *p) {
            ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
 }
 
+static void put_u16(uint8_t *p, uint16_t v) { p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); }
+static uint16_t get_u16(const uint8_t *p) { return (uint16_t)(p[0] | ((uint16_t)p[1] << 8)); }
 static void put_i32(uint8_t *p, int32_t v) { put_u32(p, (uint32_t)v); }
 static int32_t get_i32(const uint8_t *p) { return (int32_t)get_u32(p); }
 
@@ -43,7 +45,9 @@ uint16_t lp_crc16(const uint8_t *data, size_t len) {
 #define LP_LEN_EVENT   11u
 #define LP_LEN_STATS   (32u + LP_FW_LEN)   /* 56 = LP_MAX_PAYLOAD: full */
 #define LP_LEN_CMD     1u
+#define LP_LEN_CALIB   25u   /* phase, secs, flags(2), channel, gate[5], sat, away[5], 4 thresholds(2 each), gain_steps */
 
+_Static_assert(LP_LEN_CALIB <= LP_MAX_PAYLOAD, "a calibration state fits a frame");
 _Static_assert(LP_LEN_STATS <= LP_MAX_PAYLOAD && LP_LEN_CONFIG <= LP_MAX_PAYLOAD, "a payload fits a frame");
 
 static bool cmd_known(uint8_t c) {
@@ -153,6 +157,24 @@ size_t lp_encode_log(uint8_t *buf, size_t cap, const char *text, size_t len) {
 size_t lp_encode_debug(uint8_t *buf, size_t cap, bool on) {
     const uint8_t pl = on ? 1u : 0u;
     return frame(buf, cap, LP_MSG_DEBUG, &pl, 1u);
+}
+
+size_t lp_encode_calib_start(uint8_t *buf, size_t cap, uint8_t step) {
+    if (step > 2u) return 0;
+    return frame(buf, cap, LP_MSG_CALIB_START, &step, 1u);
+}
+
+size_t lp_encode_calib_state(uint8_t *buf, size_t cap, const lp_calib_t *c) {
+    if (c->phase > LP_CALIB_DONE) return 0;
+    uint8_t pl[LP_LEN_CALIB];
+    pl[0] = c->phase; pl[1] = c->secs_left; put_u16(pl + 2, c->flags); pl[4] = c->channel;
+    for (unsigned i = 0; i < 5; i++) pl[5 + i] = (uint8_t)c->gate[i];
+    pl[10] = c->gate_sat_pct;
+    for (unsigned i = 0; i < 5; i++) pl[11 + i] = (uint8_t)c->away[i];
+    put_u16(pl + 16, (uint16_t)c->active_db_x10); put_u16(pl + 18, (uint16_t)c->hysteresis_db_x10);
+    put_u16(pl + 20, (uint16_t)c->drop_db_x10);   put_u16(pl + 22, (uint16_t)c->min_peak_db_x10);
+    pl[24] = (uint8_t)c->gain_steps;
+    return frame(buf, cap, LP_MSG_CALIB_STATE, pl, LP_LEN_CALIB);
 }
 
 size_t lp_encode_gain(uint8_t *buf, size_t cap, uint8_t gain) {
@@ -284,6 +306,24 @@ static bool decode_payload(uint8_t type, uint8_t len, const uint8_t *p,
         out->type = LP_MSG_DEBUG;
         out->debug = p[0];
         return true;
+    case LP_MSG_CALIB_START:
+        if (len != 1u || p[0] > 2u) return false;
+        out->type = LP_MSG_CALIB_START;
+        out->calib_step = p[0];
+        return true;
+    case LP_MSG_CALIB_STATE: {
+        if (len != LP_LEN_CALIB || p[0] > LP_CALIB_DONE) return false;
+        out->type = LP_MSG_CALIB_STATE;
+        lp_calib_t *k = &out->calib;
+        k->phase = p[0]; k->secs_left = p[1]; k->flags = get_u16(p + 2); k->channel = p[4];
+        for (unsigned i = 0; i < 5; i++) k->gate[i] = (int8_t)p[5 + i];
+        k->gate_sat_pct = p[10];
+        for (unsigned i = 0; i < 5; i++) k->away[i] = (int8_t)p[11 + i];
+        k->active_db_x10 = (int16_t)get_u16(p + 16); k->hysteresis_db_x10 = (int16_t)get_u16(p + 18);
+        k->drop_db_x10 = (int16_t)get_u16(p + 20);   k->min_peak_db_x10 = (int16_t)get_u16(p + 22);
+        k->gain_steps = (int8_t)p[24];
+        return true;
+    }
     case LP_MSG_GAIN:
         if (len != 1u || p[0] < LP_GAIN_MIN || p[0] > LP_GAIN_MAX) return false;
         out->type = LP_MSG_GAIN;

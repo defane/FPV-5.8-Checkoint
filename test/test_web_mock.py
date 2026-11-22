@@ -528,5 +528,52 @@ class MasterGain(GainCases, unittest.TestCase):
         self.assertIsNone(self.sim.gain({"gain": 44, "gate": 9}, t), "no such gate")
 
 
+class MasterCalib(unittest.TestCase):
+    """/api/calib against c6_web.c's post_calib and the C5's session (cp_calib.c): two steps, then a proposal."""
+
+    def setUp(self):
+        self.sim = web_mock.Master()
+        self.sim.state(60.0)
+        self.t = 60.0
+
+    def call(self, action, dt=0.0, gate=0):
+        self.t += dt
+        return self.sim.calib({"gate": gate, "action": action}, self.t)
+
+    def test_two_steps_then_a_proposal(self):
+        self.assertEqual(self.call("state")["phase"], 0)
+        out = self.call("start1")
+        self.assertEqual((out["phase"], out["secs_left"]), (1, 5))
+        self.assertEqual(self.call("state", 2.0)["secs_left"], 3, "the countdown follows the measurement")
+        self.assertEqual(self.call("start2", 0.5)["flags"] & 32, 32, "step 2 while measuring: refused")
+        out = self.call("state", 3.0)
+        self.assertEqual((out["phase"], out["channel"], out["passage"]), (2, 0, web_mock.CAL_PASSAGE))
+        self.assertEqual(out["rec"]["min_peak"], 0, "no proposal before step 2")
+        self.assertEqual(self.call("start2")["phase"], 3)
+        out = self.call("state", 5.5)
+        self.assertEqual((out["phase"], out["away"], out["rec"]), (4, web_mock.CAL_AWAY, web_mock.CAL_REC))
+        self.assertTrue(self.call("apply")["ok"])
+        self.assertEqual(self.sim.applied[0], web_mock.CAL_REC)
+        self.assertEqual(self.call("state")["phase"], 0, "applying ends the session")
+        self.assertEqual(self.call("apply"), {**self.call("state"), "ok": False, "msg": "nothing to apply"})
+
+    def test_step_2_needs_step_1_and_cancel_ends_it(self):
+        self.assertEqual(self.call("start2")["flags"] & 32, 32, "step 2 first: refused")
+        self.call("start1")
+        self.call("state", 6.0)
+        self.call("start2")
+        self.assertEqual(self.call("cancel")["phase"], 0)
+
+    def test_a_gate_without_a_reachable_c5(self):
+        out = self.call("start1", gate=1)
+        self.assertEqual((out["ok"], out["msg"]), (False, "no C5 linked"))
+        self.assertIsNone(self.sim.calib({"gate": 16, "action": "state"}, self.t))
+        self.assertIsNone(self.sim.calib({"gate": 0, "action": "nope"}, self.t))
+
+    def test_a_calibrating_gate_refuses(self):
+        self.sim.local.run("cal_quick", self.t)
+        self.assertEqual(self.call("start1")["flags"] & 32, 32, "the rests are being learnt: busy")
+
+
 if __name__ == "__main__":
     unittest.main()

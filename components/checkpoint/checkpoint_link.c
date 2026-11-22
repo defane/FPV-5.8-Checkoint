@@ -70,6 +70,9 @@ static void handle_msg(const lp_msg_t *m) {
     case LP_MSG_COMMAND:        /* recalibrate or reboot: the bridge's web confirmed it */
         checkpoint_link_command(m->command);
         break;
+    case LP_MSG_CALIB_START:    /* the bridge's web: a passage-calibration step, or its end */
+        checkpoint_link_calib_start(m->calib_step);
+        break;
     case LP_MSG_GAIN:           /* the bridge's admin set the RX gain: as K g/G, to that index */
         checkpoint_link_set_gain(m->gain);
         break;
@@ -129,6 +132,9 @@ static void link_task(void *arg) {
         if (now - last_stats >= (uint32_t)CONFIG_CHECKPOINT_LINK_STATS_MS) {
             last_stats = now;
             send_stats();
+            lp_calib_t cal;
+            uint8_t cb[LP_MAX_FRAME];
+            if (checkpoint_link_get_calib(&cal)) send_frame(cb, lp_encode_calib_state(cb, sizeof cb, &cal));   /* while a session exists */
         }
     }
 }

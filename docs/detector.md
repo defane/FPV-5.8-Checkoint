@@ -368,6 +368,44 @@ Which value ([host], the tables above, mild fading): 16 dB unless the laps say o
   where the lap reads lowest: the next pass climbs from that trough, whatever the rest of
   the lap reads.
 
+## Passage calibration (the web, a real drone)
+
+The thresholds are the C5VRX meter's defaults, and a gate's antenna, height and distance to the
+line change what a drone reads there. The passage calibration tunes them on this gate with a drone
+whose **VTX is on** (unlike the radio calibrations `B`/`F`, it does not blind the gate and needs no
+VTX guard):
+
+1. **In the passage:** hold the drone where it flies through, 5 s (`LP_CALIB_SECS`).
+2. **2 m away** along the track, 5 s: the limit of what must not count.
+
+The scan task samples every channel's smoothed rise (`sd_rise_db`, the level the thresholds compare)
+once per rotation into a histogram (2 KB on the heap, freed after each step: `cp_calib.c`, host-tested
+statistics and solver in `components/pass_detector/pass_calib.c`). The drone is the channel that stands
+highest in the passage; step 2 reads that same channel. From its percentiles (p10, p50, p90, p95 in the
+passage, p50 and p95 away) the solver proposes:
+
+| Threshold | Rule (provisional) |
+| --- | --- |
+| `min_peak_db` | the away p95 + 2.5 dB (a fixed margin, not the midpoint: a hover overstates a real pass's smoothed peak, τ ≈ 61 ms against a 0.1 to 0.2 s crossing); halfway between the away p95 and the passage p10 when they are too close for that, flagged; within 8 to 40 dB |
+| `active_db` | `min_peak_db` − 2 dB (never under 6) |
+| `hysteresis_db` | the drone's ripple away (p95 − p50), 2 to 6 dB |
+| `drop_db` | half its spread in the passage ((p90 − p10) / 2), 3 to 6 dB |
+
+D (the re-arm drop) and `alpha` are not touched: they belong to the track and the filter, not to the
+gate. Warnings, in plain words on the page: no drone seen in the passage (p95 under 6 dB), clipping in
+the passage (5 % of the captures or more: lower the gain), the two levels under 6 dB apart, the drone
+hardly seen at 2 m (p95 under 3 dB: raise the gain), another channel standing 6 dB higher at 2 m (another
+drone), the C5 refusing (rests being learnt, a calibration, a bench, a gain change). The gain is only
+advised, never changed (it would relearn the rests mid-measurement).
+
+Things to know: the thresholds are shared by the 8 channels, so they follow the drone used (use the
+weakest of the fleet for step 1 and check the strongest away); a pass rung while the drone hovers in the
+passage is real (sound, a lap on the master): reset that channel after; the **formulas are a first
+proposal**, to confirm on real passes (bench B6) and retune here. The session lasts until it is
+applied, cancelled, or `LP_CALIB_IDLE_S` (10 min) pass; the bridge applies the proposal as a plain
+`CONFIG_SET` over the C5's echoed settings. The C6 admin page has it in *Passage calibration* (a gate
+selector, gate 0 and each remote gate), the degraded C3's page in its own card.
+
 ## Parameters (console `K`, saved in NVS namespace "checkpoint", key "prefs")
 
 | Parameter | Default | Keys |

@@ -429,6 +429,53 @@ static esp_err_t post_gain(httpd_req_t *req) {
     return httpd_resp_send(req, out, o);
 }
 
+/* Passage calibration (admin): with a drone in the passage, then 2 m away, a gate's C5 measures its
+ * channels' smoothed rise and proposes thresholds (link_proto CALIB_*, docs/detector.md). It never
+ * blinds the gate and the VTX stays ON, so there is no VTX guard; a pass rung during step 1 is real
+ * (sound, a lap): the page says to reset that channel. POST {"gate":0..15,"action":"state" | "start1" |
+ * "start2" | "cancel" | "apply"} answers the session as {"ok","msg"?,"gate","phase" (0 none, 1 measuring
+ * in the passage, 2 measured, 3 measuring away, 4 done),"secs_left","flags" (pass_calib.h PC_*),
+ * "channel" (255 before step 1),"passage":[p10,p50,p90,p95,max] and "away":[...] (half dB),"passage_sat"
+ * (% of clipped captures),"rec":{"active","hysteresis","drop","min_peak"} (dB x10, phase 4),
+ * "gain_steps"}. "apply" sends the proposal to the gate's C5 and ends the session. */
+static int put_calib(char *b, size_t cap, int32_t gate, bool ok, const char *msg, const lp_calib_t *k) {
+    int o = snprintf(b, cap, "{\"ok\":%s,\"msg\":\"%s\",\"gate\":%ld,\"phase\":%u,\"secs_left\":%u,\"flags\":%u,"
+                     "\"channel\":%u,\"passage\":[%d,%d,%d,%d,%d],\"passage_sat\":%u,\"away\":[%d,%d,%d,%d,%d],"
+                     "\"rec\":{\"active\":%d,\"hysteresis\":%d,\"drop\":%d,\"min_peak\":%d},\"gain_steps\":%d}",
+                     ok ? "true" : "false", msg, (long)gate, k->phase, k->secs_left, k->flags, k->channel,
+                     k->gate[0], k->gate[1], k->gate[2], k->gate[3], k->gate[4], k->gate_sat_pct,
+                     k->away[0], k->away[1], k->away[2], k->away[3], k->away[4],
+                     k->active_db_x10, k->hysteresis_db_x10, k->drop_db_x10, k->min_peak_db_x10, k->gain_steps);
+    return o;
+}
+
+static esp_err_t post_calib(httpd_req_t *req) {
+    char buf[64], action[12];
+    if (!web_auth_request(req, buf, sizeof buf)) return ESP_OK;
+    const int32_t gate = json_i(buf, "gate", -1);
+    if (gate < 0 || gate >= (int32_t)RT_MAX_GATES || !json_s(buf, "action", action, sizeof action)) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "gate/action");
+        return ESP_FAIL;
+    }
+    bool ok = true;
+    const char *msg = "";
+    if (strcmp(action, "start1") == 0) ok = c6_hub_calib_start((uint8_t)gate, 1);
+    else if (strcmp(action, "start2") == 0) ok = c6_hub_calib_start((uint8_t)gate, 2);
+    else if (strcmp(action, "cancel") == 0) { c6_hub_calib_start((uint8_t)gate, 0); }
+    else if (strcmp(action, "apply") == 0) { ok = c6_hub_calib_apply((uint8_t)gate); if (!ok) msg = "nothing to apply"; }
+    else if (strcmp(action, "state") != 0) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "action");
+        return ESP_FAIL;
+    }
+    if (!ok && !msg[0]) msg = "no C5 linked";
+    lp_calib_t k;
+    (void)c6_hub_calib_get((uint8_t)gate, &k);
+    static char out[480];                           /* larger than the stack; httpd runs one handler at a time */
+    const int o = put_calib(out, sizeof out, gate, ok, msg, &k);
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_send(req, out, o);
+}
+
 /* Debug mode (admin): a gate's C5 console text and typed keys. Every body may carry "gate" (default
  * 0, the master's own C5 over its UART; 1.. a remote gate, over its node: c6_hub_debug_*). One gate
  * at a time is in debug mode: switching one on switches the previous off. */
@@ -564,7 +611,7 @@ void c6_web_start(void) {
     web_auth_init(s_admin_key, ADMIN_SALT, ADMIN_ITERATIONS, ADMIN_AUTH_OPEN);
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.lru_purge_enable = true;
-    cfg.max_uri_handlers = 17;   /* 15 here + web_auth's 2 */
+    cfg.max_uri_handlers = 18;   /* 16 here + web_auth's 2 */
     cfg.stack_size = 6144;       /* the signature's PSA HMAC under post_command: ~3.5 KB of the 4 KB default */
     httpd_handle_t srv = NULL;
     if (httpd_start(&srv, &cfg) != ESP_OK) { ESP_LOGE(TAG, "httpd start failed"); return; }
@@ -581,6 +628,7 @@ void c6_web_start(void) {
         { .uri = "/api/rearm",    .method = HTTP_POST, .handler = post_rearm },
         { .uri = "/api/command",  .method = HTTP_POST, .handler = post_command },
         { .uri = "/api/gain",     .method = HTTP_POST, .handler = post_gain },
+        { .uri = "/api/calib",    .method = HTTP_POST, .handler = post_calib },
         { .uri = "/api/log",      .method = HTTP_POST, .handler = post_log },
         { .uri = "/api/key",      .method = HTTP_POST, .handler = post_key },
         { .uri = "/api/debug",    .method = HTTP_POST, .handler = post_debug },

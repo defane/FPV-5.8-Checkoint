@@ -22,7 +22,7 @@ extern "C" {
 #endif
 
 #define LP_SOF      0xC5u
-#define LP_VERSION  6u   /* 6: GAIN (the web sets the C5's RX gain). 5: LOG (C5 text), KEY (console keystrokes), DEBUG. 4: CONFIG carries the re-arm drop,
+#define LP_VERSION  6u   /* 6: GAIN (the web sets the C5's RX gain), CALIB_START / CALIB_STATE (passage calibration). 5: LOG (C5 text), KEY (console keystrokes), DEBUG. 4: CONFIG carries the re-arm drop,
                           * STATS each channel's detector state. 3: the C5 scans: STATS levels, EVENT_PASS age */
 #define LP_MAX_PAYLOAD 56u
 #define LP_MAX_FRAME   (6u + LP_MAX_PAYLOAD)   /* SOF+VER+TYPE+LEN + payload + CRC16(2) */
@@ -39,9 +39,38 @@ typedef enum {
     LP_MSG_DEBUG = 11,       /* bridge -> C5: debug mode on/off (off by default: no LOG, KEY ignored) */
     LP_MSG_KEY = 10,         /* bridge -> C5: console keystrokes ("Ka", "T", "F" ...), debug mode */
     LP_MSG_GAIN = 12,        /* bridge -> C5: force this RX gain index (console K g/G, saved, rests relearnt) */
+    LP_MSG_CALIB_START = 13, /* bridge -> C5: a passage-calibration step (1 passage, 2 away) or 0 to end it */
+    LP_MSG_CALIB_STATE = 14, /* C5 -> bridge: the calibration session, every STATS period while one exists */
 } lp_type_t;
 
 typedef enum { LP_ROLE_C5 = 1, LP_ROLE_C3 = 2 } lp_role_t;
+
+/* Passage calibration (components/pass_detector/pass_calib.h): with a drone in the passage, then 2 m
+ * away, the C5 measures each channel's smoothed rise for LP_CALIB_SECS seconds and proposes thresholds.
+ * It does not blind the gate, so the VTX stays ON. A session starts with CALIB_START step 1, goes on
+ * with step 2 (and may redo either), and ends on step 0, on the bridge applying the proposal or
+ * after LP_CALIB_IDLE_S s with nothing asked; CALIB_STATE is sent every STATS period meanwhile. */
+#define LP_CALIB_SECS   5u
+#define LP_CALIB_IDLE_S 600u
+typedef enum {
+    LP_CALIB_NONE = 0,       /* no session: never sent, the bridges' own idle */
+    LP_CALIB_MEASURING1 = 1, /* the drone in the passage */
+    LP_CALIB_MEASURED1 = 2,  /* ... measured, waiting for step 2 */
+    LP_CALIB_MEASURING2 = 3, /* the drone 2 m away */
+    LP_CALIB_DONE = 4,       /* both measured, thresholds proposed */
+} lp_calib_phase_t;
+
+typedef struct {
+    uint8_t  phase;          /* lp_calib_phase_t */
+    uint8_t  secs_left;      /* of the running measurement, else 0 */
+    uint16_t flags;          /* PC_* of pass_calib.h (PC_BUSY: the last request was refused) */
+    uint8_t  channel;        /* the drone's channel (R1 = 0), 255 before step 1 is measured */
+    int8_t   gate[5];        /* in the passage: p10, p50, p90, p95, max of the channel's rise, half dB */
+    uint8_t  gate_sat_pct;   /* captures that clipped in the passage, % */
+    int8_t   away[5];        /* 2 m away: the same */
+    int16_t  active_db_x10, hysteresis_db_x10, drop_db_x10, min_peak_db_x10;   /* the proposal (DONE only) */
+    int8_t   gain_steps;     /* advice: -1 lower the gain by one step of 2, +1 raise it */
+} lp_calib_t;
 
 /* The forced RX gain the web may set (the C5 clamps to its PHY's maximum; the console's K g/G
  * keeps its step of 2 from the saved one). Changing it blinds the gate for a moment: the rests are
@@ -160,6 +189,8 @@ typedef struct {
         lp_text_t   data;       /* LOG / KEY */
         uint8_t     debug;      /* DEBUG: 0 off, 1 on */
         uint8_t     gain;       /* GAIN: LP_GAIN_MIN..LP_GAIN_MAX */
+        uint8_t     calib_step; /* CALIB_START: 0 end, 1 passage, 2 away */
+        lp_calib_t  calib;      /* CALIB_STATE */
     };
 } lp_msg_t;
 
@@ -174,6 +205,8 @@ size_t lp_encode_command(uint8_t *buf, size_t cap, lp_cmd_t cmd);   /* 0 for an 
 /* 0 when len is 0 or over LP_TEXT_MAX / LP_KEY_MAX. */
 size_t lp_encode_log(uint8_t *buf, size_t cap, const char *text, size_t len);
 size_t lp_encode_debug(uint8_t *buf, size_t cap, bool on);
+size_t lp_encode_calib_start(uint8_t *buf, size_t cap, uint8_t step);   /* 0 over 2 */
+size_t lp_encode_calib_state(uint8_t *buf, size_t cap, const lp_calib_t *c);   /* 0 for a phase over DONE */
 size_t lp_encode_gain(uint8_t *buf, size_t cap, uint8_t gain);   /* 0 outside LP_GAIN_MIN..LP_GAIN_MAX */
 size_t lp_encode_key(uint8_t *buf, size_t cap, const char *keys, size_t len);
 

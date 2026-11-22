@@ -135,6 +135,7 @@ static void run_bench(cp_t *cp, char key, cp_yield_t *y)
 /* The mailbox (cp_internal.h): detector settings, gain (+ relearn), a recalibration, a bench. */
 static void cp_apply_requests(cp_t *cp, cp_yield_t *y)
 {
+    cp_calib_apply(cp, esp_timer_get_time());
     if (cp->wanted_dirty) {
         portENTER_CRITICAL(&cp_mux);
         const pd_config_t c = cp->wanted;
@@ -250,6 +251,7 @@ static void scan_task(void *arg)
         if (cp->trace && h.n && (h.r[0].flags & SDR_RD_SATURATED) && h.hop < SDR_RX_MAX_HOPS &&
             cp->trace_sat[h.hop] < UINT16_MAX)
             cp->trace_sat[h.hop]++;              /* one flag per capture, on both of its readings */
+        if (h.n) cp_calib_capture(cp, h.r[0].flags & SDR_RD_SATURATED);
         pd_event_t ev[SDR_RX_PER_HOP];
         unsigned held;
         const unsigned rang = cp_feed_hop(&cp->sd, &h, ev, &held);
@@ -262,6 +264,7 @@ static void scan_task(void *arg)
         const int64_t now = esp_timer_get_time();
         if (h.rotation_end) {
             sd_rotation(&cp->sd, now);
+            cp_calib_rotation(cp, now);
             cp->rotations++;
             cp->last_rotation_ms = (uint32_t)(now / 1000);
             if (cp_wdt_subscribed) (void)esp_task_wdt_reset();

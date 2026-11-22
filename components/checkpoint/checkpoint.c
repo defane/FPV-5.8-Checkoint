@@ -344,6 +344,16 @@ void checkpoint_link_get_stats(lp_stats_t *out)
  * runs: "command=cal_full refused=busy"); the gate is blind until it and the relearn end. */
 void checkpoint_link_command(uint8_t cmd) { cp_command(cmd, "link"); }
 
+void checkpoint_link_calib_start(uint8_t step)
+{
+    if (s_cp) cp_calib_request(s_cp, step);
+}
+
+bool checkpoint_link_get_calib(lp_calib_t *out)
+{
+    return s_cp && cp_calib_get(s_cp, out);
+}
+
 _Static_assert(CP_GAIN_MIN == LP_GAIN_MIN, "the link and the console clamp at the same lowest gain");
 
 /* GAIN from the bridge's web: the K g/G path, to that index (clamped to CP_GAIN_MIN..the PHY's

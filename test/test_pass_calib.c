@@ -107,6 +107,15 @@ int main(void)
     pc_solve(&gate, &away, &top, &r);
     CHECK(r.valid && r.min_peak_db_x10 == 80 && r.active_db_x10 == 60, "a quiet far side: min_peak at its 8 dB floor, active 6");
 
+    /* The web mock's fixture (tools/web_mock.py CAL_PASSAGE, CAL_AWAY, CAL_REC): the same numbers. */
+    {
+        pc_stats_t fg = { .channel = 0, .p10 = 34, .p50 = 40, .p90 = 46, .p95 = 48, .max = 56, .samples = 2500 };
+        pc_stats_t fa = { .channel = 0, .p10 = 6, .p50 = 12, .p90 = 18, .p95 = 20, .max = 26, .samples = 2500 };
+        pc_solve(&fg, &fa, &fa, &r);
+        CHECK(r.valid && r.flags == 0 && r.active_db_x10 == 105 && r.hysteresis_db_x10 == 40 && r.drop_db_x10 == 30 &&
+              r.min_peak_db_x10 == 125 && r.gain_steps == 0, "the web mock's fixture: 105 / 40 / 30 / 125");
+    }
+
     /* No drone in the passage. */
     measure(&hg, 3, 1.0f, 0.5f, 2500, 0);
     pc_stats(&hg, 3, &gate);

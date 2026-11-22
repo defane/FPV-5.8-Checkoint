@@ -161,7 +161,7 @@ Protocols (`link_proto` v6, `fleet_proto` v6; reflash every board together after
 `components/link_proto` (C5↔bridge UART: config, passes, `STATS` with the 8 levels, the 8
 detector states (2 bits each, `lp_state_of()`) and the C5's health (CAL_NEEDED = an LO's
 DC or IQ out of range or its captures failing, no engine or a stalled scan; faults =
-capture faults), `LP_MSG_COMMAND` calibrate/reboot, `GAIN` (the web forces the RX gain, calibrations' VTX guard), `LOG`/`KEY`/`DEBUG` for the C3 and C6 debug pages),
+capture faults), `LP_MSG_COMMAND` calibrate/reboot, `GAIN` (the web forces the RX gain, calibrations' VTX guard), `CALIB_START`/`CALIB_STATE` (the passage calibration, docs/detector.md), `LOG`/`KEY`/`DEBUG` for the C3 and C6 debug pages),
 `components/fleet_proto` over `components/espnow_link` (pairing, beacons, `CONFIG`
 carrying the detector settings with D, `GATE_PASS`, `NODE_STATUS` relaying the states, the
 health and the C5's echoed D, `FP_MSG_COMMAND`, `DEBUG`/`KEY`/`LOG_REQ`/`LOG_CHUNK`: the C6

@@ -83,6 +83,12 @@ bool c6_hub_send_command(uint8_t gate_index, lp_cmd_t cmd);
  * node(s) over ESP-NOW. False when the gain is out of range or nobody could be reached. The C5
  * relearns its rests: the caller confirms the VTXs are off first. */
 bool c6_hub_send_gain(uint8_t gate_index, uint8_t gain);
+/* Passage calibration of a gate's C5 (link_proto CALIB_*, docs/detector.md): start a step (0 ends the
+ * session, 1 passage, 2 away), read its latest state, apply the proposed thresholds. Gate 0 is the
+ * local C5. False when the gate's C5 cannot be reached or there is nothing to apply. */
+bool c6_hub_calib_start(uint8_t gate_index, uint8_t step);
+bool c6_hub_calib_get(uint8_t gate_index, lp_calib_t *out);
+bool c6_hub_calib_apply(uint8_t gate_index);
 int32_t c6_hub_vtx_threshold_x10(void);        /* remote gates: C/N*10 above which a VTX is probably on (pushed active_db) */
 
 /* Debug mode of a remote gate (1..): its C5's console text and keys, over the node (fleet_proto

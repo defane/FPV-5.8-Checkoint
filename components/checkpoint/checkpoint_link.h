@@ -17,4 +17,6 @@ bool checkpoint_link_apply_config(const lp_config_t *c); /* validate, post to th
 void checkpoint_link_get_config(lp_config_t *out);
 void checkpoint_link_get_stats(lp_stats_t *out);         /* live rises, detector states, health */
 void checkpoint_link_command(uint8_t cmd);               /* lp_cmd_t: recalibrate (B/F) or reboot */
-void checkpoint_link_set_gain(uint8_t gain);             /* the console's K g/G, to a given index */
+void checkpoint_link_set_gain(uint8_t gain);
+void checkpoint_link_calib_start(uint8_t step);          /* CALIB_START: 0 end, 1 passage, 2 away */
+bool checkpoint_link_get_calib(lp_calib_t *out);         /* the session, false when none */             /* the console's K g/G, to a given index */

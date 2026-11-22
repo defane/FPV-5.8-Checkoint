@@ -374,6 +374,31 @@ int main(void) {
         CHECK(run(f, sizeof f, got, 4) == 0, "gain out of range dropped (valid CRC)");
     }
 
+    {   /* CALIB_START / CALIB_STATE: the passage calibration */
+        size_t n = lp_encode_calib_start(buf, sizeof buf, 2);
+        int g = run(buf, n, got, 4);
+        CHECK(g == 1 && got[0].type == LP_MSG_CALIB_START && got[0].calib_step == 2, "calib start roundtrip");
+        CHECK(lp_encode_calib_start(buf, sizeof buf, 3) == 0, "calib step 3 refused");
+        uint8_t f[7] = { LP_SOF, LP_VERSION, LP_MSG_CALIB_START, 1, 9 };
+        uint16_t crc = lp_crc16(&f[1], 4);
+        f[5] = (uint8_t)crc; f[6] = (uint8_t)(crc >> 8);
+        CHECK(run(f, sizeof f, got, 4) == 0, "calib step out of range dropped (valid CRC)");
+
+        lp_calib_t c = { .phase = LP_CALIB_DONE, .secs_left = 0, .flags = 0x0006, .channel = 5,
+                         .gate = { 30, 40, 50, 52, 60 }, .gate_sat_pct = 7, .away = { -2, 10, 20, 24, 30 },
+                         .active_db_x10 = 130, .hysteresis_db_x10 = 25, .drop_db_x10 = 30, .min_peak_db_x10 = 150,
+                         .gain_steps = -1 };
+        n = lp_encode_calib_state(buf, sizeof buf, &c);
+        g = run(buf, n, got, 4);
+        CHECK(g == 1 && got[0].type == LP_MSG_CALIB_STATE && memcmp(&got[0].calib, &c, sizeof c) == 0,
+              "calib state roundtrip, signed values included");
+        c.phase = LP_CALIB_DONE + 1;
+        CHECK(lp_encode_calib_state(buf, sizeof buf, &c) == 0, "calib state with an unknown phase refused");
+        c.phase = LP_CALIB_MEASURING1; c.secs_left = 5;
+        n = lp_encode_calib_state(buf, sizeof buf, &c);
+        CHECK(n && n <= LP_MAX_FRAME && run(buf, n, got, 4) == 1 && got[0].calib.secs_left == 5, "a state in progress fits a frame");
+    }
+
     printf("%d/%d link_proto checks passed\n", g_pass, g_pass + g_fail);
     return g_fail ? 1 : 0;
 }

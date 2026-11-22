@@ -35,6 +35,12 @@ NOISE_X10 = 60            # a gate's rise with no drone, about
 REFRACTORY_S = 1.5        # refractory_ms: no re-arm before it
 LEAVE_S = 0.9             # a drone gone this long: its level is under the release (active - hysteresis)
 CAL_S = {"cal_full": 3.7, "cal_quick": 3.2}   # blind: the recalibration + the 3 s relearn
+# Passage calibration (components/pass_detector/pass_calib.c, cp_calib.c): a drone's rise in the passage and
+# 2 m away, half dB (p10, p50, p90, p95, max), and the thresholds pc_solve() proposes from them, dB x10
+# (test_pass_calib.c checks the same numbers, so the mock cannot drift from the C).
+CAL_SECS = 5.0                                 # LP_CALIB_SECS
+CAL_PASSAGE, CAL_AWAY = [34, 40, 46, 48, 56], [6, 12, 18, 20, 26]
+CAL_REC = {"active": 105, "hysteresis": 40, "drop": 30, "min_peak": 125}
 RELEARN_S = 3.0                                # a gain change: nothing rings while the rests are learnt again
 GAIN_MIN, GAIN_MAX = 10, 83                    # LP_GAIN_MIN / LP_GAIN_MAX in link_proto.h
 REBOOT_S = 4.0
@@ -306,13 +312,14 @@ class Master(ConsoleDebug):
     ADMIN = {"/api/pairing": ("set_pairing", 128), "/api/node": ("set_node", 128),
              "/api/node_remove": ("remove_node", 128), "/api/reset": ("reset_race", 16),
              "/api/volume": ("set_volume", 128), "/api/command": ("command", 128),
-             "/api/rearm": ("set_rearm", 64), "/api/gain": ("gain", 64),
+             "/api/rearm": ("set_rearm", 64), "/api/gain": ("gain", 64), "/api/calib": ("calib", 64),
              "/api/log": ("log", 64), "/api/key": ("key", 96), "/api/debug": ("set_debug", 32)}
 
     def __init__(self, vtx=False):
         self.init_debug()
         self.vtx, self.pairing, self.volume, self.join_at = vtx, False, 60, None
         self.pairing_until = 0.0
+        self.cals, self.applied = {}, {}                  # passage-calibration sessions and applied proposals, by gate
         self.rearm = REARM_X10                            # the fleet's re-arm drop (c6_store)
         self.local = Gate(0, 0, 7.0, vtx)
         self.nodes = []
@@ -447,6 +454,46 @@ class Master(ConsoleDebug):
         for g in [self.local] + [n for n in self.nodes if n.online]:
             g.rearm = x10
         return {"ok": True}
+
+    def cal_state(self, gate, t):
+        """The session of a gate as c6_web.c's post_calib() answers it."""
+        s = self.cals.setdefault(gate, {"phase": 0, "end": 0.0, "flags": 0})
+        if s["phase"] in (1, 3) and t >= s["end"]:
+            s["phase"] = 2 if s["phase"] == 1 else 4              # finish(): measured, then solved
+        left = max(0, int(s["end"] - t + 0.999)) if s["phase"] in (1, 3) else 0
+        ph = s["phase"]
+        return {"ok": True, "msg": "", "gate": gate, "phase": ph, "secs_left": left, "flags": s["flags"],
+                "channel": self.local.channel if ph >= 2 else (255 if ph == 0 else 255),
+                "passage": CAL_PASSAGE if ph >= 2 else [0] * 5, "passage_sat": 0,
+                "away": CAL_AWAY if ph == 4 else [0] * 5,
+                "rec": CAL_REC if ph == 4 else {"active": 0, "hysteresis": 0, "drop": 0, "min_peak": 0}, "gain_steps": 0}
+
+    def calib(self, b, t):
+        """post_calib() in c6_web.c: None for its 400s. Gate 0 only for now (remote gates: no C5 linked)."""
+        gate, action = b.get("gate", -1), b.get("action")
+        if not 0 <= gate < 16 or action not in ("state", "start1", "start2", "cancel", "apply"):
+            return None
+        ok, msg = True, ""
+        s = self.cals.setdefault(gate, {"phase": 0, "end": 0.0, "flags": 0})
+        reach = self.local if gate == 0 and self.local.up(t) else None
+        self.cal_state(gate, t)                                     # a measurement that has ended finishes first
+        if action in ("start1", "start2", "apply") and reach is None:
+            ok, msg = False, "no C5 linked"
+        elif action in ("start1", "start2"):
+            step = 1 if action == "start1" else 2
+            if s["phase"] in (1, 3) or reach.calibrating(t) or (step == 2 and s["phase"] not in (2, 4)):
+                s["flags"] |= 32                                    # PC_BUSY: refused, the session goes on
+            else:
+                s.update(phase=step if step == 1 else 3, end=t + CAL_SECS, flags=0)
+        elif action == "cancel":
+            s.update(phase=0, flags=0)
+        elif action == "apply":
+            if s["phase"] != 4 or reach is None:
+                ok, msg = False, "nothing to apply"
+            else:
+                self.applied[gate] = dict(CAL_REC)
+                s.update(phase=0, flags=0)
+        return {**self.cal_state(gate, t), "ok": ok, "msg": msg}
 
     def gain(self, b, t):
         """post_gain() in c6_web.c: None for its 400s."""

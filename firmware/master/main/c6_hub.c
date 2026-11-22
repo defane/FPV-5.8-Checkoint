@@ -536,6 +536,25 @@ bool c6_hub_send_gain(uint8_t gate_index, uint8_t gain) {
     return sent;
 }
 
+bool c6_hub_calib_start(uint8_t gate_index, uint8_t step) {
+    if (step > 2u) return false;
+    if (gate_index == 0u) {
+        if (!c6_store_has_local()) return false;
+        c6_link_calib_start(step);
+        return true;
+    }
+    return false;   /* remote gates: through their node */
+}
+
+bool c6_hub_calib_get(uint8_t gate_index, lp_calib_t *out) {
+    memset(out, 0, sizeof *out);
+    return gate_index == 0u && c6_link_calib_get(out);
+}
+
+bool c6_hub_calib_apply(uint8_t gate_index) {
+    return gate_index == 0u && c6_link_calib_apply();
+}
+
 /* Remote gates run the detector config the hub pushes (at pairing, on a save and
  * each time a node comes back online), so its activity level is where a C/N says
  * a VTX is on. Gate 0 uses its own C5's echoed active_db once known (c6_store). */
