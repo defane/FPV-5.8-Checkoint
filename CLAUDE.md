@@ -223,6 +223,8 @@ cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/pass_detector/include \
   test_pass_detector.c ../components/pass_detector/pass_detector.c -lm -o /tmp/t && /tmp/t
 cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/pass_detector/include test_scan_detector.c \
   ../components/pass_detector/scan_detector.c ../components/pass_detector/pass_detector.c -lm -o /tmp/t && /tmp/t
+cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/pass_detector/include test_pass_calib.c \
+  ../components/pass_detector/pass_calib.c ../components/pass_detector/pass_detector.c -lm -o /tmp/t && /tmp/t
 cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/pass_detector/include -I../components/sdr_rx \
   -I../components/sdr_rx/include test_pair_ghost.c ../components/pass_detector/scan_detector.c \
   ../components/pass_detector/pass_detector.c ../components/sdr_rx/sdr_psd.c ../components/sdr_rx/sdr_level.c \

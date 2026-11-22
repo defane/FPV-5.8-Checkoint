@@ -86,6 +86,10 @@ jobs:
           cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/pass_detector/include test_scan_detector.c \
             ../components/pass_detector/scan_detector.c ../components/pass_detector/pass_detector.c -lm -o /tmp/test_scan_detector
           /tmp/test_scan_detector | tail -1
+          # The passage calibration's histograms and thresholds (components/pass_detector/pass_calib.c).
+          cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/pass_detector/include test_pass_calib.c \
+            ../components/pass_detector/pass_calib.c ../components/pass_detector/pass_detector.c -lm -o /tmp/test_pass_calib
+          /tmp/test_pass_calib | tail -1
           cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/race_timing/include test_race_timing.c \
             ../components/race_timing/race_timing.c -o /tmp/test_race_timing
           /tmp/test_race_timing | tail -1
