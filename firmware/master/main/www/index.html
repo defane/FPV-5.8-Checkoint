@@ -908,6 +908,7 @@ $("dbg_copy").addEventListener("click", async () => {
 });
 $("dbg").addEventListener("toggle", () => { if ($("dbg").open) dbgSwitch().catch(() => {}); });
 
+AdminAuth.restore().then(ok => { if (ok) { setAdmin(true); poll(); } });   // the key this tab kept (sessionStorage)
 poll(); setInterval(poll, 1000);
 setInterval(dbgPoll, 1000);
 </script>

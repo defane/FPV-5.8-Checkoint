@@ -125,7 +125,13 @@ with no change on the gate side.
   increasing order, so a captured request replayed, or one with a changed body or
   path, is refused. Sessions live in RAM (4, least recently used evicted): after
   an ESP reboot the page reopens one with K, without asking for the password
-  again. The page sends one request at a time and gives up on each HTTP exchange
+  again. **Staying admin across pages and reloads:** the page keeps K, as 64 hex digits, in the tab's
+  `sessionStorage` (key `fpv58.adminKey`), never the password; a reload or the Maintenance view of the same tab
+  `restore()`s it with one signed `GET /api/auth` (no PBKDF2), opening a session of its own. It is cleared by the admin
+  switch, by a 401 (the password changed: K no longer matches) and by closing the tab, never shared with another tab
+  or device; an ESP that does not answer (it reboots) leaves it for the next try. Whoever can run script on the
+  page's origin can read it: the pages are served by the firmware alone and show foreign text only as plain text.
+  Storage that refuses (a private window) just means a login after each reload. The page sends one request at a time and gives up on each HTTP exchange
   after 10 s (one that must reopen its session can take up to 30 s). On logout,
   or when the login dialog is closed during a login, queued requests are dropped;
   one already sent may still have run on the ESP and its reply reaches its

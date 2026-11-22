@@ -4,6 +4,9 @@
 // HMAC-SHA256(K, sid "\n" seq "\n" method "\n" path "\n" body) in a session the ESP
 // opened. crypto.subtle only exists on HTTPS or localhost, not on http://192.168.4.1,
 // hence SHA-256 below.
+// The tab's sessionStorage keeps K (never the password) so a reload or another page of the same tab
+// stays admin: restore() puts it back and the ESP checks it with its next request. It is cleared by
+// logout() and when the ESP refuses it; closing the tab drops it.
 "use strict";
 const AdminAuth = (() => {
   const RK = new Uint32Array([
@@ -97,6 +100,16 @@ const AdminAuth = (() => {
     hex(hmac(key, utf8(`${sid}\n${seq}\n${method}\n${path}\n${body}`)));
   const cfg = { timeoutMs: 10000 };            // a request the ESP never answers
 
+  // The key in the tab's sessionStorage, as 64 hex digits. Storage can be absent or refuse (a
+  // private window, blocked site data): then nothing is kept and the login works as before.
+  const STORE = "fpv58.adminKey";
+  const keep = {
+    get() { try { return sessionStorage.getItem(STORE); } catch (_) { return null; } },
+    set(v) { try { sessionStorage.setItem(STORE, v); } catch (_) {} },
+    clear() { try { sessionStorage.removeItem(STORE); } catch (_) {} },
+  };
+  const unhex = h => Uint8Array.from(h.match(/../g), x => parseInt(x, 16));
+
   // gen counts logouts: every step of a request or a login re-checks, after each
   // await, that no logout came in between, so nothing started before a logout
   // reads or rewrites the next login's key, session or seq.
@@ -156,7 +169,8 @@ const AdminAuth = (() => {
     return p;
   }
 
-  function logout() { key = sid = null; seq = 0; gen++; queue = Promise.resolve(); }
+  const reset = () => { key = sid = null; seq = 0; gen++; queue = Promise.resolve(); };
+  function logout() { reset(); keep.clear(); }
 
   // Resolves true when the ESP accepts the password (any one when it has none);
   // a failed or interrupted login leaves no key behind.
@@ -171,6 +185,7 @@ const AdminAuth = (() => {
       const r = await request("GET", "/api/auth", "");
       live(g);                                 // superseded by a logout or another login
       if (!r.ok) logout();
+      else keep.set(hex(key));
       return r.ok;
     } catch (e) {
       if (g === gen) logout();
@@ -178,5 +193,26 @@ const AdminAuth = (() => {
     }
   }
 
-  return { login, logout, request, _test: { sha256, hmac, pbkdf2, sign, cfg } };   // test/test_web_auth.mjs
+  // Back to admin from the key this tab kept: true when the ESP accepts it. A key it refuses (the
+  // password changed, another device) is forgotten; an ESP that does not answer (it reboots) leaves it
+  // for the next try.
+  async function restore() {
+    const k = keep.get();
+    if (k === null) return false;
+    if (!/^[0-9a-f]{64}$/.test(k)) { keep.clear(); return false; }
+    reset();
+    const g = gen;
+    try {
+      key = unhex(k);
+      const r = await request("GET", "/api/auth", "");
+      live(g);
+      if (!r.ok) { logout(); return false; }
+      return true;
+    } catch (e) {
+      if (g === gen) reset();
+      return false;
+    }
+  }
+
+  return { login, restore, logout, request, _test: { sha256, hmac, pbkdf2, sign, cfg } };   // test/test_web_auth.mjs
 })();

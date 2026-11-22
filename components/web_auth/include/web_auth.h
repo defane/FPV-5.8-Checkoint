@@ -4,7 +4,8 @@
  *
  * The key is K = PBKDF2-HMAC-SHA256(password, salt, iterations), derived at build
  * time (project_include.cmake -> admin_hash.h) and by the page at login; the
- * password never leaves the browser. The page opens a session (a random 128-bit
+ * password never leaves the browser (the tab keeps K, never the password, in its sessionStorage so
+ * a reload stays admin: www/auth.js restore()). The page opens a session (a random 128-bit
  * id, POST /api/session, which also returns the salt and iterations) and signs
  * every admin request:
  *   X-Auth-Session: sid   (WA_SID_LEN lowercase hex)

@@ -49,7 +49,8 @@ degraded C3) detector tuning — require the admin password
 (`CONFIG_*_ADMIN_PASSWORD`, no username): the admin toggle in the
 header opens a password dialog. The password never crosses the Wi-Fi: the page
 signs each admin request (HMAC-SHA256, per-session counter against replays)
-with a key derived from it (PBKDF2), the only form the firmware holds. A sniffed
+with a key derived from it (PBKDF2), the only form the firmware holds (the tab keeps that key, never
+the password, in its sessionStorage, so a reload stays admin until the tab closes or you switch admin off). A sniffed
 request still allows offline guessing, so choose a long random password
 ([docs/fleet.md](docs/fleet.md), `components/web_auth`).
 

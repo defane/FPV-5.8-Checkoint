@@ -55,10 +55,14 @@ function mockEsp({ password = "checkpoint", salt = "fpv58-checkpoint/c6/01234567
   return esp;
 }
 
-function loadAuth(fetchImpl) {
+// A tab's sessionStorage: shared by the pages (loadAuth instances) of one tab.
+const tabStorage = () => { const m = new Map(); return { getItem: k => m.has(k) ? m.get(k) : null,
+  setItem: (k, v) => { m.set(k, String(v)); }, removeItem: k => { m.delete(k); }, _m: m }; };
+
+function loadAuth(fetchImpl, storage) {
   const ctx = vm.createContext({ fetch: (...a) => fetchImpl(...a), TextEncoder, Promise, Error, Uint8Array,
                                  Uint32Array, DataView, Array, Math, String, JSON, setTimeout, clearTimeout,
-                                 AbortController, Response });
+                                 AbortController, Response, RegExp, parseInt, ...(storage ? { sessionStorage: storage } : {}) });
   const src = readFileSync(new URL("../components/web_auth/www/auth.js", import.meta.url), "utf8");
   vm.runInContext(src + "\nthis.AdminAuth = AdminAuth;", ctx);
   return ctx.AdminAuth;
@@ -273,6 +277,67 @@ for (const late of [{ ok: false, auth: true, session: false }, { ok: false, auth
   const esp = mockEsp({ password: "é ünïcödé \"q\" ${x}" });
   const auth = loadAuth(esp.fetch);
   check("UTF-8 password with quotes and ${...}", (await auth.login("é ünïcödé \"q\" ${x}")) === true);
+}
+
+// The key a tab keeps in its sessionStorage: a reload stays admin, the password is never stored.
+{
+  const esp = mockEsp(), tab = tabStorage();
+  const pw = "checkpoint";
+  const auth = loadAuth(esp.fetch, tab);
+  check("nothing kept before a login", (await auth.restore()) === false && tab._m.size === 0);
+  check("login ok", (await auth.login(pw)) === true);
+  const kept = [...tab._m.values()];
+  const want = pbkdf2Sync(pw, esp.salt, ITER, 32, "sha256").toString("hex");
+  check("the tab keeps the derived key, as 64 hex digits", kept.length === 1 && kept[0] === want);
+  check("...and never the password", !kept.some(v => v.includes(pw)) && ![...tab._m.keys()].some(k => k.includes(pw)));
+
+  // A reload: a new page (a fresh AdminAuth) in the same tab.
+  const page2 = loadAuth(esp.fetch, tab);
+  check("a new page of the tab restores admin", (await page2.restore()) === true);
+  const r = await page2.request("POST", "/api/node", '{"node_id":1}');
+  check("...and signs requests with the kept key", r.status === 200);
+  check("...in a session of its own", new Set(esp.log.map(e => e.sid)).size >= 2);
+
+  // Logging out forgets it.
+  page2.logout();
+  check("logout clears the kept key", tab._m.size === 0);
+  check("...so the next page is not admin", (await loadAuth(esp.fetch, tab).restore()) === false);
+
+  // A key the ESP refuses (its password changed) is forgotten.
+  await auth.login(pw);
+  esp.setPassword("another");
+  check("a key the ESP refuses does not restore", (await loadAuth(esp.fetch, tab).restore()) === false);
+  check("...and is dropped from the tab", tab._m.size === 0);
+}
+{
+  // An ESP that does not answer (it reboots) keeps the key for the next try.
+  const esp = mockEsp(), tab = tabStorage();
+  await loadAuth(esp.fetch, tab).login("checkpoint");
+  const page = loadAuth(esp.fetch, tab);
+  page._test.cfg.timeoutMs = 100;
+  esp.stalls.add("/api/session");
+  check("an ESP that is silent: not restored", (await page.restore()) === false);
+  check("...the key stays for the next try", tab._m.size === 1);
+  check("...which restores once it answers", (await page.restore()) === true);
+}
+{
+  // Damaged storage content is dropped; storage that refuses (a private window) changes nothing.
+  const esp = mockEsp(), tab = tabStorage();
+  tab.setItem("fpv58.adminKey", "not-a-key");
+  check("a damaged kept value is not a key", (await loadAuth(esp.fetch, tab).restore()) === false && tab._m.size === 0);
+  const broken = { getItem() { throw new Error("denied"); }, setItem() { throw new Error("denied"); },
+                   removeItem() { throw new Error("denied"); } };
+  const auth = loadAuth(esp.fetch, broken);
+  check("storage that refuses: the login still works", (await auth.login("checkpoint")) === true);
+  check("...and restore finds nothing", (await loadAuth(esp.fetch, broken).restore()) === false);
+  check("no sessionStorage at all: login and restore are unchanged", (await loadAuth(esp.fetch).login("checkpoint")) === true &&
+        (await loadAuth(esp.fetch).restore()) === false);
+}
+{
+  // An ESP with no password: its admin is kept the same way.
+  const esp = mockEsp({ open: true }), tab = tabStorage();
+  await loadAuth(esp.fetch, tab).login("whatever");
+  check("no password on the ESP: the tab restores admin too", (await loadAuth(esp.fetch, tab).restore()) === true);
 }
 
 if (fails) { console.log(`${fails} test(s) FAILED`); process.exit(1); }
