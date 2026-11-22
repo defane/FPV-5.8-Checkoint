@@ -14,6 +14,9 @@ void c3_link_push_config(const lp_config_t *c);   /* CONFIG_SET to the C5 */
 /* Relay mode: the master's CONFIG for this gate. Pushed now (CONFIG_SET), and kept (RAM) to push
  * again when the C5 says HELLO: it booted after this one went out (lost), or it was swapped. */
 void c3_link_set_master_config(const lp_config_t *c);
+/* The C5's latest passage-calibration state (it sends one a second while a session exists); false when none
+ * or older than 4 s, or after the C5 rebooted. */
+bool c3_link_calib_get(lp_calib_t *out);
 void c3_link_calib_start(uint8_t step);           /* CALIB_START to the C5: 0 ends the passage calibration, 1 passage, 2 away */
 void c3_link_send_gain(uint8_t gain);             /* GAIN to the C5 (LP_GAIN_MIN..MAX; the C5 clamps and relearns its rests) */
 void c3_link_send_command(lp_cmd_t cmd);          /* COMMAND (console B/F, reboot) to the C5 */

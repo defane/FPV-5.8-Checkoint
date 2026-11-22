@@ -220,6 +220,61 @@ static esp_err_t post_command(httpd_req_t *req)
     return httpd_resp_sendstr(req, "{\"ok\":true}");
 }
 
+/* Passage calibration of the C5 (admin; docs/detector.md): with a drone's VTX on, in the passage then 2 m away, it
+ * measures its channels and proposes thresholds. POST {"action": "state" | "start1" | "start2" | "cancel" |
+ * "apply"} answers the session like the C6's /api/calib (c6_web.c post_calib; "gate" is always 0 here). It never
+ * blinds the gate, so no VTX guard; a pass rung in step 1 is real. "apply" sets the four thresholds in the stored
+ * config (saved, pushed to the C5) and ends the session. */
+static esp_err_t post_calib(httpd_req_t *req)
+{
+    char buf[64], action[12];
+    if (!web_auth_request(req, buf, sizeof buf)) return ESP_OK;
+    if (!json_s(buf, "action", action, sizeof action)) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "action");
+        return ESP_FAIL;
+    }
+    bool ok = true;
+    const char *msg = "";
+    lp_calib_t k;
+    if (strcmp(action, "start1") == 0 || strcmp(action, "start2") == 0) {
+        ok = c3_link_c5_alive();
+        if (ok) c3_link_calib_start(action[5] == '1' ? 1 : 2);
+        else msg = "no C5 linked";
+    } else if (strcmp(action, "cancel") == 0) {
+        c3_link_calib_start(0);
+    } else if (strcmp(action, "apply") == 0) {
+        ok = c3_link_calib_get(&k) && k.phase == LP_CALIB_DONE && k.min_peak_db_x10 > 0;
+        if (ok) {
+            lp_config_t c;
+            (void)c3_store_get_config(&c);
+            c.active_db_x10 = k.active_db_x10;
+            c.hysteresis_db_x10 = k.hysteresis_db_x10;
+            c.drop_db_x10 = k.drop_db_x10;
+            c.min_peak_db_x10 = k.min_peak_db_x10;
+            c3_store_set_config(&c, true);
+            c3_link_push_config(&c);
+            c3_link_calib_start(0);
+            ESP_LOGW(TAG, "thresholds from the passage calibration: active %d hyst %d drop %d min_peak %d (x10)",
+                     (int)c.active_db_x10, (int)c.hysteresis_db_x10, (int)c.drop_db_x10, (int)c.min_peak_db_x10);
+        } else msg = "nothing to apply";
+    } else if (strcmp(action, "state") != 0) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "action");
+        return ESP_FAIL;
+    }
+    if (!c3_link_calib_get(&k)) memset(&k, 0, sizeof k);
+    static char out[480];                      /* larger than the stack; httpd runs one handler at a time */
+    const int o = snprintf(out, sizeof out,
+                           "{\"ok\":%s,\"msg\":\"%s\",\"gate\":0,\"phase\":%u,\"secs_left\":%u,\"flags\":%u,"
+                           "\"channel\":%u,\"passage\":[%d,%d,%d,%d,%d],\"passage_sat\":%u,\"away\":[%d,%d,%d,%d,%d],"
+                           "\"rec\":{\"active\":%d,\"hysteresis\":%d,\"drop\":%d,\"min_peak\":%d},\"gain_steps\":%d}",
+                           ok ? "true" : "false", msg, k.phase, k.secs_left, k.flags, k.channel,
+                           k.gate[0], k.gate[1], k.gate[2], k.gate[3], k.gate[4], k.gate_sat_pct,
+                           k.away[0], k.away[1], k.away[2], k.away[3], k.away[4],
+                           k.active_db_x10, k.hysteresis_db_x10, k.drop_db_x10, k.min_peak_db_x10, k.gain_steps);
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_send(req, out, o);
+}
+
 /* Set the C5's forced RX gain: {"gain":LP_GAIN_MIN..LP_GAIN_MAX,"force":0|1}. It blinds the gate for a
  * moment (the rests are learnt again at the new gain) and wants every VTX off, so it follows
  * post_command's rule: {"vtx":true,"cn_x10":N} while the gate sees a carrier, until the page asks the
@@ -338,7 +393,7 @@ void c3_web_start(void)
     web_auth_init(s_admin_key, ADMIN_SALT, ADMIN_ITERATIONS, ADMIN_AUTH_OPEN);
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.lru_purge_enable = true;
-    cfg.max_uri_handlers = 12;
+    cfg.max_uri_handlers = 14;
     cfg.stack_size = 6144;       /* the signature's PSA HMAC under the handlers: ~3.5 KB of the 4 KB default */
     httpd_handle_t srv = NULL;
     if (httpd_start(&srv, &cfg) != ESP_OK) { ESP_LOGE(TAG, "httpd start failed"); return; }
@@ -361,6 +416,8 @@ void c3_web_start(void)
     httpd_register_uri_handler(srv, &dbgu);
     const httpd_uri_t gainu = { .uri = "/api/gain", .method = HTTP_POST, .handler = post_gain };
     httpd_register_uri_handler(srv, &gainu);
+    const httpd_uri_t calu = { .uri = "/api/calib", .method = HTTP_POST, .handler = post_calib };
+    httpd_register_uri_handler(srv, &calu);
     web_auth_register(srv);   /* POST /api/session, GET /auth.js */
     ESP_LOGI(TAG, "web UI on http://192.168.4.1/");
 }

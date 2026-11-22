@@ -161,6 +161,37 @@
   </div>
   </div>
 
+  <div class="admin-only">
+  <h2>Passage calibration</h2>
+  <div class="card" id="cal_card">
+    <div class="bar"><span id="cal_pill" class="pill">—</span></div>
+    <p class="muted" style="margin:10px 0 6px;font-size:.85rem">Tunes this gate's thresholds on a real drone, its <b>VTX on</b> (this does not blind the gate).
+      Step 1: hold the drone <b>in the passage</b>, where it flies through, for 5 s. Step 2: hold it <b>2 m away</b> along the track, for 5 s.
+      The thresholds proposed put a pass between what it reads at 2 m and in the passage. A pass may ring during step 1: it is a real one.</p>
+    <div class="bar">
+      <button id="cal_s1" class="ghost">1 · Measure in the passage</button>
+      <button id="cal_s2" class="ghost" disabled>2 · Measure 2 m away</button>
+      <button id="cal_cancel" class="ghost" disabled>Cancel</button>
+      <span id="cal_msg" class="muted"></span>
+    </div>
+    <div id="cal_result" hidden>
+      <div class="chans" style="margin-top:12px;font-size:.9rem">Drone <b id="cal_ch">—</b> ·
+        in the passage <b id="cal_pass">—</b> · 2 m away <b id="cal_away">—</b> <span class="muted">(median · p95, dB over the rest)</span></div>
+      <ul id="cal_warn" style="margin:10px 0 0;padding-left:18px;font-size:.85rem"></ul>
+      <div id="cal_rec" hidden>
+        <div class="row" style="margin-top:12px">
+          <div class="stat"><b id="cr_min">—</b><span>min peak (dB)</span></div>
+          <div class="stat"><b id="cr_act">—</b><span>active (dB)</span></div>
+          <div class="stat"><b id="cr_hys">—</b><span>hysteresis (dB)</span></div>
+          <div class="stat"><b id="cr_drop">—</b><span>drop (dB)</span></div>
+        </div>
+        <div class="bar" style="margin-top:10px"><button id="cal_apply">Apply &amp; save</button>
+          <span class="muted" style="font-size:.8rem">a first proposal, to confirm on real passes; the re-arm drop and the smoothing stay as they are</span></div>
+      </div>
+    </div>
+  </div>
+  </div>
+
   <h2>Recent passes</h2>
   <ul id="events" class="card"></ul>
   </div>
@@ -276,7 +307,7 @@ function route() {
 window.addEventListener("hashchange", route);
 function setAdmin(on) {             // back to spectator forgets the key and unsaved detector edits
   admin = on;
-  if (!on) { AdminAuth.logout(); dirty = false; gainDirty = false; infoClose(); dbgText = ""; dbgNext = 0; $("dbg").open = false; dbgShow(false); dbgRender(); }
+  if (!on) { AdminAuth.logout(); dirty = false; gainDirty = false; calPhase = 0; infoClose(); dbgText = ""; dbgNext = 0; $("dbg").open = false; dbgShow(false); dbgRender(); }
   document.body.classList.toggle("is-admin", on);
   $("role").setAttribute("aria-checked", on);
   if (!on && location.hash === "#maintenance") location.hash = "";
@@ -475,6 +506,76 @@ $("gain_set").addEventListener("click", async () => {
     if (r.ok) { gainDirty = false; setTimeout(() => $("gain_msg").textContent = "", 4000); }
   } catch (e) { $("gain_msg").textContent = "failed"; }
 });
+
+// Passage calibration: the C5 measures a drone in the passage, then 2 m away, and proposes thresholds.
+let calPhase = 0, calAt = 0, calBusy = false;
+const CAL_WARN = [
+  [1, "No drone seen in the passage (nothing stood 3 dB over the rest): check its VTX is on, its channel, and that it is in the passage. Measure again."],
+  [2, "The ADC clips in the passage: lower the gain (the gain control above), then measure again."],
+  [4, "In the passage and 2 m away the drone reads almost the same (under 6 dB apart): the thresholds are a compromise. Check the antenna sits near the line, or lower the gain."],
+  [8, "Hardly seen at 2 m: raise the gain, or check the drone was on and 2 m from the gate."],
+  [16, "Another channel stood much higher at 2 m: another drone? Measure step 2 again with the same one."],
+  [32, "The C5 refused it (learning its rests, a calibration, a bench): try again in a few seconds."],
+];
+const dbh = x => (x / 2).toFixed(1);
+async function calCall(action) {
+  try {
+    const r = await AdminAuth.request("POST", "/api/calib", JSON.stringify({ action }));
+    if (r.status === 401) { setAdmin(false); return { error: "logged out" }; }
+    return r.ok ? await r.json() : { error: "refused (" + r.status + ")" };
+  } catch (e) { return { error: /logged out|not logged in/.test(e.message) ? "logged out" : "C3 not answering" }; }
+}
+function calRender(k) {
+  calPhase = k.phase;
+  const names = ["no session", "measuring in the passage…", "passage measured", "measuring 2 m away…", "both measured"];
+  const measuring = k.phase === 1 || k.phase === 3;
+  $("cal_pill").textContent = names[k.phase] + (measuring ? ` ${k.secs_left} s` : "");
+  $("cal_pill").className = "pill" + (measuring ? " busy" : k.phase === 4 ? " ok" : "");
+  $("cal_s1").disabled = measuring;
+  $("cal_s2").disabled = measuring || k.phase < 2 || (k.flags & 1) !== 0;
+  $("cal_cancel").disabled = k.phase === 0;
+  const show = k.phase >= 2;
+  $("cal_result").hidden = !show;
+  if (!show) return;
+  const have2 = k.phase === 4;
+  $("cal_ch").textContent = k.channel < 8 ? "R" + (k.channel + 1) : "—";
+  $("cal_pass").textContent = `${dbh(k.passage[1])} · ${dbh(k.passage[3])}` + (k.passage_sat ? ` · ${k.passage_sat} % clipped` : "");
+  $("cal_away").textContent = have2 ? `${dbh(k.away[1])} · ${dbh(k.away[3])}` : "—";
+  $("cal_warn").innerHTML = CAL_WARN.filter(w => k.flags & w[0]).map(w => `<li>${w[1]}</li>`).join("") +
+    (k.gain_steps ? `<li>Suggested: ${k.gain_steps < 0 ? "lower" : "raise"} the gain by one step (2).</li>` : "");
+  const rec = have2 && !(k.flags & 1);
+  $("cal_rec").hidden = !rec;
+  if (rec) {
+    $("cr_min").textContent = (k.rec.min_peak / 10).toFixed(1); $("cr_act").textContent = (k.rec.active / 10).toFixed(1);
+    $("cr_hys").textContent = (k.rec.hysteresis / 10).toFixed(1); $("cr_drop").textContent = (k.rec.drop / 10).toFixed(1);
+  }
+}
+async function calDo(action, msg) {
+  if (calBusy) return;
+  calBusy = true; $("cal_msg").textContent = msg || ""; $("cal_msg").className = "muted";
+  const k = await calCall(action);
+  calBusy = false;
+  if (k.error === "logged out") { $("cal_msg").textContent = ""; return; }
+  if (k.error || !k.ok) { $("cal_msg").textContent = k.error || k.msg; $("cal_msg").className = "bad"; }
+  else $("cal_msg").textContent = action === "apply" ? "applied and saved" : "";
+  if (!k.error) calRender(k);
+  calAt = Date.now();
+}
+async function calPoll() {   // a running or finished session every second, an idle one every 5 s
+  if (!admin || $("home").hidden || calBusy) return;
+  if (calPhase === 0 && Date.now() - calAt < 5000) return;
+  const k = await calCall("state");
+  if (k.error) return;
+  calRender(k);
+  calAt = Date.now();
+}
+$("cal_s1").addEventListener("click", () => calDo("start1", "starting…"));
+$("cal_s2").addEventListener("click", () => calDo("start2", "starting…"));
+$("cal_cancel").addEventListener("click", () => calDo("cancel"));
+$("cal_apply").addEventListener("click", () => {
+  if (confirm("Apply these thresholds? They replace the minimum peak, activity, hysteresis and drop (saved on the C5).")) calDo("apply", "sending…");
+});
+setInterval(calPoll, 1000);
 
 // Debug: the C5's console text (POST /api/log from the position we have) and its keys.
 const DBG_MAX = 60000;

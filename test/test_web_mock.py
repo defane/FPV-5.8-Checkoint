@@ -594,5 +594,46 @@ class MasterCalib(unittest.TestCase):
         self.assertEqual(self.call("start1")["flags"] & 32, 32, "the rests are being learnt: busy")
 
 
+class NodeCalib(unittest.TestCase):
+    """The degraded C3's /api/calib (c3_web.c post_calib): the same session as the C6's, one gate, applied into its config."""
+
+    def setUp(self):
+        self.sim = web_mock.Node()
+        self.sim.state(60.0)
+        self.t = 60.0
+
+    def call(self, action, dt=0.0):
+        self.t += dt
+        return self.sim.calib({"action": action}, self.t)
+
+    def test_two_steps_apply_and_the_config_follows(self):
+        before = dict(self.sim.config)
+        self.assertEqual(self.call("start1")["phase"], 1)
+        self.assertEqual(self.call("state", 6.0)["phase"], 2)
+        self.call("start2")
+        out = self.call("state", 6.0)
+        self.assertEqual((out["phase"], out["rec"]), (4, web_mock.CAL_REC))
+        self.assertEqual(self.sim.config, before, "nothing changes before Apply")
+        self.assertTrue(self.call("apply")["ok"])
+        self.assertEqual((self.sim.config["active_db_x10"], self.sim.config["min_peak_db_x10"],
+                          self.sim.config["hysteresis_db_x10"], self.sim.config["drop_db_x10"]), (105, 125, 40, 30))
+        self.assertEqual(self.sim.config["rearm_db_x10"], before["rearm_db_x10"], "D stays")
+        self.assertEqual(self.call("state")["phase"], 0)
+
+    def test_no_reset_and_a_missing_c5(self):
+        self.assertIsNone(self.call("reset"), "the C3 has no fleet thresholds to go back to")
+        self.sim.gate.run("reboot", self.t)
+        out = self.call("start1")
+        self.assertEqual((out["ok"], out["msg"]), (False, "no C5 linked"))
+
+    def test_page_sends_what_the_firmware_reads(self):
+        page = (ROOT / "firmware/node/main/www/index.html").read_text()
+        src = (ROOT / SOURCES[web_mock.Node]).read_text()
+        self.assertIn('"/api/calib", JSON.stringify({ action })', page)
+        self.assertEqual(c_reads(c_function(src, "post_calib"), src), {"action"})
+        self.assertLessEqual({"action"}, mock_reads(web_mock.Node, "calib"))
+        self.assertLess(len('{"action":"start1"}'), web_mock.Node.ADMIN["/api/calib"][1])
+
+
 if __name__ == "__main__":
     unittest.main()

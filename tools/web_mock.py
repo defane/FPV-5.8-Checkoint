@@ -305,7 +305,69 @@ class ConsoleDebug:
         return {"ok": True}
 
 
-class Master(ConsoleDebug):
+class PassageCalib:
+    """The passage calibration's session (cp_calib.c) as the pages' /api/calib answers it: two measurements of
+    a drone, then a proposal. CAL_DEFAULT_GATE: what a body without "gate" means (the C3's pages never send one)."""
+    CAL_DEFAULT_GATE = -1
+    CAL_ACTIONS = ("state", "start1", "start2", "cancel", "apply", "reset")
+
+    def init_calib(self):
+        self.cals, self.applied = {}, {}                  # sessions and applied proposals, by gate
+
+    def apply_calib(self, gate):
+        self.applied[gate] = dict(CAL_REC)
+
+    def cal_state(self, gate, t):
+        """The session of a gate as c6_web.c's post_calib() answers it."""
+        s = self.cals.setdefault(gate, {"phase": 0, "end": 0.0, "flags": 0})
+        if s["phase"] in (1, 3) and t >= s["end"]:
+            s["phase"] = 2 if s["phase"] == 1 else 4              # finish(): measured, then solved
+        left = max(0, int(s["end"] - t + 0.999)) if s["phase"] in (1, 3) else 0
+        ph = s["phase"]
+        return {"ok": True, "msg": "", "gate": gate, "phase": ph, "secs_left": left, "flags": s["flags"],
+                "channel": (self.c5_of(gate) or self.local).channel if ph >= 2 else 255,
+                "passage": CAL_PASSAGE if ph >= 2 else [0] * 5, "passage_sat": 0,
+                "away": CAL_AWAY if ph == 4 else [0] * 5,
+                "rec": CAL_REC if ph == 4 else {"active": 0, "hysteresis": 0, "drop": 0, "min_peak": 0}, "gain_steps": 0}
+
+    def calib(self, b, t):
+        """post_calib() in c6_web.c / c3_web.c: None for its 400s. A remote gate goes through its node (the C6)."""
+        gate, action = b.get("gate", self.CAL_DEFAULT_GATE), b.get("action")
+        if not 0 <= gate < 16 or action not in self.CAL_ACTIONS:
+            return None
+        ok, msg = True, ""
+        s = self.cals.setdefault(gate, {"phase": 0, "end": 0.0, "flags": 0})
+        reach = self.c5_of(gate)
+        if reach is not None and not reach.up(t):
+            reach = None
+        self.cal_state(gate, t)                                     # a measurement that has ended finishes first
+        if action in ("start1", "start2", "apply") and reach is None:
+            ok, msg = False, "no C5 linked"
+        elif action in ("start1", "start2"):
+            step = 1 if action == "start1" else 2
+            if s["phase"] in (1, 3) or reach.calibrating(t) or (step == 2 and s["phase"] not in (2, 4)):
+                s["flags"] |= 32                                    # PC_BUSY: refused, the session goes on
+            else:
+                s.update(phase=step if step == 1 else 3, end=t + CAL_SECS, flags=0)
+        elif action == "cancel":
+            s.update(phase=0, flags=0)
+        elif action == "apply":
+            if s["phase"] != 4 or reach is None:
+                ok, msg = False, "nothing to apply"
+            else:
+                self.apply_calib(gate)
+                s.update(phase=0, flags=0)
+        elif action == "reset":
+            if gate == 0:
+                ok, msg = False, "gate 0 keeps its own settings"
+            elif gate not in self.applied and reach is None:
+                ok, msg = False, "no such gate"
+            else:
+                self.applied.pop(gate, None)
+        return {**self.cal_state(gate, t), "ok": ok, "msg": msg}
+
+
+class Master(PassageCalib, ConsoleDebug):
     """firmware/master/main/c6_web.c."""
     TAG = "c6"
     # POST path -> (method, char buf[N] of its C handler)
@@ -319,7 +381,7 @@ class Master(ConsoleDebug):
         self.init_debug()
         self.vtx, self.pairing, self.volume, self.join_at = vtx, False, 60, None
         self.pairing_until = 0.0
-        self.cals, self.applied = {}, {}                  # passage-calibration sessions and applied proposals, by gate
+        self.init_calib()
         self.rearm = REARM_X10                            # the fleet's re-arm drop (c6_store)
         self.local = Gate(0, 0, 7.0, vtx)
         self.nodes = []
@@ -455,55 +517,6 @@ class Master(ConsoleDebug):
             g.rearm = x10
         return {"ok": True}
 
-    def cal_state(self, gate, t):
-        """The session of a gate as c6_web.c's post_calib() answers it."""
-        s = self.cals.setdefault(gate, {"phase": 0, "end": 0.0, "flags": 0})
-        if s["phase"] in (1, 3) and t >= s["end"]:
-            s["phase"] = 2 if s["phase"] == 1 else 4              # finish(): measured, then solved
-        left = max(0, int(s["end"] - t + 0.999)) if s["phase"] in (1, 3) else 0
-        ph = s["phase"]
-        return {"ok": True, "msg": "", "gate": gate, "phase": ph, "secs_left": left, "flags": s["flags"],
-                "channel": (self.c5_of(gate) or self.local).channel if ph >= 2 else 255,
-                "passage": CAL_PASSAGE if ph >= 2 else [0] * 5, "passage_sat": 0,
-                "away": CAL_AWAY if ph == 4 else [0] * 5,
-                "rec": CAL_REC if ph == 4 else {"active": 0, "hysteresis": 0, "drop": 0, "min_peak": 0}, "gain_steps": 0}
-
-    def calib(self, b, t):
-        """post_calib() in c6_web.c: None for its 400s. A remote gate goes through its node."""
-        gate, action = b.get("gate", -1), b.get("action")
-        if not 0 <= gate < 16 or action not in ("state", "start1", "start2", "cancel", "apply", "reset"):
-            return None
-        ok, msg = True, ""
-        s = self.cals.setdefault(gate, {"phase": 0, "end": 0.0, "flags": 0})
-        reach = self.c5_of(gate)
-        if reach is not None and not reach.up(t):
-            reach = None
-        self.cal_state(gate, t)                                     # a measurement that has ended finishes first
-        if action in ("start1", "start2", "apply") and reach is None:
-            ok, msg = False, "no C5 linked"
-        elif action in ("start1", "start2"):
-            step = 1 if action == "start1" else 2
-            if s["phase"] in (1, 3) or reach.calibrating(t) or (step == 2 and s["phase"] not in (2, 4)):
-                s["flags"] |= 32                                    # PC_BUSY: refused, the session goes on
-            else:
-                s.update(phase=step if step == 1 else 3, end=t + CAL_SECS, flags=0)
-        elif action == "cancel":
-            s.update(phase=0, flags=0)
-        elif action == "apply":
-            if s["phase"] != 4 or reach is None:
-                ok, msg = False, "nothing to apply"
-            else:
-                self.applied[gate] = dict(CAL_REC)
-                s.update(phase=0, flags=0)
-        elif action == "reset":
-            if gate == 0:
-                ok, msg = False, "gate 0 keeps its own settings"
-            elif gate not in self.applied and reach is None:
-                ok, msg = False, "no such gate"
-            else:
-                self.applied.pop(gate, None)
-        return {**self.cal_state(gate, t), "ok": ok, "msg": msg}
-
     def gain(self, b, t):
         """post_gain() in c6_web.c: None for its 400s."""
         gate, gain, force = b.get("gate", -1), b.get("gain", -1), b.get("force", 0)
@@ -566,14 +579,23 @@ class Master(ConsoleDebug):
         return {"ok": True, "sent": sent, "failed": failed, "busy": sorted(busy)}
 
 
-class Node(ConsoleDebug):
+class Node(PassageCalib, ConsoleDebug):
     """firmware/node/main/c3_web.c, the degraded local web."""
     TAG = "c3"
+    CAL_DEFAULT_GATE, CAL_ACTIONS = 0, ("state", "start1", "start2", "cancel", "apply")   # one gate, no "reset"
     ADMIN = {"/api/config": ("set_config", 512), "/api/command": ("command", 96), "/api/gain": ("gain", 64),
+             "/api/calib": ("calib", 64),
              "/api/log": ("log", 64), "/api/key": ("key", 96), "/api/debug": ("set_debug", 32)}
+
+    def apply_calib(self, gate):
+        """post_calib()'s apply in c3_web.c: the four thresholds into the stored config."""
+        self.config.update(active_db_x10=CAL_REC["active"], hysteresis_db_x10=CAL_REC["hysteresis"],
+                           drop_db_x10=CAL_REC["drop"], min_peak_db_x10=CAL_REC["min_peak"])
+        self.applied[gate] = dict(CAL_REC)
 
     def __init__(self, vtx=False):
         self.init_debug()
+        self.init_calib()
         self.gate = Gate(0, 0, 7.0, vtx, cal_needed=True)
         self.events, self.total = [], 0
         self.config = {"alpha_milli": 300, "active_db_x10": 150, "hysteresis_db_x10": 30, "drop_db_x10": 30,

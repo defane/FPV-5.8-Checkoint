@@ -228,7 +228,9 @@ page for a gate with no master.
   `CONFIG` it sends that node (pairing, back online, a change of D), so a re-send never erases it. The nodes table shows a
   *calibrated* pill; *Use the fleet's thresholds* (`action: "reset"`) drops it. API: `POST /api/calib`
   `{"gate": 0..15, "action": "state" | "start1" | "start2" | "cancel" | "apply" | "reset"}` answers the session
-  (phase, seconds left, flags, the drone's channel, the two measurements, the proposal).
+  (phase, seconds left, flags, the drone's channel, the two measurements, the proposal). The degraded C3's page has the
+  same card (`POST /api/calib` `{"action": ...}`, no gate and no *reset*): *Apply & save* puts the four thresholds in
+  its stored config and pushes them to its C5.
 - **Back online:** the C6 re-sends a node's `CONFIG` (gate, detector settings with the
   fleet's re-arm drop) when the node comes back online, and to each heartbeat (a C3 sends
   them only while it boots, until it hears its master), so a rebooted gate returns to its

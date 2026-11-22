@@ -30,6 +30,9 @@ static int32_t s_c5_rearm_x10 = -1;      /* its last CONFIG_STATE's re-arm drop;
 /* Relay mode: the master's last CONFIG for this gate (written by the ESP-NOW task, read by the
  * link task), pushed again when the C5 says HELLO. */
 static portMUX_TYPE s_master_mux = portMUX_INITIALIZER_UNLOCKED;
+static lp_calib_t s_calib;                 /* the C5's passage-calibration state, for the degraded web */
+static uint32_t s_calib_ms;                /* when it came, 0 = none */
+static portMUX_TYPE s_calib_mux = portMUX_INITIALIZER_UNLOCKED;
 static lp_config_t s_master_cfg;
 static bool s_has_master_cfg;
 
@@ -119,7 +122,20 @@ void c3_link_set_master_config(const lp_config_t *c) {
     c3_link_push_config(c);
 }
 
+bool c3_link_calib_get(lp_calib_t *out) {
+    portENTER_CRITICAL(&s_calib_mux);
+    *out = s_calib;
+    const uint32_t at = s_calib_ms;
+    portEXIT_CRITICAL(&s_calib_mux);
+    return at && out->phase != LP_CALIB_NONE && now_ms() - at <= 4000u;
+}
+
 void c3_link_calib_start(uint8_t step) {
+    if (step == 0) {
+        portENTER_CRITICAL(&s_calib_mux);
+        s_calib_ms = 0;                                      /* ended: the page stops showing it */
+        portEXIT_CRITICAL(&s_calib_mux);
+    }
     uint8_t b[LP_MAX_FRAME];
     enqueue(b, lp_encode_calib_start(b, sizeof b, step));   /* 0 (nothing sent) over step 2 */
 }
@@ -138,7 +154,13 @@ static void handle_msg(const lp_msg_t *m) {
     uint8_t b[LP_MAX_FRAME];
     switch (m->type) {
     case LP_MSG_LOG:        log_store(&m->data); break;
-    case LP_MSG_CALIB_STATE: c3_fleet_report_calib(&m->calib); break;
+    case LP_MSG_CALIB_STATE:
+        portENTER_CRITICAL(&s_calib_mux);
+        s_calib = m->calib;
+        s_calib_ms = now_ms() | 1u;
+        portEXIT_CRITICAL(&s_calib_mux);
+        c3_fleet_report_calib(&m->calib);
+        break;
     case LP_MSG_EVENT_PASS: if (s_on_pass) s_on_pass(&m->event); break;
     case LP_MSG_STATS:
         if (s_on_stats) s_on_stats(&m->stats);
@@ -158,6 +180,9 @@ static void handle_msg(const lp_msg_t *m) {
      * A degraded C3 asks for its config (its page follows the C5's). Either answer is a
      * CONFIG_STATE. */
     case LP_MSG_HELLO: {
+        portENTER_CRITICAL(&s_calib_mux);
+        s_calib_ms = 0;                                      /* a rebooted C5 has no session */
+        portEXIT_CRITICAL(&s_calib_mux);
         lp_config_t c = {0};
         portENTER_CRITICAL(&s_master_mux);
         const bool master = s_has_master_cfg;
