@@ -8,6 +8,7 @@ endif()
 # closure so it is discovered but not built for the C6.
 set(EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/../../components")
 set(COMPONENTS main)
+include(${CMAKE_CURRENT_LIST_DIR}/../version.cmake)   # PROJECT_VER, from ../../VERSION or CI
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 # One firmware, two targets: C6 (default) or a spare C5 as a stand-in master
 # (-DIDF_TARGET=esp32c5). Name the binary by role + chip so the two images are

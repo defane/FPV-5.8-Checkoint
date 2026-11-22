@@ -1,9 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-if(DEFINED CHECKPOINT_VERSION)
-    set(PROJECT_VER "${CHECKPOINT_VERSION}")
-else()
-    set(PROJECT_VER "5.0.0-dev")
-endif()
+include(${CMAKE_CURRENT_LIST_DIR}/../version.cmake)   # PROJECT_VER, from ../../VERSION or CI
 if(NOT DEFINED SDKCONFIG_DEFAULTS)
     set(SDKCONFIG_DEFAULTS "${CMAKE_CURRENT_LIST_DIR}/sdkconfig.defaults")
 endif()

@@ -134,7 +134,7 @@ typedef struct {
                                       * (its LO's captures fail, or the pair guard held it: its partner
                                       * clipped the ADC) */
 
-#define LP_FW_LEN 24u                /* firmware id incl. NUL, e.g. "5.0.0-dev+3201b7196ece" */
+#define LP_FW_LEN 24u                /* firmware id incl. NUL, e.g. "1.0.0-dev+3201b7196ece" */
 
 /* lp_stats_t.states: each channel's pass_detector pd_state_t (0 IDLE, 1 RISING, 2 PEAK_PASSED,
  * 3 COOLDOWN), 2 bits per channel, R1 (channel 0) in bits 1..0, R8 in bits 15..14. PEAK_PASSED

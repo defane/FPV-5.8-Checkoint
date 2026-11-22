@@ -191,6 +191,10 @@ roles (spectator vs admin password), degraded mode and the C5-as-master build:
 
 ## Build and tests
 
+Firmware version: one number for the three images, the `VERSION` file at the root (**1.0.0**; local builds
+`1.0.0-dev+<commit>`, CI `1.0.<run>` on main and `1.0.0-pr.<n>` on a PR); `firmware/version.cmake` reads it, and the C3 sends its
+major in its pairing request. Bump `VERSION` for a release.
+
 The root `Makefile` wraps the per-firmware commands: `make firmware` builds every
 variant, `make flash [FW=<name>] [PORT=<port>]` flashes one (interactive
 firmware/port menu when an arg is omitted), plus `make monitor`, `make variants`

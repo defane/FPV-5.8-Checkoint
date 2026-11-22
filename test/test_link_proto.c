@@ -168,7 +168,7 @@ int main(void) {
                          .flags = LP_HEALTH_CAL_NEEDED | LP_HEALTH_CALIBRATING, .gain = 83,
                          .passes = 41, .uptime_s = 86400, .heap_min = 123456,
                          .faults = 0xFFFFFFFEu, .levels = {0, 1, -2, 127, -127, LP_LEVEL_UNKNOWN, 7, 8},
-                         .fw = "5.0.0-dev+3201b7196ece" };
+                         .fw = "1.0.0-dev+3201b7196ece" };
         n = lp_encode_stats(buf, sizeof buf, &s);
         g = run(buf, n, got, 4);
         const lp_stats_t *r = &got[0].stats;
@@ -177,7 +177,7 @@ int main(void) {
              r->flags == (LP_HEALTH_CAL_NEEDED | LP_HEALTH_CALIBRATING) && r->gain == 83 &&
              r->passes == 41 && r->uptime_s == 86400 && r->heap_min == 123456 &&
              r->faults == 0xFFFFFFFEu && memcmp(r->levels, s.levels, LP_LEVELS) == 0 &&
-             strcmp(r->fw, "5.0.0-dev+3201b7196ece") == 0;
+             strcmp(r->fw, "1.0.0-dev+3201b7196ece") == 0;
         for (unsigned ch = 0; ch < LP_LEVELS; ch++) ok = ok && lp_state_of(r->states, ch) == want[ch];
         CHECK(ok, "stats roundtrip (each channel's state, health, negative cn, fw id, 56-byte payload)");
         CHECK(states == 0xC693u && buf[4 + 4] == 0x93u && buf[4 + 5] == 0xC6u,

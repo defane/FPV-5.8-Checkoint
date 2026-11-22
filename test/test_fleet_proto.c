@@ -19,11 +19,11 @@ int main(void) {
     fp_msg_t m;
 
     {
-        fp_pair_request_t s = { .nonce = 0xDEADBEEF, .seen_channel = 27, .fw_major = 5 };
+        fp_pair_request_t s = { .nonce = 0xDEADBEEF, .seen_channel = 27, .fw_major = 1 };
         size_t n = fp_encode_pair_request(buf, sizeof buf, &s);
         bool ok = n && fp_decode(buf, n, &m) && m.type == FP_MSG_PAIR_REQUEST &&
                   m.pair_request.nonce == 0xDEADBEEF && m.pair_request.seen_channel == 27 &&
-                  m.pair_request.fw_major == 5;
+                  m.pair_request.fw_major == 1;
         CHECK(ok, "pair_request roundtrip");
     }
     {
@@ -93,7 +93,7 @@ int main(void) {
                                .states = states, .passes = 9, .flags = LP_HEALTH_CAL_NEEDED,
                                .seq = 0xDEADBEEF, .gain = 76, .uptime_s = 3600,
                                .heap_min = 131072, .faults = 3, .levels = {1, -2, 3, LP_LEVEL_UNKNOWN, 5, 6, 127, -127},
-                               .rearm_db_x10 = 140, .fw = "5.0.12+abcdef123456" };
+                               .rearm_db_x10 = 140, .fw = "1.0.12+abcdef123456" };
         size_t n = fp_encode_node_status(buf, sizeof buf, &s);
         const fp_node_status_t *r = &m.node_status;
         bool ok = n && n <= FP_MAX_FRAME && fp_decode(buf, n, &m) && m.type == FP_MSG_NODE_STATUS &&
@@ -102,7 +102,7 @@ int main(void) {
                   r->flags == LP_HEALTH_CAL_NEEDED && r->seq == 0xDEADBEEF && r->gain == 76 &&
                   r->uptime_s == 3600 && r->heap_min == 131072 && r->faults == 3 &&
                   memcmp(r->levels, s.levels, LP_LEVELS) == 0 && r->rearm_db_x10 == 140 &&
-                  strcmp(r->fw, "5.0.12+abcdef123456") == 0;
+                  strcmp(r->fw, "1.0.12+abcdef123456") == 0;
         for (unsigned ch = 0; ch < LP_LEVELS; ch++) ok = ok && lp_state_of(r->states, ch) == want[ch];
         CHECK(ok, "node_status roundtrip (each channel's state, negative cn, seq, C5 health, re-arm drop, fw id)");
         CHECK(n == 4u + 64u && n == FP_MAX_FRAME, "node_status: 64-byte payload, a full FP_MAX_FRAME");
@@ -118,7 +118,7 @@ int main(void) {
         s.rearm_db_x10 = FP_REARM_UNKNOWN;
         n = fp_encode_node_status(buf, sizeof buf, &s);
         ok = n && fp_decode(buf, n, &m) && r->rearm_db_x10 == FP_REARM_UNKNOWN &&
-             memcmp(r->levels, s.levels, LP_LEVELS) == 0 && strcmp(r->fw, "5.0.12+abcdef123456") == 0;
+             memcmp(r->levels, s.levels, LP_LEVELS) == 0 && strcmp(r->fw, "1.0.12+abcdef123456") == 0;
         CHECK(ok, "node_status: an unknown re-arm drop (no echo yet) round-trips");
 
         memset(s.fw, 'x', sizeof s.fw);

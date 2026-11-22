@@ -236,7 +236,7 @@ ELF = "ab" * 32
 GOOD = [
     "ESP-ROM:esp32c5-eco2-20250121",
     "rst:0x1 (POWERON),boot:0x18 (SPI_FAST_FLASH_BOOT)",
-    f'FIRMWARE id=5.0.0-dev+f5a6999c0ffe version=5.0.0-dev commit=f5a6999c0ffee elf_sha256={ELF} '
+    f'FIRMWARE id=1.0.0-dev+f5a6999c0ffe version=1.0.0-dev commit=f5a6999c0ffee elf_sha256={ELF} '
     'built="Nov 15 2026 10:00:00" idf=v6.0.2 engine=sdr_rx chip_rev=v1.0',
     "BOOT_TIMING radio_ms=420",
     "CHECKPOINT prefs=defaults gain=40",
@@ -247,10 +247,10 @@ GOOD = [
     "SDR cal lo=5899 ms=44 irr_db=46.3 verify_gain=60 tries=1 dc=6 sat=0",
     "SDR ready lo=5677,5751,5825,5899 gain=40 cal_ms=174 boot_ms=1630 chip_rev=v1.0",
     # T, about 6 s after the boot.
-    f'FIRMWARE id=5.0.0-dev+f5a6999c0ffe version=5.0.0-dev commit=f5a6999c0ffee elf_sha256={ELF} '
+    f'FIRMWARE id=1.0.0-dev+f5a6999c0ffe version=1.0.0-dev commit=f5a6999c0ffee elf_sha256={ELF} '
     'built="Nov 15 2026 10:00:00" idf=v6.0.2 engine=sdr_rx chip_rev=v1.0',
     "STATUS uptime_s=6 heap_internal=61234 heap_largest=31744 heap_min=24100 heap_ok=1 scan_stack_free=1800 "
-    "console_stack_free=3900 usb_stack_free=1700 link_stack_free=2100 fw=5.0.0-dev+f5a6999c0ffe",
+    "console_stack_free=3900 usb_stack_free=1700 link_stack_free=2100 fw=1.0.0-dev+f5a6999c0ffe",
     "SDR plan=pairs lo=5677,5751,5825,5899 gain=40/83 rot_hz_x10=5100 rot_us=1961/2350 tune_us=225/310 "
     "cap_us=24 wait_us=1 dsp_us=237/280 faults=0 timeout=0 short=0 overrun=0 dsp=0 stale=0 recal=4 "
     "foreign_dc=0 dc_max=7 iq_bad=0x0 cal_needed=0 calibrating=0 init_failed=0 phy=1200,abcdef0,Oct 1 2025",

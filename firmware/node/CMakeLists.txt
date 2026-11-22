@@ -8,5 +8,6 @@ endif()
 # discovered but not built for the C3.
 set(EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/../../components")
 set(COMPONENTS main)
+include(${CMAKE_CURRENT_LIST_DIR}/../version.cmake)   # PROJECT_VER, from ../../VERSION or CI
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(node-c3)

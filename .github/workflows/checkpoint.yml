@@ -52,11 +52,12 @@ jobs:
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          # Main builds are 5.0.<run number>, PR builds 5.0.0-pr.<number>.
+          # The repository's VERSION file (1.0.0): main builds are 1.0.<run number>, PR builds 1.0.0-pr.<number>.
+          V=$(head -n1 VERSION)
           if [[ -n "$PR_NUMBER" ]]; then
-            echo "version=5.0.0-pr.${PR_NUMBER}" >> "$GITHUB_OUTPUT"
+            echo "version=${V}-pr.${PR_NUMBER}" >> "$GITHUB_OUTPUT"
           else
-            echo "version=5.0.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+            echo "version=${V%.*}.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
           fi
       - uses: actions/setup-node@v4   # test/*.mjs (the idf image has no node)
         with:

@@ -200,7 +200,7 @@ class Gate:
     def health(self, t):
         return {"passes": self.passes, "cal_needed": self.cal_needed, "calibrating": self.calibrating(t),
                 "gain": self.gain, "c5_uptime_s": max(0, int(t - self.booted)),
-                "heap_min": self.heap_min, "faults": self.faults, "fw": "5.0.0-mock", "rearm_db_x10": self.rearm}
+                "heap_min": self.heap_min, "faults": self.faults, "fw": "1.0.0-mock", "rearm_db_x10": self.rearm}
 
 
 class ConsoleDebug:

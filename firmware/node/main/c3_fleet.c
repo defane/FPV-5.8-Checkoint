@@ -1,6 +1,7 @@
 #include "c3_fleet.h"
 #include "c3_link.h"
 #include "espnow_link.h"
+#include "esp_app_desc.h"
 #include "esp_log.h"
 #include "esp_wifi_types.h"
 #include "esp_random.h"
@@ -10,6 +11,7 @@
 #include "freertos/task.h"
 #include "nvs.h"
 #include "status_led.h"
+#include <stdlib.h>
 #include <string.h>
 
 static const char *TAG = "c3_fleet";
@@ -167,8 +169,14 @@ esp_err_t c3_fleet_start_espnow(uint8_t channel) {
     return espnow_link_start(WIFI_IF_AP, channel, on_msg);
 }
 
+/* The major number of this image's version (VERSION at the repository root: 1 for 1.0.x). */
+static uint8_t fw_major(void) {
+    const esp_app_desc_t *d = esp_app_get_description();
+    return d ? (uint8_t)atoi(d->version) : 0;
+}
+
 static void send_pair_request(void) {
-    const fp_pair_request_t r = { .nonce = s_nonce, .seen_channel = s_channel, .fw_major = 5 };
+    const fp_pair_request_t r = { .nonce = s_nonce, .seen_channel = s_channel, .fw_major = fw_major() };
     uint8_t buf[FP_MAX_FRAME];
     size_t n = fp_encode_pair_request(buf, sizeof buf, &r);
     if (n) espnow_link_send(espnow_link_broadcast_addr(), buf, n);
