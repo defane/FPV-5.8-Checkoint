@@ -56,6 +56,15 @@ with no change on the gate side.
   `PAIR_REQUEST`; the C6 assigns it a gate (`PAIR_ACCEPT` + `CONFIG`),
   persisted on both sides. The channel those frames still carry is ignored. A node only asks
   while it boots, so with pairing closed it ends up degraded: open pairing, then reboot it.
+- **Gate order** (admin, C6 *Gates / nodes*): drag a row by its **⠿** handle, or focus the handle and press ↑ ↓, to
+  put the gates in the order of the track; they are numbered 1, 2, 3… as listed (gate 0 stays the master's own C5). The
+  page sends the whole list once the row is dropped, `POST /api/order` `{"order": [node ids, first gate first]}` →
+  `{"ok": true}` (or `{"ok": false}`, nothing changed, unless the list holds every paired node's id once: the page's
+  list may be stale). One call renumbers every gate, so the race timing restarts once and only the nodes whose gate
+  changed get a new `CONFIG`; the same order changes nothing. A remote gate in debug mode follows its node; the pages'
+  gate selectors go back to gate 0, since a number now names another node. *Remove* (red, asks first) forgets a
+  node, which must pair again; the others keep their numbers. A node's id is the lowest free one at pairing, so
+  it never repeats after a removal.
 - **Degraded C3:** if the C6 is unreachable for `CONFIG_C3_FLEET_TIMEOUT_MS` at
   boot, the C3 serves its own local AP + web (pass display, the channels' levels and
   states, detector settings). Its *Detector* card has the relative re-arm drop too, with an info

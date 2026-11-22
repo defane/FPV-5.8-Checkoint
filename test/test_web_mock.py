@@ -72,10 +72,11 @@ def page_posts(page):
 
 
 def c_reads(fn, src=""):
-    """The body keys a C handler parses (json_i/json_s), with the helpers it hands buf to (body_gate(buf))."""
-    keys = set(re.findall(r'json_[is]\(buf, "(\w+)"', fn))
+    """The body keys a C handler parses (json_i/json_s/json_ints), with the helpers it hands buf to (body_gate(buf))."""
+    reads = r'json_(?:[is]|ints)\(buf, "(\w+)"'
+    keys = set(re.findall(reads, fn))
     for helper in set(re.findall(r"\b(\w+)\(buf\)", fn)):
-        keys |= set(re.findall(r'json_[is]\(buf, "(\w+)"', c_function(src, helper)))
+        keys |= set(re.findall(reads, c_function(src, helper)))
     return keys
 
 
@@ -526,6 +527,59 @@ class MasterGain(GainCases, unittest.TestCase):
         off = self.sim.nodes[2]                                   # offline
         self.assertEqual(self.sim.gain({"gain": 44, "gate": off.gate}, t)["failed"], [off.gate])
         self.assertIsNone(self.sim.gain({"gain": 44, "gate": 9}, t), "no such gate")
+
+
+class MasterOrder(unittest.TestCase):
+    """The gate order (c6_web.c post_order, c6_hub_set_order): every node once, first gate first, gates 1..N."""
+
+    def setUp(self):
+        self.sim = web_mock.Master()
+        self.sim.state(60.0)
+        self.ids = [n.node_id for n in self.sim.nodes]
+        self.gates = lambda: {n.node_id: n.gate for n in self.sim.nodes}
+
+    def test_ids_start_at_zero_and_stay_unique_after_a_removal(self):
+        self.assertEqual(sorted(self.ids), list(range(len(self.ids))))
+        self.sim.remove_node({"node_id": 1}, 60.0)
+        self.sim.add_node(9, 9, 9.0)
+        ids = [n.node_id for n in self.sim.nodes]
+        self.assertEqual(len(set(ids)), len(ids), "a node paired after a removal never reuses a held id")
+        self.assertEqual(self.sim.nodes[-1].node_id, 1, "it takes the lowest free one")
+
+    def test_the_order_renumbers_the_gates_from_one(self):
+        want = list(reversed(self.ids))
+        self.assertEqual(self.sim.order({"order": want}, 60.0), {"ok": True})
+        self.assertEqual(self.gates(), {nid: i + 1 for i, nid in enumerate(want)})
+
+    def test_a_list_that_is_not_every_node_once_changes_nothing(self):
+        before = self.gates()
+        for bad in (self.ids[:-1], self.ids + [99], [self.ids[0]] * len(self.ids), [], "x", None):
+            self.assertEqual(self.sim.order({"order": bad}, 60.0), {"ok": False}, bad)
+        self.assertEqual(self.sim.order({}, 60.0), {"ok": False})
+        self.assertEqual(self.gates(), before)
+
+    def test_the_same_order_leaves_the_race_alone(self):
+        self.sim.order({"order": self.ids}, 60.0)           # makes the gates 1..N
+        self.sim.state(80.0)
+        laps = {c: s["laps"] for c, s in self.sim.laps.items()}
+        self.assertTrue(any(laps.values()))
+        self.sim.order({"order": self.ids}, 81.0)
+        self.assertEqual({c: s["laps"] for c, s in self.sim.laps.items()}, laps, "no change, no restart")
+        self.sim.order({"order": list(reversed(self.ids))}, 82.0)
+        self.assertEqual(self.sim.laps, {}, "a change restarts the race timing")
+
+    def test_a_remote_gate_in_debug_mode_follows_its_node(self):
+        node = self.sim.nodes[0]
+        self.sim.set_debug({"on": 1, "gate": node.gate}, 60.0)
+        self.sim.order({"order": list(reversed(self.ids))}, 61.0)
+        self.assertEqual(self.sim.debug_gate, node.gate, "debug mode stays on the same node")
+        self.assertEqual(self.sim.log({"since": 0, "gate": node.gate}, 61.0)["debug"], 1)
+
+    def test_the_old_per_node_save_is_gone(self):
+        self.assertNotIn("/api/node", web_mock.Master.ADMIN)
+        page = (ROOT / "firmware/master/main/www/index.html").read_text()
+        self.assertNotIn('class="save"', page)
+        self.assertNotIn('"/api/node",', page)
 
 
 class MasterCalib(unittest.TestCase):

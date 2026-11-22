@@ -204,6 +204,28 @@ static void nodes_load(void) {
     nvs_close(h);
 }
 
+static uint8_t free_node_id(void);
+
+/* A table saved before ids were handed out free could hold two nodes with one id (a removal, then a pairing):
+ * the web names nodes by id, so every later duplicate gets a free one. */
+static void nodes_unique_ids(void) {
+    bool changed = false;
+    for (unsigned i = 1; i < s_num_nodes; i++)
+        for (unsigned j = 0; j < i; j++)
+            if (s_nodes[j].node_id == s_nodes[i].node_id) { s_nodes[i].node_id = free_node_id(); changed = true; break; }
+    if (changed) nodes_save();
+}
+
+/* The lowest node id no paired node holds (ids name a node in the web's reorder and remove). s_lock held. */
+static uint8_t free_node_id(void) {
+    for (unsigned id = 0; id < 256u; id++) {
+        bool used = false;
+        for (unsigned i = 0; i < s_num_nodes && !used; i++) used = s_nodes[i].node_id == id;
+        if (!used) return (uint8_t)id;
+    }
+    return 0;
+}
+
 static c6_node_t *find_by_mac(const uint8_t mac[6]) {
     for (unsigned i = 0; i < s_num_nodes; i++)
         if (memcmp(s_nodes[i].mac, mac, 6) == 0) return &s_nodes[i];
@@ -251,7 +273,7 @@ static void handle_pair(const uint8_t mac[6], const fp_pair_request_t *req) {
         if (!pairing_open() || s_num_nodes >= C6_MAX_NODES) { xSemaphoreGive(s_lock); return; }
         n = &s_nodes[s_num_nodes];
         /* Link counters and C5 health start zeroed; next free gate (gate 0 is the local C5). */
-        *n = (c6_node_t){ .node_id = s_num_nodes, .gate_index = num_gates(),
+        *n = (c6_node_t){ .node_id = free_node_id(), .gate_index = num_gates(),
                           .channel = req->seen_channel, .cn_x10 = LP_CN_UNKNOWN,
                           .rearm_x10 = FP_REARM_UNKNOWN, .online = true, .last_seen_ms = now_ms() };
         memcpy(n->mac, mac, 6);
@@ -453,6 +475,7 @@ void c6_hub_start(void) {
     audio_player_play(AUDIO_SOUND_COIN, audio_pitch_for_channel(0));  /* speaker check */
 #endif
     nodes_load();
+    nodes_unique_ids();
     ovr_load();
     rt_init(&s_rt, &(rt_config_t){ .num_gates = num_gates() });
 
@@ -480,20 +503,43 @@ void c6_hub_set_pairing(bool open) {
     xSemaphoreGive(s_lock);
 }
 
-bool c6_hub_set_node(uint8_t node_id, uint8_t gate_index, uint8_t channel) {
-    if (gate_index < 1u || gate_index >= RT_MAX_GATES) return false;
+bool c6_hub_set_order(const uint8_t *ids, unsigned n) {
+    int at[C6_MAX_NODES];                         /* the table index of each id, in the order asked */
+    struct { uint8_t mac[6], gate, channel; } to[C6_MAX_NODES];
+    unsigned m = 0;
+    bool ok = n == s_num_nodes && n <= C6_MAX_NODES, changed = false;
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    c6_node_t *n = NULL;
-    for (unsigned i = 0; i < s_num_nodes; i++)
-        if (s_nodes[i].node_id == node_id) { n = &s_nodes[i]; break; }
-    if (!n) { xSemaphoreGive(s_lock); return false; }
-    n->gate_index = gate_index;
-    n->channel = channel;
-    nodes_save();
-    rt_init(&s_rt, &(rt_config_t){ .num_gates = num_gates() });
-    const c6_node_t snap = *n;
+    ok = ok && n == s_num_nodes;                  /* a node paired or removed since the page's list */
+    for (unsigned i = 0; ok && i < n; i++) {
+        at[i] = -1;
+        for (unsigned k = 0; k < s_num_nodes; k++) if (s_nodes[k].node_id == ids[i]) at[i] = (int)k;
+        for (unsigned j = 0; j < i; j++) if (at[j] == at[i]) ok = false;   /* an id twice */
+        if (at[i] < 0) ok = false;
+    }
+    if (!ok) { xSemaphoreGive(s_lock); return false; }
+    for (unsigned i = 0; i < n; i++) {            /* gates 1..N in the order asked */
+        c6_node_t *nd = &s_nodes[at[i]];
+        const uint8_t gate = (uint8_t)(i + 1u);
+        if (nd->gate_index == gate) continue;
+        nd->gate_index = gate;
+        changed = true;
+        if (nd->online) {
+            memcpy(to[m].mac, nd->mac, 6); to[m].gate = gate; to[m].channel = nd->channel;
+            m++;
+        }
+    }
+    if (changed) {
+        nodes_save();
+        rt_init(&s_rt, &(rt_config_t){ .num_gates = num_gates() });   /* the sectors are not the same gates any more */
+        if (s_dgate >= 0) {                       /* the debug target is a node: it follows it to its new gate */
+            s_dgate = -1;
+            for (unsigned k = 0; k < s_num_nodes; k++)
+                if (memcmp(s_nodes[k].mac, s_dmac, 6) == 0) s_dgate = s_nodes[k].gate_index;
+        }
+    }
     xSemaphoreGive(s_lock);
-    send_config_to(&snap);
+    for (unsigned i = 0; i < m; i++) send_config(to[i].mac, to[i].gate, to[i].channel);   /* offline: when back */
+    if (changed) ESP_LOGI(TAG, "gate order changed: %u node(s) renumbered, race timing restarted", m);
     return true;
 }
 

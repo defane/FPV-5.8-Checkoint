@@ -234,13 +234,31 @@ static esp_err_t post_pairing(httpd_req_t *req) {
     return ok_json(req, true);
 }
 
-static esp_err_t post_node(httpd_req_t *req) {
+/* The ints of the array "key":[1,2,3] of a flat body, at most max of them; -1 when the key or its array is absent. */
+static int json_ints(const char *body, const char *key, uint8_t *out, unsigned max) {
+    char pat[40];
+    snprintf(pat, sizeof pat, "\"%s\"", key);
+    const char *p = strstr(body, pat);
+    if (!p || !(p = strchr(p + strlen(pat), '['))) return -1;
+    unsigned n = 0;
+    for (p++; ; ) {
+        while (*p == ' ' || *p == ',') p++;
+        if (*p == ']') return (int)n;
+        char *end;
+        const long v = strtol(p, &end, 10);
+        if (end == p || v < 0 || v > 255 || n >= max) return -1;
+        out[n++] = (uint8_t)v;
+        p = end;
+    }
+}
+
+/* The order of the remote gates: {"order":[node ids, first gate first]}, every paired node once. */
+static esp_err_t post_order(httpd_req_t *req) {
     char buf[128];
     if (!web_auth_request(req, buf, sizeof buf)) return ESP_OK;
-    bool ok = c6_hub_set_node((uint8_t)json_i(buf, "node_id", -1),
-                              (uint8_t)json_i(buf, "gate", 0),
-                              (uint8_t)json_i(buf, "channel", 0));
-    return ok_json(req, ok);
+    uint8_t ids[C6_MAX_NODES];
+    const int n = json_ints(buf, "order", ids, sizeof ids);
+    return ok_json(req, n >= 0 && c6_hub_set_order(ids, (unsigned)n));
 }
 
 static esp_err_t post_node_remove(httpd_req_t *req) {
@@ -625,7 +643,7 @@ void c6_web_start(void) {
         { .uri = "/api/results",  .method = HTTP_GET,  .handler = get_results },
         { .uri = "/api/auth",     .method = HTTP_GET,  .handler = get_auth },
         { .uri = "/api/pairing",  .method = HTTP_POST, .handler = post_pairing },
-        { .uri = "/api/node",     .method = HTTP_POST, .handler = post_node },
+        { .uri = "/api/order",    .method = HTTP_POST, .handler = post_order },
         { .uri = "/api/node_remove", .method = HTTP_POST, .handler = post_node_remove },
         { .uri = "/api/reset",    .method = HTTP_POST, .handler = post_reset },
         { .uri = "/api/volume",   .method = HTTP_POST, .handler = post_volume },

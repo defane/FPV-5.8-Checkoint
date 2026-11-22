@@ -57,6 +57,15 @@
   #dbg_log { height: 260px; overflow: auto; margin: 0; padding: 8px; background: #0f1216; border-radius: 6px;
              font: .75rem/1.35 ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; word-break: break-all; }
   details > summary { cursor: pointer; }
+  /* Gate order: the grip is a drag handle (pointer events: mouse, touch, pen); the row follows the pointer's place. */
+  button.grip { background: transparent; border: 0; color: #8b97a7; padding: 2px 6px; margin-right: 2px; font-size: 1.1rem; line-height: 1;
+                cursor: grab; touch-action: none; -webkit-user-select: none; user-select: none; border-radius: 4px; }
+  button.grip:is(:hover, :focus-visible) { background: #2a313a; color: #e7ebf0; }
+  button.grip:focus-visible { outline: none; }                       /* the ring is drawn on the row */
+  #nodes tr:has(button.grip:focus-visible) { outline: 2px solid #93c5fd; outline-offset: -2px; }
+  tr.dragging { background: #232a33; box-shadow: 0 0 0 1px #2f6feb inset; }
+  html.gate-dragging, html.gate-dragging * { cursor: grabbing !important; }   /* the pointer has left the handle */
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   a.maint-link { color: #93c5fd; font-size: .85rem; text-decoration: none; border: 1px solid #2a313a; border-radius: 999px; padding: 4px 10px; }
   select { background: #0f1216; color: #e7ebf0; border: 1px solid #2a313a; border-radius: 6px; padding: 5px; }
   .tip { position: relative; display: inline-block; cursor: pointer; }
@@ -138,10 +147,13 @@
       <button id="pair_toggle" class="admin-only" title="Opens pairing for 5 minutes (it is closed at every boot); again to close it now">Toggle pairing</button>
       </div>
     <table>
-      <thead><tr><th>Gate</th><th>Node</th><th>Link</th><th title="C5 calibration state, capture faults and a re-arm drop other than the fleet's (hover for firmware, uptime, heap)">Health</th><th>RSSI</th><th>Loss</th><th>Seen</th><th class="admin-only"></th></tr></thead>
+      <thead><tr><th title="Drag a row by its handle (or focus it and press the up and down arrows) to change the order">Gate</th><th>Node</th><th>Link</th><th title="C5 calibration state, capture faults and a re-arm drop other than the fleet's (hover for firmware, uptime, heap)">Health</th><th>RSSI</th><th>Loss</th><th>Seen</th><th class="admin-only"></th></tr></thead>
       <tbody id="nodes"><tr><td colspan="8" class="muted">no nodes paired</td></tr></tbody>
     </table>
-    <p class="muted" style="margin:10px 0 0">Gate 0 is the master's own C5.</p>
+    <p class="muted" style="margin:10px 0 0">Gate 0 is the master's own C5.
+      <span class="admin-only">Drag a gate by its <b>⠿</b> handle (or focus it and press ↑ ↓) to change the order: the gates are numbered 1, 2, 3… as listed,
+      and the race timing restarts. <span id="order_msg"></span></span></p>
+    <p id="order_live" role="status" class="sr-only"></p>
   </div>
 
   <h2 class="adv admin-only">Passage calibration</h2>
@@ -579,16 +591,19 @@ async function poll() {
       const up = s.uptime_ms || 0;
       const seen = n => n.online ? Math.max(0, (up - n.last_seen_ms)/1000 | 0) + "s" : "—";
       const rearm = n => n.online ? rearmPill(n.rearm_db_x10, s.rearm_db_x10) + (n.custom ? CAL_PILL : "") : "";   // after its health
-      $("nodes").innerHTML = nodes.length ? nodes.map(n => admin ? `
-        <tr data-id="${n.node_id}" data-gate="${n.gate}" data-channel="${n.channel}">
-          <td><input type="number" min="1" max="15" value="${n.gate}" class="g"></td>
+      const byGate = [...nodes].sort((a, b) => a.gate - b.gate || a.node_id - b.node_id);
+      const ae = document.activeElement;                                   // a grip in focus keeps it over the redraw
+      const gripOf = ae && ae.classList && ae.classList.contains("grip") && $("nodes").contains(ae) ? ae.closest("tr").dataset.id : null;
+      $("nodes").innerHTML = nodes.length ? byGate.map(n => admin ? `
+        <tr data-id="${n.node_id}" data-gate="${n.gate}">
+          <td class="acts"><button type="button" class="grip" aria-label="Reorder gate ${n.gate}, node ${n.mac.slice(9)}: drag, or press up and down" aria-keyshortcuts="ArrowUp ArrowDown" title="Drag to change the order">⠿</button><b class="gnum">${n.gate}</b></td>
           <td class="muted">${n.mac.slice(9)}</td>
           <td class="${n.online?'on':'off'}">${n.online?'online':'offline'}</td>
           ${healthTd(n, rearm(n))}
           <td>${rssiTxt(n.rssi)}</td>
           <td title="${lossTitle(n)}">${lossTxt(n)}</td>
           <td>${seen(n)}</td>
-          <td class="admin-only acts"><button class="save">Save</button> <button class="ghost rm">✕</button></td>
+          <td class="admin-only acts"><button type="button" class="warn sm rm" title="Forget this gate: it must pair again">Remove</button></td>
         </tr>` : `
         <tr><td>${n.gate}</td><td class="muted">${n.mac.slice(9)}</td>
           <td class="${n.online?'on':'off'}">${n.online?'online':'offline'}</td>
@@ -597,6 +612,7 @@ async function poll() {
           <td title="${lossTitle(n)}">${lossTxt(n)}</td>
           <td>${seen(n)}</td></tr>`).join("")
         : '<tr><td colspan="8" class="muted">no nodes paired</td></tr>';
+      if (gripOf !== null) { const g = $("nodes").querySelector(`tr[data-id="${gripOf}"] .grip`); if (g) g.focus({ preventScroll: true }); }
     }
   } catch (e) { $("conn").hidden = false; }
 }
@@ -671,21 +687,111 @@ $("rearm_save").addEventListener("click", async () => {
   poll();
 });
 $("vol").addEventListener("change", async () => { await post("/api/volume", { volume: +$("vol").value }); });
-document.addEventListener("focusin", e => { if (e.target.closest("#nodes")) editing = true; });
-$("nodes").addEventListener("click", async e => {
-  const tr = e.target.closest("tr"); if (!tr || !admin) return;
-  const id = +tr.dataset.id;
-  if (e.target.classList.contains("save")) {   // a failed save must not freeze the table (editing)
-    try { await post("/api/node", { node_id: id, gate: +tr.querySelector(".g").value, channel: +tr.dataset.channel }); }
-    catch (_) { $("cmd_msg").textContent = "save failed: master not answering"; }
-    finally { editing = false; }
-    poll();
-  } else if (e.target.classList.contains("rm")) {
-    try { await post("/api/node_remove", { node_id: id }); }
-    catch (_) { $("cmd_msg").textContent = "remove failed: master not answering"; }
-    finally { editing = false; }
-    poll();
+// Gate order: drag a row by its grip, or focus it and press the arrows; the rows are renumbered as they move, and the
+// order goes to the master once the row is dropped (/api/order, every node id, first gate first). The table is not
+// redrawn by the poll meanwhile (editing). One pointer drives a drag, Escape puts it back.
+let dragRow = null, dragPointer = null, orderBefore = "", orderTimer = null, liveTimer = null;
+const rowIds = () => [...$("nodes").children].map(tr => +tr.dataset.id);
+const rowMac = tr => tr.children[1].textContent;
+function say(text) {                                   // polite, once, after a beat (a move that refocuses is swallowed otherwise)
+  clearTimeout(liveTimer); $("order_live").textContent = "";
+  liveTimer = setTimeout(() => { $("order_live").textContent = text; }, 300);
+}
+function renumber() {
+  [...$("nodes").children].forEach((tr, i) => {
+    const g = tr.querySelector(".gnum"), grip = tr.querySelector(".grip");
+    if (g) g.textContent = i + 1;
+    if (grip) grip.setAttribute("aria-label", `Reorder gate ${i + 1}, node ${rowMac(tr)}: drag, or press up and down`);
+  });
+}
+// moveBefore keeps what lives in a row (the focused grip); append/insertBefore drops it, so the grip is focused again by the callers.
+const canMoveBefore = typeof Element !== "undefined" && "moveBefore" in Element.prototype;
+function moveRow(tr, before) {                       // before: the row it goes in front of, null = last
+  if (before === tr || tr.nextElementSibling === before) return false;
+  if (canMoveBefore) $("nodes").moveBefore(tr, before); else $("nodes").insertBefore(tr, before);
+  renumber();
+  return true;
+}
+async function commitOrder() {
+  clearTimeout(orderTimer); orderTimer = null;
+  const order = rowIds();
+  if (order.join() === orderBefore) { editing = false; renumber(); return; }
+  $("order_msg").textContent = "saving…"; $("order_msg").className = "muted";
+  let msg = "", bad = false;
+  try {
+    const r = await post("/api/order", { order });
+    const ok = r.ok && (await r.json()).ok;
+    msg = ok ? "order saved" : r.status === 401 ? "admin password needed" : "the list changed: try again";
+    bad = !ok;
+    if (ok) gatesRenumbered();
+  } catch (e) { msg = /logged out|not logged in/.test(e.message) ? "" : "master not answering"; bad = !!msg; }
+  $("order_msg").textContent = msg; $("order_msg").className = bad ? "bad" : "muted";
+  if (msg) say(msg);
+  if (!bad) setTimeout(() => { if ($("order_msg").textContent === msg) $("order_msg").textContent = ""; }, 4000);
+  editing = false;
+  poll();
+}
+// Gate numbers now name other nodes: the gate the pages' controls had chosen would act on the wrong one, so they go back to gate 0.
+function gatesRenumbered() {
+  gainGate = 0; gainDirty = false; calGate = 0; calPhase = 0; dbgGate = 0;
+  dbgShow(false); dbgReset();
+}
+function restoreOrder() {                             // Escape: the rows as they were when the drag began
+  const byId = new Map([...$("nodes").children].map(tr => [String(tr.dataset.id), tr]));
+  for (const id of orderBefore.split(",")) { const tr = byId.get(id); if (tr) moveRow(tr, null); }
+}
+$("nodes").addEventListener("pointerdown", e => {
+  const grip = e.target.closest(".grip");
+  if (!grip || !admin || e.button || dragRow) return;   // the primary button, one drag at a time
+  dragRow = grip.closest("tr"); dragPointer = e.pointerId;
+  editing = true; orderBefore = rowIds().join();
+  dragRow.classList.add("dragging");
+  document.documentElement.classList.add("gate-dragging");
+  $("nodes").setPointerCapture(e.pointerId);        // on the tbody: it is not moved, the row is
+  e.preventDefault();
+});
+$("nodes").addEventListener("pointermove", e => {
+  if (!dragRow || e.pointerId !== dragPointer) return;   // a second finger changes nothing
+  const rows = [...$("nodes").children].filter(r => r !== dragRow);
+  moveRow(dragRow, rows.find(r => { const b = r.getBoundingClientRect(); return e.clientY < b.top + b.height / 2; }) || null);
+});
+function endDrag(e, cancel) {
+  if (!dragRow || (e && e.pointerId !== dragPointer)) return;
+  const row = dragRow;
+  row.classList.remove("dragging"); document.documentElement.classList.remove("gate-dragging");
+  dragRow = dragPointer = null;
+  if (cancel) { restoreOrder(); editing = false; say("Reordering cancelled"); return; }
+  const place = rowIds().indexOf(+row.dataset.id) + 1;
+  if (rowIds().join() !== orderBefore) say(`Gate ${place} of ${rowIds().length}: ${rowMac(row)} moved to position ${place}`);
+  commitOrder();
+}
+$("nodes").addEventListener("pointerup", e => endDrag(e, false));
+$("nodes").addEventListener("pointercancel", e => endDrag(e, true));
+$("nodes").addEventListener("lostpointercapture", e => endDrag(e, false));   // capture ended some other way: drop where it stands
+document.addEventListener("keydown", e => { if (e.key === "Escape" && dragRow) { e.preventDefault(); endDrag(null, true); } });
+$("nodes").addEventListener("keydown", e => {         // a grip in focus: ↑ ↓ move its row one place, saved a moment after the last
+  const grip = e.target.closest(".grip");
+  if (!grip || !admin || (e.key !== "ArrowUp" && e.key !== "ArrowDown")) return;
+  e.preventDefault();
+  const tr = grip.closest("tr");
+  if (!editing) { editing = true; orderBefore = rowIds().join(); }
+  const moved = e.key === "ArrowUp" ? tr.previousElementSibling && moveRow(tr, tr.previousElementSibling)
+                                    : tr.nextElementSibling && moveRow(tr, tr.nextElementSibling.nextElementSibling);
+  if (moved) {
+    grip.focus({ preventScroll: true });
+    tr.scrollIntoView({ block: "nearest", inline: "nearest" });
+    const place = rowIds().indexOf(+tr.dataset.id) + 1;
+    say(`Gate ${place} of ${rowIds().length}: ${rowMac(tr)}`);
   }
+  clearTimeout(orderTimer); orderTimer = setTimeout(commitOrder, 800);
+});
+$("nodes").addEventListener("click", async e => {
+  const tr = e.target.closest("tr"); if (!tr || !admin || !e.target.classList.contains("rm")) return;
+  const id = +tr.dataset.id, gate = tr.querySelector(".gnum").textContent, mac = tr.children[1].textContent;
+  if (!confirm(`Remove gate ${gate} (node ${mac})? It stops reporting and has to pair again. The other gates keep their numbers.`)) return;
+  try { await post("/api/node_remove", { node_id: id }); gatesRenumbered(); }
+  catch (_) { $("cmd_msg").textContent = "remove failed: master not answering"; }
+  poll();
 });
 // RX gain of one gate (a C5 forces it, saved there): the field follows the selected gate's gain until
 // the admin edits it. The VTX guard is the calibrations': a gate that sees a carrier asks first.

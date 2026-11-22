@@ -71,7 +71,11 @@ void c6_hub_set_volume(uint8_t pct);           /* 0..100 %, applied + saved in N
  * now to every online remote gate in its CONFIG (and from then on at pairing, a gate's save and
  * back online) and to gate 0 (c6_link_sync_rearm). */
 bool c6_hub_set_rearm(int32_t x10);
-bool c6_hub_set_node(uint8_t node_id, uint8_t gate_index, uint8_t channel);  /* reassign */
+/* The order of the remote gates: ids lists every paired node's id, first gate first; they get gates 1..N in that
+ * order (gate 0 stays the local C5), each online one its new CONFIG. False, nothing changed, unless ids is a
+ * permutation of all the paired nodes' ids (the page's list may be stale). A change restarts the race timing; the
+ * same order changes nothing. */
+bool c6_hub_set_order(const uint8_t *ids, unsigned n);
 bool c6_hub_remove_node(uint8_t node_id);
 void c6_hub_reset_race(void);
 bool c6_hub_reset_channel(uint8_t channel);

@@ -374,7 +374,7 @@ class Master(PassageCalib, ConsoleDebug):
     """firmware/master/main/c6_web.c."""
     TAG = "c6"
     # POST path -> (method, char buf[N] of its C handler)
-    ADMIN = {"/api/pairing": ("set_pairing", 128), "/api/node": ("set_node", 128),
+    ADMIN = {"/api/pairing": ("set_pairing", 128), "/api/order": ("order", 128),
              "/api/node_remove": ("remove_node", 128), "/api/reset": ("reset_race", 16),
              "/api/volume": ("set_volume", 128), "/api/command": ("command", 128),
              "/api/rearm": ("set_rearm", 64), "/api/gain": ("gain", 64), "/api/calib": ("calib", 64),
@@ -396,9 +396,13 @@ class Master(PassageCalib, ConsoleDebug):
                         "last_gate": 2, "seen_ms": 45000,
                         "history": [self.lap_entry(n, 8840 + 93 * n) for n in range(4, 0, -1)]}
 
+    def free_node_id(self):
+        """The lowest id no paired node holds (free_node_id() in c6_hub.c: ids start at 0)."""
+        return next(i for i in range(256) if all(n.node_id != i for n in self.nodes))
+
     def add_node(self, gate, channel, period, rssi=-60, lost=0, online=True, **health):
         n = Gate(gate, channel, period, self.vtx, **health)
-        n.node_id, n.rssi, n.status_lost, n.online = len(self.nodes) + 1, rssi, lost, online
+        n.node_id, n.rssi, n.status_lost, n.online = self.free_node_id(), rssi, lost, online
         n.mac = f"7c:df:a1:10:20:{0x30 + n.node_id:02x}"
         self.nodes.append(n)
 
@@ -494,11 +498,23 @@ class Master(PassageCalib, ConsoleDebug):
         self.join_at = t + 4.0 if self.pairing else None
         return {"ok": True}
 
-    def set_node(self, b, t):
-        n = self.node_by_id(b)
-        if n:
-            n.gate, n.channel = b.get("gate", 0), b.get("channel", 0)
-        return {"ok": bool(n)}
+    def order(self, b, t):
+        """post_order() / c6_hub_set_order(): b["order"] lists every paired node's id, first gate first; gates 1..N follow
+        it. Not a permutation of the paired ids: {"ok": false}, nothing changes. A change restarts the race timing."""
+        ids = b.get("order")
+        if not isinstance(ids, list) or sorted(ids) != sorted(n.node_id for n in self.nodes):
+            return {"ok": False}
+        by_id = {n.node_id: n for n in self.nodes}
+        changed = False
+        debug_node = self.c5_of(self.debug_gate) if self.debug_gate else None   # a remote gate in debug mode follows its node
+        for i, nid in enumerate(ids):
+            if by_id[nid].gate != i + 1:
+                by_id[nid].gate, changed = i + 1, True
+        if changed:
+            self.reset_race()
+            if debug_node is not None:
+                self.debug_gate = debug_node.gate
+        return {"ok": True}
 
     def remove_node(self, b, t):
         n = self.node_by_id(b)
