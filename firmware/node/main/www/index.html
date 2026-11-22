@@ -121,12 +121,6 @@
     </div>
     <div class="muted" style="margin-top:10px;font-size:.85rem;word-break:break-all">firmware <span id="h_fw" style="color:#e7ebf0">—</span></div>
     <div class="admin-only">
-      <div class="bar" style="margin-top:12px">
-        <label class="muted">RX gain <input id="gain_in" type="number" min="10" max="83" step="2" style="width:70px"></label>
-        <button id="gain_set">Set gain</button>
-        <span id="gain_msg" class="muted"></span>
-      </div>
-      <div class="muted" style="margin-top:6px;font-size:.8rem">Forced, no AGC (40 by default). Lower it when a strong signal clips, raise it for a weak one. It is saved on the C5 and the gate learns its rests again: blind for a few seconds, every VTX off.</div>
       <div class="muted" style="margin-top:8px;font-size:.8rem">Radio calibration, reboot and the debug console are on the <a href="#maintenance" class="maint-link-inline" style="color:#93c5fd">Maintenance</a> page.</div>
     </div>
   </div>
@@ -158,6 +152,19 @@
     <label>Stale (ms) <input id="stale" type="number" step="250" min="1"></label>
     <button id="save">Apply &amp; save</button>
     <span id="msg" class="muted"></span>
+    <div class="field infobox">
+      <span><label for="gain_in">RX gain</label><button type="button" class="info" aria-label="About the RX gain"
+        aria-expanded="false" aria-controls="gain_note">i</button></span>
+      <input id="gain_in" type="number" min="10" max="83" step="2">
+      <div id="gain_note" class="note" hidden>
+        <p>The C5's receive gain, forced (no AGC): 10 to 83, 40 by default. It sets how far a drone rises over the noise.</p>
+        <p>Lower it when a strong signal clips (a VTX close to the antenna), raise it for a weak or far drone: the Passage calibration below says which.</p>
+        <p><b>Recommended: 40.</b></p>
+        <p>The C5 saves it and learns its rests again, so that gate is blind for a few seconds: every VTX off.</p>
+      </div>
+    </div>
+    <button id="gain_set">Set gain</button>
+    <span id="gain_msg" class="muted"></span>
   </div>
   </div>
 

@@ -142,13 +142,6 @@
       <tbody id="nodes"><tr><td colspan="8" class="muted">no nodes paired</td></tr></tbody>
     </table>
     <p class="muted" style="margin:10px 0 0">Gate 0 is the master's own C5.</p>
-    <div class="bar admin-only" style="margin-top:12px">
-      <label class="muted">RX gain of gate <select id="gain_gate"><option value="0">0 · master</option></select></label>
-      <input id="gain_in" type="number" min="10" max="83" step="2" style="width:70px" aria-label="RX gain">
-      <button id="gain_set">Set gain</button>
-      <span id="gain_msg" class="muted"></span>
-    </div>
-    <p class="muted admin-only" style="margin:6px 0 0;font-size:.8rem">Forced, no AGC (40 by default): lower it when a strong signal clips, raise it for a weak one. The C5 saves it and learns its rests again, so that gate is blind for a few seconds: every VTX off.</p>
   </div>
 
   <h2 class="adv admin-only">Passage calibration</h2>
@@ -209,6 +202,20 @@
     <p class="muted" style="margin:10px 0 0">One value for every gate, kept by the master: sent now, then to a gate at
       pairing, on its save, when it comes back online and when it reboots. A gate whose C5 runs another shows it next
       to its health (<span class="pill busy">D 12</span>).</p>
+    <div class="bar infobox" style="margin-top:14px">
+      <span><label for="gain_gate">RX gain of gate</label><button type="button" class="info" aria-label="About the RX gain"
+        aria-expanded="false" aria-controls="gain_note">i</button></span>
+      <select id="gain_gate"><option value="0">0 · master</option></select>
+      <input id="gain_in" type="number" min="10" max="83" step="2" aria-label="RX gain">
+      <button id="gain_set">Set gain</button>
+      <span id="gain_msg" class="muted"></span>
+      <div id="gain_note" class="note" hidden>
+        <p>The C5's receive gain, forced (no AGC): 10 to 83, 40 by default. It sets how far a drone rises over the noise.</p>
+        <p>Lower it when a strong signal clips (a VTX close to the antenna), raise it for a weak or far drone: the Passage calibration above says which.</p>
+        <p><b>Recommended: 40.</b></p>
+        <p>The C5 saves it and learns its rests again, so that gate is blind for a few seconds: every VTX off.</p>
+      </div>
+    </div>
   </div>
 
   <h2 class="adv">Master &amp; local gate (0)</h2>

@@ -212,8 +212,8 @@ page for a gate with no master.
   replies `{"ok": true}`, `{"ok": false, "vtx": true, "cn_x10": x}` or
   `{"ok": false, "msg": "no C5 linked"}`.
 - **RX gain** (admin): the C5 forces its gain (no AGC, 40 by default, saved in its NVS), set from the
-  web in *Gates / nodes* on the C6 (a gate selector, a field that follows the gate's current gain,
-  *Set gain*) and in the degraded C3's *C5 health* card. It goes as `GAIN` (`link_proto`) to
+  web in the *Detector* card on the C6, under the re-arm drop (a gate selector, a field that follows the gate's
+  current gain, *Set gain*) and in the degraded C3's *Detector* card. It goes as `GAIN` (`link_proto`) to
   a C5, relayed by `FP_MSG_GAIN` to a remote gate (from its master's MAC only, as `COMMAND`), and the C5
   does what the console's `K g/G` does, to that index: clamped to 10..the PHY's maximum (83), saved,
   the rests learnt again (a bench refuses it: `CHECKPOINT gain refused=busy`). It blinds the gate for
