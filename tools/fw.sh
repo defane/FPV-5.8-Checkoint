@@ -28,7 +28,7 @@ IDF_EXPORT="${IDF_EXPORT:-$HOME/esp/esp-idf-v6.0.2/export.sh}"
 # the base RAM/Wi-Fi/PHY tuning is never duplicated. To add a variant: drop a
 # resolve() case below + a sdkconfig.<tag>.defaults in the role dir, and list it
 # in FIRMWARES.
-FIRMWARES="detector detector-ipex detector-xiao-c5 detector-wave-c5-lcd node master master-wave-c5"
+FIRMWARES="detector detector-ipex detector-xiao-c5 detector-wave-c5-lcd node master master-wave-c5 master-wave-s3"
 
 # resolve <name> -> sets DIR CHIP SDKCFG DEFAULTS BUILDDIR BIN LABEL
 resolve() {
@@ -62,6 +62,10 @@ resolve() {
             DIR=firmware/master; CHIP=esp32c5; BIN=master-c5.bin
             SDKCFG=sdkconfig.c5; BUILDDIR=build-c5; DEFAULTS=sdkconfig.c5.defaults
             LABEL="fleet master -- ESP32-C5-Zero stand-in, WS2812 GPIO27" ;;
+        master-wave-s3)
+            DIR=firmware/master; CHIP=esp32s3; BIN=master-s3.bin
+            SDKCFG=sdkconfig.s3; BUILDDIR=build-s3; DEFAULTS="sdkconfig.defaults;sdkconfig.s3.defaults"
+            LABEL="fleet master -- ESP32-S3-Zero stand-in, WS2812 GPIO21" ;;
         "") echo "no firmware selected" >&2; return 2 ;;
         *)  echo "unknown firmware: '$1' (choose: $FIRMWARES)" >&2; return 2 ;;
     esac

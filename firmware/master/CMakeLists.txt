@@ -15,6 +15,8 @@ include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 # distinguishable (master-c6.bin vs master-c5.bin).
 if("$ENV{IDF_TARGET}" STREQUAL "esp32c5" OR "${IDF_TARGET}" STREQUAL "esp32c5")
     project(master-c5)
+elseif("$ENV{IDF_TARGET}" STREQUAL "esp32s3" OR "${IDF_TARGET}" STREQUAL "esp32s3")
+    project(master-s3)
 else()
     project(master-c6)
 endif()

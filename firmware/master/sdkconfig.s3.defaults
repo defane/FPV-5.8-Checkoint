@@ -1,0 +1,16 @@
+# master-wave-s3 overlay (on sdkconfig.defaults): the C6 master firmware on a
+# Waveshare ESP32-S3-Zero (4 MB). GPIO 19/20 are the S3's USB, so the C6 amp
+# defaults (18-21) cannot be used. SD is tied high on the amp board (-1).
+# The link uses the board's labelled UART0 pins (TX 43 / RX 44): the console
+# is on USB, so they are free.
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_C6_UART_TX_GPIO=43
+CONFIG_C6_UART_RX_GPIO=44
+CONFIG_C6_AUDIO_BCLK_GPIO=4
+CONFIG_C6_AUDIO_WS_GPIO=3
+CONFIG_C6_AUDIO_DOUT_GPIO=5
+CONFIG_C6_AUDIO_SD_GPIO=-1
+# Onboard WS2812 of the S3-Zero: RGB byte order like the other Waveshare
+# Zero boards (GRB showed the magenta pairing pulse as cyan).
+CONFIG_STATUS_LED_GPIO=21
+CONFIG_STATUS_LED_RGB_ORDER=y
