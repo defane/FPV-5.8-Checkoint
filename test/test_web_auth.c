@@ -110,18 +110,18 @@ static bool fail_mac(void *ctx, const uint8_t *const parts[], const size_t lens[
 
 /* ---- shared vectors (Python: hmac.new(K, msg, sha256)) ---- */
 /* Any 32-byte key: the core does not derive K (the build and the page do, PBKDF2);
- * this one is SHA-256("fpv58-checkpoint/c6:checkpoint"). */
+ * this one is SHA-256("letztimer/c6:letztimer"). */
 static const uint8_t KEY[32] = {
-    0x13, 0xa6, 0x66, 0x09, 0xc4, 0x4b, 0x40, 0x55, 0x0b, 0x8e, 0xa5, 0xce, 0x65, 0x5b, 0x11, 0x6e,
-    0x95, 0x43, 0x43, 0x9a, 0x78, 0x70, 0x30, 0x1f, 0xc9, 0x4e, 0xdf, 0x5b, 0x21, 0x7c, 0x53, 0x0e,
+    0x78, 0x91, 0x3f, 0x79, 0x44, 0xbf, 0x6e, 0xd9, 0x5b, 0x82, 0x52, 0xa3, 0xf0, 0x41, 0x27, 0x0c,
+    0xf2, 0x20, 0xb8, 0xcf, 0xd0, 0x72, 0x56, 0xce, 0x35, 0xa7, 0x7c, 0x83, 0xbe, 0xa7, 0xb4, 0x41,
 };
 static const uint8_t RND[16] = { 0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
                                  0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff };
 #define SID "00112233445566778899aabbccddeeff"
-#define SIG1 "4ca74e9d9a99af7f5f9a48e8cec40d2e2892d8541214aeb11a5305087ea9c40e"  /* 1 POST /api/reset {} */
-#define SIG2 "391ec91e5996b3a933f648d53cc00156fa0ce40b43859d7b6e358d4d58b62a3d"  /* 2 GET /api/auth "" */
+#define SIG1 "ec5ed5962d68079d7534e13c33946de4b48db48a2e4ca7ba574bdbc0d7441d8e"  /* 1 POST /api/reset {} */
+#define SIG2 "7289286c502f1f68a1a2dc55e803d1f7d744ef07be166767b7b2234b6946b181"  /* 2 GET /api/auth "" */
 #define BODY3 "{\"node_id\":1,\"gate\":2,\"channel\":3}"
-#define SIG3 "ef7f3361727f8339a720e97a887a73fab0b78cc74b778d36db241b504e79aacf"  /* 3 POST /api/node BODY3 */
+#define SIG3 "7445610216db2dfb139bc06e89e06ca5f1548fc1cd8d7c4f6830e3ed93554fd3"  /* 3 POST /api/node BODY3 */
 
 static wa_result_t req(wa_table_t *t, const char *sid, const char *seq, const char *sig,
                        const char *method, const char *uri, const char *body)

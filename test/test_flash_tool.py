@@ -1,4 +1,5 @@
-"""C5VRX-5 by Twotoz and contributors: tools/flash.py never line-resets or syncs a running receiver."""
+"""tools/flash.py (from C5VRX-5, by Twotoz and the C5VRX contributors) never line-resets or syncs a
+running detector, and checks a board from its console lines."""
 import contextlib
 import importlib.util
 import io
@@ -25,7 +26,7 @@ def run(argv, key_ack=True, has_esptool=True, flash_args=("flash_args",), rc=0):
     """main() with the board side mocked; returns (rc, key mock, esptool mock, output)."""
     with tempfile.TemporaryDirectory() as build:
         for name in flash_args:
-            (Path(build) / name).write_text("--flash-mode dio\n0x10000 c5vrx.bin\n")
+            (Path(build) / name).write_text("--flash-mode dio\n0x10000 detector-c5.bin\n")
         key = mock.Mock(return_value=key_ack)
         esptool = mock.Mock(return_value=mock.Mock(returncode=rc))
         out = io.StringIO()
@@ -66,7 +67,7 @@ class FlashToolTest(unittest.TestCase):
         esptool.assert_called_once()
 
     def test_checks_run_before_the_key(self):
-        # The key reboots the receiver into the loader, so a missing build or
+        # The key reboots the detector into the loader, so a missing build or
         # esptool must stop the tool before it is sent.
         for kw in ({"flash_args": ()}, {"has_esptool": False}):
             code, key, esptool, _, _ = run(["COM6"], **kw)
@@ -119,9 +120,9 @@ class FlashToolTest(unittest.TestCase):
             self.assertEqual(chk.call_args.args[2], booting)
             mon.assert_not_called()   # --check alone exits with its result
 
-    def test_option_dependencies(self):
-        for argv in (["--iq-every", "5", "--monitor"], ["--expect-video"],
-                     ["--iq", "x", "--iq-every", "5"]):
+    def test_c5vrx_only_options_are_gone(self):
+        # IQ snapshots (key I) and the video check have no counterpart on the sdr_rx detector.
+        for argv in (["--iq", "x"], ["--iq-every", "5", "--monitor"], ["--check", "--expect-video"]):
             with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
                 flash.main(["COM6"] + argv)
 
@@ -160,12 +161,12 @@ class MonitorTest(unittest.TestCase):
     def setUp(self):
         FakePort.opened = []
 
-    def monitor(self, port, keys, console=None, iq_every=0.0):
+    def monitor(self, port, keys, console=None):
         keys = list(keys)
         console = console or flash.Console(io.StringIO())
         flash_serial.Serial = port
         with mock.patch.dict(sys.modules, {"serial": flash_serial}), mock.patch.object(flash.time, "sleep"):
-            flash.monitor("COM6", lambda: keys.pop(0) if keys else "\x1d", console, iq_every)
+            flash.monitor("COM6", lambda: keys.pop(0) if keys else "\x1d", console)
         return console.out.getvalue()
 
     def test_opens_with_lines_low_and_forwards_keys(self):
@@ -189,53 +190,35 @@ class MonitorTest(unittest.TestCase):
         self.assertIn("port lost, reopening", out)
         self.assertIn("b", out.split("reopening")[1])
 
-
-    def test_iq_every_sends_i_on_the_period(self):
-        clock = iter(range(0, 1000, 4))   # each monotonic() call is 4 s later
-        port = FakePort()
-        with mock.patch.object(flash.time, "monotonic", lambda: next(clock)):
-            self.monitor(port, [None, None, None, "T", None], iq_every=10)
-        self.assertIn(b"I", port.writes)
-        self.assertIn(b"T", port.writes)
-        self.assertLess(port.writes.count(b"I"), 4)
-
     def test_monitor_does_not_retain_transcript(self):
         console = flash.Console(io.StringIO())
-        self.monitor(FakePort([b"FIELD_DIAG t=1\n"] * 100), [None] * 100, console)
+        self.monitor(FakePort([b"SCAN,1,-240,-236,-238,-241,-239,-237,-240,-238\n"] * 100), [None] * 100, console)
         self.assertEqual(console.lines, [])
-        self.assertEqual(console.out.getvalue().count("FIELD_DIAG t=1"), 100)
-
-
-IQ = bytes(range(256)) * 31 + bytes(254)
-
-
-def snapshot_lines(data=IQ, corrupt=False):
-    """The firmware's I output: header, 256-byte hex lines, checksum."""
-    h = flash.capture_iq_snapshot.fnv1a(data)
-    lines = [f"IQSNAP_BEGIN bytes=8190 rate_hz=40000000 format=Ihigh_Qlow gain=60 lane=2 freq_mhz=5800 "
-             f"fnv1a={h:08x} fw=abc"]
-    for off in range(0, len(data), 256):
-        lines.append(f"IQSNAP_DATA offset={off} {data[off:off + 256].hex()}")
-    lines.append(f"IQSNAP_END fnv1a={(h ^ corrupt):08x}")
-    return lines
+        self.assertEqual(console.out.getvalue().count("SCAN,1,"), 100)
 
 
 class ConsoleTest(unittest.TestCase):
-    def test_log_is_timestamped_and_field_diag_compare_reads_it(self):
-        spec = importlib.util.spec_from_file_location("compare", Path(__file__).parents[1] / "tools/field_diag_compare.py")
-        compare = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(compare)
+    def test_log_is_timestamped_and_scan_analyze_reads_it(self):
+        spec = importlib.util.spec_from_file_location("scan_analyze", Path(__file__).parents[1] / "tools/scan_analyze.py")
+        analyze = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(analyze)
         with tempfile.TemporaryDirectory() as d:
             path = Path(d) / "bench.log"
             with open(path, "w") as log:
                 c = flash.Console(io.StringIO(), log)
-                c.feed("FIELD_DIAG t=1 sync_valid_pct=100 gain=70 max=83\r\nFIELD_DIAG t=2 sync_")
-                c.feed("valid_pct=0 gain=70 max=83\n")
+                # A K S recording (lt_bench.c), split across reads as USB delivers it.
+                c.feed("SCANDUMP begin rotations=28 kept=2 kept_s=0.1 decim=14 format=qdb order=R1+R2,R3+R4,"
+                       "R5+R6,R7+R8 gain=40 rot_us=1961 fw=x\r\nSCAN,27454,-240,-236,-238,-241,-239,-237,-240,-238\r\n")
+                c.feed("SCAN,54908,-120,-236,-32768,-241,-239,-237,-240,-238\nSCANDUMP end rot")
+                c.feed("ations=28 decim=14 format=qdb order=R1+R2,R3+R4,R5+R6,R7+R8 gain=40\n")
                 c.note("CHECK result=pass")
             text = path.read_text()
-            self.assertRegex(text.splitlines()[0], r"^\d\d:\d\d:\d\d\.\d{3} FIELD_DIAG t=1 ")
+            self.assertRegex(text.splitlines()[0], r"^\d\d:\d\d:\d\d\.\d{3} SCANDUMP begin ")
             self.assertIn(" # CHECK result=pass", text)
-            self.assertEqual(compare.summary(str(path))["seconds"], 2)
+            rows, header = analyze.read_scans(text)
+            self.assertEqual([t for t, _ in rows], [27454, 54908])
+            self.assertEqual(rows[1][1][:3], [-120, -236, None])
+            self.assertEqual(analyze.read_dump(header, rows)["rot_us"], 1961.0)
 
     def test_partial_line_shown_once(self):
         c = flash.Console(io.StringIO())
@@ -245,63 +228,47 @@ class ConsoleTest(unittest.TestCase):
         self.assertEqual(c.out.getvalue(), "menu> ok\n")
         self.assertEqual(c.lines, ["menu> ok"])
 
-    def test_iq_snapshot_saved_not_printed(self):
-        with tempfile.TemporaryDirectory() as d:
-            c = flash.Console(io.StringIO(), iq_dir=Path(d))
-            # A STATUS prefix joined to the header, and a stream line in the middle.
-            lines = snapshot_lines()
-            lines[0] = "STATUS x " + lines[0]
-            lines.insert(5, "FIELD_DIAG t=9 gain=60")
-            c.feed("\n".join(lines) + "\n")
-            bins = list(Path(d).glob("iq_*.bin"))
-            self.assertEqual(len(bins), 1)
-            self.assertEqual(bins[0].read_bytes(), IQ)
-            self.assertIn('"freq_mhz": "5800"', bins[0].with_suffix(".json").read_text())
-            out = c.out.getvalue()
-            self.assertNotIn("IQSNAP_DATA", out)
-            self.assertIn("FIELD_DIAG t=9", out)
-            self.assertIn("IQ saved", out)
-
-    def test_bad_iq_snapshot_reported(self):
-        with tempfile.TemporaryDirectory() as d:
-            c = flash.Console(io.StringIO(), iq_dir=Path(d))
-            c.feed("\n".join(snapshot_lines(corrupt=True)) + "\nIQSNAP_REFUSED context_busy\n")
-            self.assertEqual(list(Path(d).iterdir()), [])
-            self.assertIn("not saved: IQ checksum mismatch", c.out.getvalue())
-            self.assertIn("IQSNAP_REFUSED context_busy", c.out.getvalue())
-
-    def test_without_iq_dir_snapshots_stay_on_screen(self):
-        c = flash.Console(io.StringIO())
-        c.feed("\n".join(snapshot_lines()) + "\n")
-        self.assertIn("IQSNAP_DATA offset=0 ", c.out.getvalue())
-
 
 ELF = "ab" * 32
+# The detector's boot and T lines, after the printf formats of firmware/detector/main/main.c,
+# components/letztimer and components/sdr_rx (no board log of the sdr_rx engine yet: the
+# values are illustrative).
 GOOD = [
     "ESP-ROM:esp32c5-eco2-20250121",
     "rst:0x1 (POWERON),boot:0x18 (SPI_FAST_FLASH_BOOT)",
-    "CAL_BOOT mode=baseline ms=410 searches=0 sweeps=0 dc_trim=0 boot_phase_budget_ms=600",
-    "BOOT_PHASE ms=320 budget_ms=600 state=settled",
-    f'FIRMWARE id=c5v5-1 version=1 commit=abc elf_sha256={ELF[:9]} built="Oct 26 2026" idf=v6.0.2 cal_dump=1',
-    # Board, 2026-10-26: main 45fb464 with heap_min, T about 6 s after the boot.
-    "C5VRX5 version=5.0.0-dev demod=U80P64-R1 lane=ultrafine gain_owner=keel1 uptime_s=6 heap_internal=24784 "
-    "heap_largest=17408 heap_min=2104 heap_dma=23236 heap_dma_largest=17408 heap_lp=1548 fw=c5v5-1",
-    "VIDEO_Q known=1 snr_x10=312 lines_x100=9850 lines=15 windows=60 periods=4 (end-to-end)",
-    "RANGE_DIAG gain index=54 max=83 rf_stage=3 rf_code=1 bb=2 fine=0 top_rf_stage_from=70 at_max=0 state=2",
-    "RANGE_DIAG chain sphase=settled dc_ok=1 dc_held=1 lane=ultrafine faults=0",
-    "RANGE_DIAG iq p50=9 coherence=80 cn_est_x10=180 (model, 12 MHz class) origin_pm=10 clip_pm=0 video_recent=1",
-    "RANGE_DIAG verdict=VIDEO_EVIDENCE strong C/N estimate with gain headroom",
-    "RANGE_DIAG history seconds=60 sync_evidence_ok_pct=100 at_max_gain_pct=0 dropouts=0",
+    f'FIRMWARE id=1.0.0-dev+f5a6999c0ffe version=1.0.0-dev commit=f5a6999c0ffee elf_sha256={ELF} '
+    'built="Nov 15 2026 10:00:00" idf=v6.0.2 engine=sdr_rx chip_rev=v1.0',
+    "BOOT_TIMING radio_ms=420",
+    "LETZTIMER prefs=defaults gain=40",
+    "LETZTIMER link=on uart=1 tx=6 rx=8 baud=115200",
+    "SDR cal lo=5677 ms=44 irr_db=47.9 verify_gain=60 tries=1 dc=6 sat=0",
+    "SDR cal lo=5751 ms=43 irr_db=51.2 verify_gain=60 tries=1 dc=5 sat=0",
+    "SDR cal lo=5825 ms=43 irr_db=49.6 verify_gain=60 tries=1 dc=7 sat=0",
+    "SDR cal lo=5899 ms=44 irr_db=46.3 verify_gain=60 tries=1 dc=6 sat=0",
+    "SDR ready lo=5677,5751,5825,5899 gain=40 cal_ms=174 boot_ms=1630 chip_rev=v1.0",
+    # T, about 6 s after the boot.
+    f'FIRMWARE id=1.0.0-dev+f5a6999c0ffe version=1.0.0-dev commit=f5a6999c0ffee elf_sha256={ELF} '
+    'built="Nov 15 2026 10:00:00" idf=v6.0.2 engine=sdr_rx chip_rev=v1.0',
+    "STATUS uptime_s=6 heap_internal=61234 heap_largest=31744 heap_min=24100 heap_ok=1 scan_stack_free=1800 "
+    "console_stack_free=3900 usb_stack_free=1700 link_stack_free=2100 fw=1.0.0-dev+f5a6999c0ffe",
+    "SDR plan=pairs lo=5677,5751,5825,5899 gain=40/83 rot_hz_x10=5100 rot_us=1961/2350 tune_us=225/310 "
+    "cap_us=24 wait_us=1 dsp_us=237/280 faults=0 timeout=0 short=0 overrun=0 dsp=0 stale=0 recal=4 "
+    "foreign_dc=0 dc_max=7 iq_bad=0x0 cal_needed=0 calibrating=0 init_failed=0 phy=1200,abcdef0,Oct 1 2025",
+    "LETZTIMER source=sdr live=1 learning=0 bench=0 engine_failed=0 stalled=0 stalls=0 gain=40 top=R1 "
+    "rise_db=0.3 state=IDLE rotations=2450 readings=19600 passes=0 alpha=0.25 tau_ms=60.8 active_db=8.0 "
+    "hyst_db=3.0 drop_db=4.0 min_peak_db=10.0 refractory_ms=1000 stale_ms=1000",
 ]
+READY = next(i for i, line in enumerate(GOOD) if line.startswith("SDR ready"))
+AFTER_BOOT = GOOD[READY + 1:]   # what T prints
 
 
 class EvaluateTest(unittest.TestCase):
     def test_healthy_board_passes(self):
-        problems, warnings, fields = flash.evaluate(GOOD, True, ELF, expect_video=True)
+        problems, warnings, fields = flash.evaluate(GOOD, True, ELF)
         self.assertEqual((problems, warnings), ([], []))
         self.assertEqual(fields["elf_match"], 1)
-        self.assertEqual((fields["snr_x10"], fields["gain"], fields["cn_est_x10"]), ("312", "54", "180"))
-        self.assertEqual(fields["verdicts"], "VIDEO_EVIDENCE")
+        self.assertEqual((fields["gain"], fields["rot_hz_x10"], fields["faults"], fields["cal_needed"]),
+                         ("40/83", "5100", "0", "0"))
 
     def fails(self, lines, booting=True, elf=ELF, **kw):
         return " | ".join(flash.evaluate(lines, booting, elf, **kw)[0])
@@ -311,52 +278,56 @@ class EvaluateTest(unittest.TestCase):
 
     def test_failures(self):
         self.assertIn("not the flashed build", self.fails(GOOD, elf="cd" * 32))
-        self.assertIn("did not finish booting", self.fails(GOOD[4:]))
+        self.assertIn("did not finish booting", self.fails([line for line in GOOD if "SDR ready" not in line]))
         self.assertIn("rebooted after the boot", self.fails(GOOD + ["rst:0xc (SW_CPU),boot:0x18"]))
         self.assertIn("crash", self.fails(GOOD + ["Guru Meditation Error: Core 0 panic'ed"]))
-        self.assertIn("faults=3", self.fails(self.swap("RANGE_DIAG chain", "RANGE_DIAG chain sphase=settled faults=3")))
+        self.assertIn("crash", self.fails(GOOD + ["E (12000) task_wdt: Task watchdog got triggered."]))
+        self.assertIn("engine faults=3", self.fails([line.replace(" faults=0 ", " faults=3 ") for line in GOOD]))
         self.assertIn("did not answer T", self.fails([line for line in GOOD if "FIRMWARE" not in line]))
-        self.assertIn("did not answer D", self.fails([line for line in GOOD if "RANGE_DIAG" not in line]))
-        self.assertIn("filter not read back", self.fails(GOOD + [
-            "RANGE_DIAG verdict=CALIBRATION_OR_PHY filter not read back as requested"]))
-        no_video = self.swap("VIDEO_Q", "VIDEO_Q known=0 snr_x10=0 lines_x100=0")
-        self.assertIn("no video", self.fails(no_video, expect_video=True))
-        self.assertEqual(self.fails(no_video), "")
+        # The boot prints a FIRMWARE line too: only the SDR plan= line proves T was answered.
+        self.assertEqual(self.fails(GOOD[:READY + 1]), "no SDR plan= line: the board did not answer T")
+        self.assertIn("engine health was not confirmed", self.fails([line.replace(" faults=0 ", " ") for line in GOOD]))
+
+    def test_failed_engine_init_is_named(self):
+        # sdr_rx_init failed: no SDR ready; T still answers (CAL_NEEDED, a fault, init_failed=1).
+        lines = [line for line in GOOD[:READY] if not line.startswith("SDR cal")] + [
+            "SDR cal lo=5677 err=ESP_ERR_TIMEOUT", "SDR init error err=ESP_ERR_TIMEOUT",
+            "SDR init failed: no detection; console stays up"] + [
+            line.replace(" faults=0 ", " faults=1 ").replace("cal_needed=0", "cal_needed=1")
+                .replace("init_failed=0", "init_failed=1") for line in AFTER_BOOT]
+        problems, warnings, _ = flash.evaluate(lines, True, ELF)
+        self.assertIn("did not finish booting (SDR init failed: no detection; console stays up)", problems[0])
+        self.assertIn("engine faults=1", " | ".join(problems))
+        self.assertIn("cal_needed=1", " | ".join(warnings))
 
     def test_running_board_check_skips_boot_and_image(self):
-        self.assertEqual(self.fails(GOOD[4:], booting=False, elf=None), "")
-
-    def test_incomplete_diagnostics_fail(self):
-        for tag in ("RANGE_DIAG chain", "RANGE_DIAG history"):
-            self.assertIn("incomplete RANGE_DIAG", self.fails([s for s in GOOD if not s.startswith(tag)]))
-        self.assertIn("incomplete RANGE_DIAG", self.fails(self.swap(
-            "RANGE_DIAG chain", "RANGE_DIAG chain sphase=settled")))
+        self.assertEqual(self.fails(AFTER_BOOT, booting=False, elf=None), "")
 
     def test_running_board_reboot_fails(self):
-        self.assertIn("rebooted", self.fails(GOOD[4:] + [GOOD[1]], booting=False, elf=None))
+        self.assertIn("rebooted", self.fails(AFTER_BOOT + [GOOD[1]], booting=False, elf=None))
 
     def test_boot_loop_reported_once_with_a_count(self):
-        # Board, 2026-10-26: a stale sdkconfig ran out of heap in receiver_start every boot.
+        # Board, 2026-10-26 (C5VRX image): a stale sdkconfig ran out of heap at every boot.
         crash = ["ESP_ERROR_CHECK failed: esp_err_t 0x101 (ESP_ERR_NO_MEM) at 0x420182f6",
                  "abort() was called at PC 0x4080c967 on core 0", "Rebooting...",
-                 "ESP-ROM:esp32c5-eco2-20250121", "rst:0xc (SW_CPU),boot:0x18 (SPI_FAST_FLASH_BOOT)",
-                 "CAL_BOOT mode=baseline ms=0"]
-        problems = flash.evaluate(GOOD[:2] + GOOD[2:3] + crash * 3 + GOOD[3:], True, ELF)[0]
-        self.assertEqual(len(problems), 3)
+                 "ESP-ROM:esp32c5-eco2-20250121", "rst:0xc (SW_CPU),boot:0x18 (SPI_FAST_FLASH_BOOT)"]
+        problems = flash.evaluate(GOOD[:3] + crash * 3 + GOOD[3:], True, ELF)[0]
+        self.assertEqual(len(problems), 2)
         self.assertIn("ESP_ERR_NO_MEM", problems[0])
         self.assertTrue(all(p.endswith("(x3)") for p in problems))
 
-    def test_settings_left_behind_only_warn(self):
-        problems, warnings, _ = flash.evaluate(GOOD + [
-            "RANGE_DIAG verdict=GAIN_FIXED a fixed gain is saved across boots",
-            "RANGE_DIAG verdict=CALIBRATION_OR_PHY sampling phase unverified (manual CALIBRATE only)"], True, ELF)
+    def test_cal_needed_only_warns(self):
+        problems, warnings, fields = flash.evaluate(self.swap("SDR plan=", GOOD[-2].replace(
+            "cal_needed=0", "cal_needed=1")), True, ELF)
         self.assertEqual(problems, [])
-        self.assertEqual(len(warnings), 2)
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("cal_needed=1", warnings[0])
+        self.assertEqual(fields["cal_needed"], "1")
 
     def test_heap_read_from_status_and_warned_when_low(self):
         _, warnings, fields = flash.evaluate(GOOD, True, ELF)
-        self.assertEqual((fields["heap_largest"], fields["heap_min"]), (17408, 2104))
-        low = [line.replace("heap_largest=17408", "heap_largest=6144").replace("heap_min=2104", "heap_min=900")
+        self.assertEqual((fields["heap_largest"], fields["heap_min"]), (31744, 24100))
+        low = [line.replace("heap_largest=31744", "heap_largest=6144").replace("heap_min=24100", "heap_min=900")
                for line in GOOD]
         problems, warnings, _ = flash.evaluate(low, True, ELF)
         self.assertEqual(problems, [])   # a warning, not a failure
@@ -365,7 +336,7 @@ class EvaluateTest(unittest.TestCase):
         self.assertEqual(warnings, [])
 
     def test_firmware_without_heap_min(self):
-        old = [line.replace(" heap_min=2104", "") for line in GOOD]
+        old = [line.replace(" heap_min=24100", "") for line in GOOD]
         _, warnings, fields = flash.evaluate(old, True, ELF)
         self.assertNotIn("heap_min", fields)
         self.assertEqual(warnings, [])
@@ -411,6 +382,28 @@ class ConfigDriftTest(unittest.TestCase):
         self.assertEqual(flash.config_drift(build),
                          ["ESP_WIFI_STATIC_RX_BUFFER_NUM=4 (sdkconfig.defaults: 2)"])
 
+    def board_overlay_choice(self, have_4mb):
+        # The XIAO overlay picks another member of the base defaults' flash-size choice.
+        build = self.build("CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y\n",
+                           {"ESPTOOLPY_FLASHSIZE_4MB": have_4mb, "ESPTOOLPY_FLASHSIZE_8MB": not have_4mb})
+        project = build.parent
+        (project / "sdkconfig.xiao-c5.defaults").write_text("CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y\n")
+        (build / "project_description.json").write_text(json.dumps({
+            "project_path": str(project),
+            "config_defaults": "sdkconfig.defaults;sdkconfig.xiao-c5.defaults"}))
+        members = [{"name": f"ESPTOOLPY_FLASHSIZE_{n}MB", "type": "bool"} for n in (1, 2, 4, 8)]
+        (build / "config" / "kconfig_menus.json").write_text(json.dumps([
+            {"type": "menu", "name": None, "children": [
+                {"type": "choice", "name": "ESPTOOLPY_FLASHSIZE", "children": members}]}]))
+        return build
+
+    def test_overlay_choice_member_replaces_the_base_one(self):
+        self.assertEqual(flash.config_drift(self.board_overlay_choice(have_4mb=False)), [])
+
+    def test_overlay_choice_still_reports_a_stale_member(self):
+        self.assertEqual(flash.config_drift(self.board_overlay_choice(have_4mb=True)),
+                         ["ESPTOOLPY_FLASHSIZE_8MB=False (sdkconfig.defaults: True)"])
+
     def test_drift_warned_before_flashing(self):
         drift = mock.Mock(return_value=["ESP_WIFI_STATIC_RX_BUFFER_NUM=4 (sdkconfig.defaults: 2)"])
         with mock.patch.object(flash, "config_drift", drift):
@@ -420,20 +413,51 @@ class ConfigDriftTest(unittest.TestCase):
         self.assertIn("sdkconfig differs from sdkconfig.defaults: ESP_WIFI_STATIC_RX_BUFFER_NUM=4", out)
 
 
+class OrderedPort(FakePort):
+    """FakePort that also records how many reads were still queued at each write."""
+
+    def __init__(self, reads=(), fail_open=0):
+        super().__init__(reads, fail_open)
+        self.unread_at_write = []
+
+    def write(self, b):
+        self.unread_at_write.append(len(self.reads))
+        super().write(b)
+
+
 class CheckBoardTest(unittest.TestCase):
-    def test_waits_for_boot_then_sends_t_and_d(self):
+    def check(self, reads, booting=True):
         FakePort.opened = []
-        text = "\n".join(GOOD) + "\n"
-        port = FakePort([b"", text[:150].encode(), b"", text[150:].encode()], fail_open=2)
+        port = OrderedPort(reads, fail_open=2)
         flash_serial.Serial = port
         clock = (x * 0.1 for x in range(100000))
         console = flash.Console(io.StringIO())
         with mock.patch.dict(sys.modules, {"serial": flash_serial}), mock.patch.object(flash.time, "sleep"), \
                 mock.patch.object(flash.time, "monotonic", lambda: next(clock)):
-            lines = flash.check_board("COM6", console, True)
-        self.assertEqual(port.writes, [b"T", b"D"])
+            lines = flash.check_board("COM6", console, booting)
+        return port, lines, next(clock)
+
+    def test_waits_for_sdr_ready_then_sends_t(self):
+        boot = "\n".join(GOOD[:READY + 1]) + "\n"
+        port, lines, _ = self.check([b"", boot[:150].encode(), b"", boot[150:].encode()] +
+                                    [b""] * 5 + ["\n".join(AFTER_BOOT).encode() + b"\n"])
+        self.assertEqual(port.writes, [b"T"])   # no D: the sdr_rx console has no such key
         self.assertTrue(all(o == (False, False) for o in FakePort.opened))
         self.assertEqual(lines, GOOD)
+
+    def test_t_is_sent_only_after_sdr_ready(self):
+        # Quiet reads while the LOs calibrate: T goes out only once SDR ready has been read.
+        boot = "\n".join(GOOD[:READY]) + "\n"
+        port, lines, _ = self.check([boot.encode()] + [b""] * 20 + [GOOD[READY].encode() + b"\n"])
+        self.assertEqual(port.writes, [b"T"])
+        self.assertEqual(port.unread_at_write, [0])
+        self.assertEqual(lines, GOOD[:READY + 1])
+
+    def test_a_failed_engine_init_ends_the_wait(self):
+        # No SDR ready will come: T goes out at once instead of after the 60 s boot timeout.
+        _, lines, t = self.check([b"SDR init failed: no detection; console stays up\n"])
+        self.assertLess(t, 10.0)
+        self.assertEqual(lines, ["SDR init failed: no detection; console stays up"])
 
 
 if __name__ == "__main__":

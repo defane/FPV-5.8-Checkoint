@@ -14,12 +14,22 @@ static const char *TAG = "c3_web";
 
 extern const uint8_t index_html_start[] asm("_binary_index_html_start");
 extern const uint8_t index_html_end[]   asm("_binary_index_html_end");
+extern const uint8_t app_js_start[] asm("_binary_app_js_start");
+extern const uint8_t app_js_end[]   asm("_binary_app_js_end");
 
 static esp_err_t get_root(httpd_req_t *req)
 {
+    web_auth_page_headers(req);              /* CSP: no inline script, so the page's code is /app.js */
     httpd_resp_set_type(req, "text/html");
     return httpd_resp_send(req, (const char *)index_html_start,
                            index_html_end - index_html_start - 1);
+}
+
+static esp_err_t get_app_js(httpd_req_t *req)
+{
+    web_auth_page_headers(req);
+    httpd_resp_set_type(req, "application/javascript");
+    return httpd_resp_send(req, (const char *)app_js_start, app_js_end - app_js_start);
 }
 
 /* The C5's firmware id comes off the wire: keep it a valid JSON string by
@@ -44,34 +54,45 @@ static void put_levels(char *b, size_t cap, const int8_t *levels)
     }
 }
 
+/* Each channel's detector state (pd_state_t, 0..3), R1 first: "0,3,..." (15 B). */
+static void put_states(char *b, size_t cap, uint16_t states)
+{
+    int o = 0;
+    for (unsigned ch = 0; ch < LP_LEVELS; ch++)
+        o += snprintf(b + o, cap - o, "%s%u", ch ? "," : "", lp_state_of(states, ch));
+}
+
 static esp_err_t get_state(httpd_req_t *req)
 {
     c3_snapshot_t s;
     c3_store_snapshot(&s);
-    char fw[LP_FW_LEN], levels[48];
+    char fw[LP_FW_LEN], levels[48], states[16];   /* levels 8 x "-1270" + 7 commas = 47 B */
     json_safe(fw, s.stats.fw, sizeof fw);
-    put_levels(levels, sizeof levels, s.has_stats ? s.stats.levels : NULL);
+    /* A silent C5's last levels and states are stale: unknown and IDLE, as the C6 shows one. */
+    const bool alive = c3_link_c5_alive(), live = s.has_stats && alive;
+    put_levels(levels, sizeof levels, live ? s.stats.levels : NULL);
+    put_states(states, sizeof states, live ? s.stats.states : 0u);
 
-    char body[2048];   /* worst case (16 events, every field at its widest): 1586 B */
+    char body[2048];   /* worst case (16 events, every field at its widest): 1620 B */
     int o = 0;
     o += snprintf(body + o, sizeof body - o,
                   "{\"has_config\":%s,\"config\":{\"alpha_milli\":%ld,\"active_db_x10\":%ld,"
                   "\"hysteresis_db_x10\":%ld,\"drop_db_x10\":%ld,\"min_peak_db_x10\":%ld,"
-                  "\"refractory_ms\":%lu,\"stale_ms\":%lu,\"volume_pct\":%u,\"muted\":%u},",
+                  "\"refractory_ms\":%lu,\"stale_ms\":%lu,\"rearm_db_x10\":%ld,\"volume_pct\":%u,\"muted\":%u},",
                   s.has_config ? "true" : "false",
                   (long)s.config.alpha_milli, (long)s.config.active_db_x10,
                   (long)s.config.hysteresis_db_x10, (long)s.config.drop_db_x10,
                   (long)s.config.min_peak_db_x10, (unsigned long)s.config.refractory_ms,
-                  (unsigned long)s.config.stale_ms, s.config.volume_pct, s.config.muted);
+                  (unsigned long)s.config.stale_ms, (long)s.config.rearm_db_x10, s.config.volume_pct,
+                  s.config.muted);
     o += snprintf(body + o, sizeof body - o,
                   "\"c5_alive\":%s,"
-                  "\"has_stats\":%s,\"stats\":{\"cn_x10\":%ld,\"channel\":%u,\"state\":%u,"
+                  "\"has_stats\":%s,\"stats\":{\"cn_x10\":%ld,\"states\":[%s],"
                   "\"flags\":%u,\"cal_needed\":%s,\"calibrating\":%s,\"gain\":%u,\"passes\":%lu,"
                   "\"uptime_s\":%lu,\"heap_min\":%lu,\"faults\":%lu,\"fw\":\"%s\",\"levels\":[%s]},"
                   "\"total_events\":%lu,\"events\":[",
-                  c3_link_c5_alive() ? "true" : "false",
-                  s.has_stats ? "true" : "false", (long)s.stats.cn_x10, s.stats.channel,
-                  s.stats.state, s.stats.flags,
+                  alive ? "true" : "false",
+                  s.has_stats ? "true" : "false", (long)s.stats.cn_x10, states, s.stats.flags,
                   (s.stats.flags & LP_HEALTH_CAL_NEEDED) ? "true" : "false",
                   (s.stats.flags & LP_HEALTH_CALIBRATING) ? "true" : "false", s.stats.gain,
                   (unsigned long)s.stats.passes, (unsigned long)s.stats.uptime_s,
@@ -140,6 +161,10 @@ static esp_err_t get_auth(httpd_req_t *req)
     return httpd_resp_sendstr(req, "{\"admin\":true}");
 }
 
+/* The page posts every detector field: 8 of them, about 330 B with every number at its widest
+ * JSON form (test/test_web_mock.py checks it against this buffer). A value the C5 refuses (out of
+ * range, the re-arm drop's 0..LP_REARM_MAX_X10 included) leaves it on its settings: its echo
+ * (CONFIG_STATE) replaces the stored copy, and the page shows it. */
 static esp_err_t post_config(httpd_req_t *req)
 {
     char buf[512];
@@ -154,6 +179,7 @@ static esp_err_t post_config(httpd_req_t *req)
     cur.min_peak_db_x10   = json_i(buf, "min_peak_db_x10", cur.min_peak_db_x10);
     cur.refractory_ms     = (uint32_t)json_i(buf, "refractory_ms", (int32_t)cur.refractory_ms);
     cur.stale_ms          = (uint32_t)json_i(buf, "stale_ms", (int32_t)cur.stale_ms);
+    cur.rearm_db_x10      = json_i(buf, "rearm_db_x10", cur.rearm_db_x10);
     cur.volume_pct        = (uint8_t)json_i(buf, "volume_pct", cur.volume_pct);
     cur.muted             = (uint8_t)json_i(buf, "muted", cur.muted);
 
@@ -204,12 +230,181 @@ static esp_err_t post_command(httpd_req_t *req)
     return httpd_resp_sendstr(req, "{\"ok\":true}");
 }
 
+/* Passage calibration of the C5 (admin; docs/detector.md): with a drone's VTX on, in the passage then 2 m away, it
+ * measures its channels and proposes thresholds. POST {"action": "state" | "start1" | "start2" | "cancel" |
+ * "apply", "channel": 0..7 (start1: the channel to measure; absent or anything else: any, the one standing highest)} answers the session like the C6's /api/calib (c6_web.c post_calib; "gate" is always 0 here). It never
+ * blinds the gate, so no VTX guard; a pass rung in step 1 is real. "apply" sets the four thresholds in the stored
+ * config (saved, pushed to the C5) and ends the session. */
+static esp_err_t post_calib(httpd_req_t *req)
+{
+    char buf[64], action[12];
+    if (!web_auth_request(req, buf, sizeof buf)) return ESP_OK;
+    if (!json_s(buf, "action", action, sizeof action)) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "action");
+        return ESP_FAIL;
+    }
+    bool ok = true;
+    const char *msg = "";
+    lp_calib_t k;
+    if (strcmp(action, "start1") == 0 || strcmp(action, "start2") == 0) {
+        ok = c3_link_c5_alive();
+        const int32_t ch = json_i(buf, "channel", LP_CALIB_ANY);   /* step 1's: R1..R8 as 0..7, else any */
+        if (ok) c3_link_calib_start(action[5] == '1' ? 1 : 2, ch >= 0 && ch < (int32_t)LP_LEVELS ? (uint8_t)ch : LP_CALIB_ANY);
+        else msg = "no C5 linked";
+    } else if (strcmp(action, "cancel") == 0) {
+        c3_link_calib_start(0, LP_CALIB_ANY);
+    } else if (strcmp(action, "apply") == 0) {
+        ok = c3_link_calib_get(&k) && k.phase == LP_CALIB_DONE && k.min_peak_db_x10 > 0;
+        if (ok) {
+            lp_config_t c;
+            (void)c3_store_get_config(&c);
+            c.active_db_x10 = k.active_db_x10;
+            c.hysteresis_db_x10 = k.hysteresis_db_x10;
+            c.drop_db_x10 = k.drop_db_x10;
+            c.min_peak_db_x10 = k.min_peak_db_x10;
+            c3_store_set_config(&c, true);
+            c3_link_push_config(&c);
+            c3_link_calib_start(0, LP_CALIB_ANY);
+            ESP_LOGW(TAG, "thresholds from the passage calibration: active %d hyst %d drop %d min_peak %d (x10)",
+                     (int)c.active_db_x10, (int)c.hysteresis_db_x10, (int)c.drop_db_x10, (int)c.min_peak_db_x10);
+        } else msg = "nothing to apply";
+    } else if (strcmp(action, "state") != 0) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "action");
+        return ESP_FAIL;
+    }
+    if (!c3_link_calib_get(&k)) memset(&k, 0, sizeof k);
+    static char out[480];                      /* larger than the stack; httpd runs one handler at a time */
+    const int o = snprintf(out, sizeof out,
+                           "{\"ok\":%s,\"msg\":\"%s\",\"gate\":0,\"phase\":%u,\"secs_left\":%u,\"flags\":%u,"
+                           "\"channel\":%u,\"passage\":[%d,%d,%d,%d,%d],\"passage_sat\":%u,\"away\":[%d,%d,%d,%d,%d],"
+                           "\"rec\":{\"active\":%d,\"hysteresis\":%d,\"drop\":%d,\"min_peak\":%d},\"gain_steps\":%d}",
+                           ok ? "true" : "false", msg, k.phase, k.secs_left, k.flags, k.channel,
+                           k.gate[0], k.gate[1], k.gate[2], k.gate[3], k.gate[4], k.gate_sat_pct,
+                           k.away[0], k.away[1], k.away[2], k.away[3], k.away[4],
+                           k.active_db_x10, k.hysteresis_db_x10, k.drop_db_x10, k.min_peak_db_x10, k.gain_steps);
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_send(req, out, o);
+}
+
+/* Set the C5's forced RX gain: {"gain":LP_GAIN_MIN..LP_GAIN_MAX,"force":0|1}. It blinds the gate for a
+ * moment (the rests are learnt again at the new gain) and wants every VTX off, so it follows
+ * post_command's rule: {"vtx":true,"cn_x10":N} while the gate sees a carrier, until the page asks the
+ * admin and retries with force. The new gain comes back in /api/state's stats. */
+static esp_err_t post_gain(httpd_req_t *req)
+{
+    char buf[64];
+    if (!web_auth_request(req, buf, sizeof buf)) return ESP_OK;
+    const int32_t gain = json_i(buf, "gain", -1);
+    if (gain < (int32_t)LP_GAIN_MIN || gain > (int32_t)LP_GAIN_MAX) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "gain");
+        return ESP_FAIL;
+    }
+    const bool force = json_i(buf, "force", 0) != 0;
+
+    httpd_resp_set_type(req, "application/json");
+    if (!c3_link_c5_alive())
+        return httpd_resp_sendstr(req, "{\"ok\":false,\"msg\":\"no C5 linked\"}");
+    if (!force) {
+        c3_snapshot_t s;
+        c3_store_snapshot(&s);
+        if (s.has_stats && s.stats.cn_x10 != LP_CN_UNKNOWN && s.stats.cn_x10 > s.config.active_db_x10) {
+            char r[64];
+            snprintf(r, sizeof r, "{\"ok\":false,\"vtx\":true,\"cn_x10\":%ld}", (long)s.stats.cn_x10);
+            return httpd_resp_sendstr(req, r);
+        }
+    }
+    c3_link_send_gain((uint8_t)gain);
+    ESP_LOGW(TAG, "gain %ld from web%s", (long)gain, force ? " (forced)" : "");
+    return httpd_resp_sendstr(req, "{\"ok\":true}");
+}
+
+/* Debug mode (admin): the C5's console text and typed keys. POST {"since":N} answers
+ * {"next":M,"lost":0|1,"text":"..."}: the bytes after position N (c3_link_log_read; the text
+ * holds no quote, backslash or control other than the newline, which is escaped here). The page
+ * asks again from "next". */
+static esp_err_t post_log(httpd_req_t *req)
+{
+    char buf[64];
+    if (!web_auth_request(req, buf, sizeof buf)) return ESP_OK;
+    char raw[C3_LOG_CHUNK];
+    uint32_t next;
+    bool lost;
+    const size_t n = c3_link_log_read((uint32_t)json_i(buf, "since", 0), raw, sizeof raw, &next, &lost);
+
+    char body[2 * C3_LOG_CHUNK + 96];
+    int o = snprintf(body, sizeof body, "{\"debug\":%u,\"next\":%lu,\"lost\":%u,\"c5_alive\":%u,\"text\":\"",
+                     c3_link_debug() ? 1u : 0u, (unsigned long)next, lost ? 1u : 0u, c3_link_c5_alive() ? 1u : 0u);
+    for (size_t i = 0; i < n; i++) {
+        if (raw[i] == '\n') { body[o++] = '\\'; body[o++] = 'n'; }
+        else body[o++] = raw[i];
+    }
+    o += snprintf(body + o, sizeof body - o, "\"}");
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_send(req, body, o);
+}
+
+/* Debug mode on or off ({"on":0|1}; no "on" only asks). Off at every boot: nothing is mirrored
+ * from the C5, and /api/key sends nothing, until an admin switches it on. */
+static esp_err_t post_debug(httpd_req_t *req)
+{
+    char buf[32];
+    if (!web_auth_request(req, buf, sizeof buf)) return ESP_OK;
+    const int32_t on = json_i(buf, "on", -1);
+    if (on >= 0) {
+        c3_link_debug_set(on != 0);
+        ESP_LOGW(TAG, "debug mode %s from web", on ? "ON" : "off");
+    }
+    char r[32];
+    snprintf(r, sizeof r, "{\"ok\":true,\"debug\":%u}", c3_link_debug() ? 1u : 0u);
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, r);
+}
+
+/* {"keys":"Ka","force":0|1}: typed on the C5's console as on its USB ("K" opens the settings
+ * menu, "T" is the status, "F"/"B" calibrate). The keys that blind the gate follow
+ * post_command's rule: refused with {"blind":true}, or {"vtx":true} while a carrier is seen,
+ * until the page asks the admin and retries with force. The C5's answer comes back through
+ * /api/log. */
+static esp_err_t post_key(httpd_req_t *req)
+{
+    char buf[96], keys[17];
+    if (!web_auth_request(req, buf, sizeof buf)) return ESP_OK;
+    if (!json_s(buf, "keys", keys, sizeof keys) || !keys[0]) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "no keys");
+        return ESP_FAIL;
+    }
+    if (!lp_keys_valid(keys)) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad key");
+        return ESP_FAIL;
+    }
+    const bool force = json_i(buf, "force", 0) != 0;
+
+    httpd_resp_set_type(req, "application/json");
+    if (!c3_link_debug())
+        return httpd_resp_sendstr(req, "{\"ok\":false,\"msg\":\"debug mode is off\"}");
+    if (!c3_link_c5_alive())
+        return httpd_resp_sendstr(req, "{\"ok\":false,\"msg\":\"no C5 linked\"}");
+    if (lp_keys_blind(keys) && !force) {
+        c3_snapshot_t s;
+        c3_store_snapshot(&s);
+        char r[72];
+        if (s.has_stats && s.stats.cn_x10 != LP_CN_UNKNOWN && s.stats.cn_x10 > s.config.active_db_x10)
+            snprintf(r, sizeof r, "{\"ok\":false,\"vtx\":true,\"cn_x10\":%ld}", (long)s.stats.cn_x10);
+        else
+            snprintf(r, sizeof r, "{\"ok\":false,\"blind\":true}");
+        return httpd_resp_sendstr(req, r);
+    }
+    c3_link_send_keys(keys, strlen(keys));
+    ESP_LOGW(TAG, "keys \"%s\" from web%s", keys, force ? " (forced)" : "");
+    return httpd_resp_sendstr(req, "{\"ok\":true}");
+}
+
 void c3_web_start(void)
 {
     web_auth_init(s_admin_key, ADMIN_SALT, ADMIN_ITERATIONS, ADMIN_AUTH_OPEN);
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.lru_purge_enable = true;
-    cfg.max_uri_handlers = 10;
+    cfg.max_uri_handlers = 15;   /* 13 here + web_auth's 2 */
     cfg.stack_size = 6144;       /* the signature's PSA HMAC under the handlers: ~3.5 KB of the 4 KB default */
     httpd_handle_t srv = NULL;
     if (httpd_start(&srv, &cfg) != ESP_OK) { ESP_LOGE(TAG, "httpd start failed"); return; }
@@ -219,11 +414,23 @@ void c3_web_start(void)
     const httpd_uri_t authu = { .uri = "/api/auth", .method = HTTP_GET, .handler = get_auth };
     const httpd_uri_t conf = { .uri = "/api/config", .method = HTTP_POST, .handler = post_config };
     const httpd_uri_t cmd = { .uri = "/api/command", .method = HTTP_POST, .handler = post_command };
+    const httpd_uri_t appjs = { .uri = "/app.js", .method = HTTP_GET, .handler = get_app_js };
     httpd_register_uri_handler(srv, &root);
+    httpd_register_uri_handler(srv, &appjs);
     httpd_register_uri_handler(srv, &state);
     httpd_register_uri_handler(srv, &authu);
     httpd_register_uri_handler(srv, &conf);
     httpd_register_uri_handler(srv, &cmd);
+    const httpd_uri_t logu = { .uri = "/api/log", .method = HTTP_POST, .handler = post_log };
+    const httpd_uri_t keyu = { .uri = "/api/key", .method = HTTP_POST, .handler = post_key };
+    httpd_register_uri_handler(srv, &logu);
+    httpd_register_uri_handler(srv, &keyu);
+    const httpd_uri_t dbgu = { .uri = "/api/debug", .method = HTTP_POST, .handler = post_debug };
+    httpd_register_uri_handler(srv, &dbgu);
+    const httpd_uri_t gainu = { .uri = "/api/gain", .method = HTTP_POST, .handler = post_gain };
+    httpd_register_uri_handler(srv, &gainu);
+    const httpd_uri_t calu = { .uri = "/api/calib", .method = HTTP_POST, .handler = post_calib };
+    httpd_register_uri_handler(srv, &calu);
     web_auth_register(srv);   /* POST /api/session, GET /auth.js */
     ESP_LOGI(TAG, "web UI on http://192.168.4.1/");
 }

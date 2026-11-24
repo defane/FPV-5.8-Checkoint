@@ -2,7 +2,7 @@
 # generate admin_hash.h in its build dir and add that dir to its include path:
 #   ADMIN_KEY        PBKDF2-HMAC-SHA256(CONFIG_<config>, ADMIN_SALT, ADMIN_ITERATIONS),
 #                    the HMAC key of the page's signed admin requests (32 bytes)
-#   ADMIN_SALT       "fpv58-checkpoint/<tag>/" + 16 hex chars, random at each configure,
+#   ADMIN_SALT       "letztimer/<tag>/" + 16 hex chars, random at each configure,
 #                    so no precomputed table fits two builds
 #   ADMIN_ITERATIONS 200000: about 0.1 s on a desktop browser, 0.3-1 s on a phone,
 #                    once per login (the ESP never runs the derivation)
@@ -16,7 +16,7 @@ function(web_auth_admin_key config tag)
     idf_build_get_property(sdkconfig_json SDKCONFIG_JSON)
     idf_component_get_property(dir web_auth COMPONENT_DIR)
     string(RANDOM LENGTH 16 ALPHABET "0123456789abcdef" rnd)
-    set(admin_salt "fpv58-checkpoint/${tag}/${rnd}")
+    set(admin_salt "letztimer/${tag}/${rnd}")
     execute_process(COMMAND "${python}" "${dir}/admin_key.py" "${sdkconfig_json}" "${config}"
                             "${admin_salt}" "${iterations}"
                     OUTPUT_VARIABLE key_hex OUTPUT_STRIP_TRAILING_WHITESPACE

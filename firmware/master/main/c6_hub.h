@@ -17,7 +17,7 @@ typedef struct {
     uint8_t  channel;        /* assigned FPV channel code */
     int32_t  cn_x10;         /* last reported; LP_CN_UNKNOWN if none */
     int8_t   levels[LP_LEVELS];   /* last reported */
-    uint8_t  state;          /* pd_state_t of the node's detector */
+    uint16_t states;         /* each channel's detector state, lp_state_of() (all IDLE until told) */
     uint32_t last_seen_ms;
     bool     online;         /* seen within the liveness window */
     int8_t   rssi;           /* last ESP-NOW RSSI dBm; 0 = none yet */
@@ -32,8 +32,15 @@ typedef struct {
     uint8_t  gain;           /* RX gain index */
     uint32_t c5_uptime_s;
     uint32_t heap_min;       /* lowest free internal heap since boot, bytes */
-    uint32_t faults;         /* transport fault counters */
+    uint32_t faults;         /* capture faults (timeouts, short/overrun dumps, DSP errors)
+                              * + scan stalls, since its boot */
+    uint16_t rearm_x10;      /* the re-arm drop its C5 echoed *10, FP_REARM_UNKNOWN until told */
     char     fw[LP_FW_LEN];  /* firmware id */
+    lp_calib_t calib;        /* the C5's passage-calibration state, last relayed */
+    uint32_t calib_ms;       /* when it came, 0 = none yet or the node rebooted since */
+    bool     custom;         /* a snapshot's: this node has thresholds from a passage calibration (not the fleet's) */
+    bool     rearm_own;      /* a snapshot's: this node has a re-arm drop of its own (not the fleet's) */
+    uint16_t rearm_want_x10; /* a snapshot's: the D it should run, its own or the fleet's */
 } c6_node_t;
 
 typedef struct {
@@ -45,6 +52,7 @@ typedef struct {
 
 typedef struct {
     bool          pairing;
+    uint16_t      pairing_left_s;   /* seconds until an open pairing closes by itself, 0 when closed */
     uint8_t       num_gates;
     uint8_t       num_nodes;
     uint8_t       volume;        /* centralized audio volume, 0..100 % */
@@ -58,9 +66,22 @@ typedef struct {
 
 void c6_hub_start(void);                       /* after Wi-Fi AP is up */
 void c6_hub_local_pass(uint8_t channel, int32_t peak_db_x10, uint32_t at_ms);
+/* Pairing is closed at every boot. true opens it for 5 minutes (again from now if already open), false closes it. */
 void c6_hub_set_pairing(bool open);
 void c6_hub_set_volume(uint8_t pct);           /* 0..100 %, applied + saved in NVS */
-bool c6_hub_set_node(uint8_t node_id, uint8_t gate_index, uint8_t channel);  /* reassign */
+/* The fleet's relative re-arm drop *10 (0..LP_REARM_MAX_X10, else false): saved (c6_store), sent
+ * now to every online remote gate in its CONFIG (and from then on at pairing, a gate's save and
+ * back online) and to gate 0 (c6_link_sync_rearm). */
+bool c6_hub_set_rearm(int32_t x10);
+/* D of one gate only: its own value *10, or -1 to run the fleet's again; saved (gate 0 in c6_store, a remote gate by its
+ * nodes' MACs) and sent now. False for a value out of range or a gate with no node. c6_hub_set_rearm (the fleet's, "every
+ * gate") drops every gate's own D first. */
+bool c6_hub_set_rearm_gate(uint8_t gate, int32_t x10);
+/* The order of the remote gates: ids lists every paired node's id, first gate first; they get gates 1..N in that
+ * order (gate 0 stays the local C5), each online one its new CONFIG. False, nothing changed, unless ids is a
+ * permutation of all the paired nodes' ids (the page's list may be stale). A change restarts the race timing; the
+ * same order changes nothing. */
+bool c6_hub_set_order(const uint8_t *ids, unsigned n);
 bool c6_hub_remove_node(uint8_t node_id);
 void c6_hub_reset_race(void);
 bool c6_hub_reset_channel(uint8_t channel);
@@ -71,4 +92,27 @@ void c6_hub_snapshot(c6_fleet_t *out);
  * node(s) over ESP-NOW (false if none). The caller confirms the VTXs are off
  * before a calibration. */
 bool c6_hub_send_command(uint8_t gate_index, lp_cmd_t cmd);
+/* Force a gate's C5 RX gain (LP_GAIN_MIN..LP_GAIN_MAX): 0 is the local C5 over UART, 1.. its online
+ * node(s) over ESP-NOW. False when the gain is out of range or nobody could be reached. The C5
+ * relearns its rests: the caller confirms the VTXs are off first. */
+bool c6_hub_send_gain(uint8_t gate_index, uint8_t gain);
+/* Passage calibration of a gate's C5 (link_proto CALIB_*, docs/detector.md): start a step (0 ends the
+ * session, 1 passage, 2 away), read its latest state, apply the proposed thresholds. Gate 0 is the
+ * local C5. False when the gate's C5 cannot be reached or there is nothing to apply. */
+bool c6_hub_calib_start(uint8_t gate_index, uint8_t step, uint8_t channel);   /* channel: 0..7 or LP_CALIB_ANY (step 1) */
+bool c6_hub_calib_get(uint8_t gate_index, lp_calib_t *out);
+bool c6_hub_calib_apply(uint8_t gate_index);
+/* A remote gate back on the fleet's thresholds: its calibration override is dropped and the fleet's
+ * CONFIG sent. False for gate 0 (it keeps the C5's own settings) or a gate nobody answers for. */
+bool c6_hub_calib_reset(uint8_t gate_index);
 int32_t c6_hub_vtx_threshold_x10(void);        /* remote gates: C/N*10 above which a VTX is probably on (pushed active_db) */
+
+/* Debug mode of a remote gate (1..): its C5's console text and keys, over the node (fleet_proto
+ * DEBUG, KEY, LOG_REQ, LOG_CHUNK). One target at a time. on switches it on (the previous target
+ * off) and false when the gate has no online node; off switches the target off. It leaves by
+ * itself when the node reports it is out of debug (a reboot) or no c6_hub_log_read() comes for
+ * 10 s. The log is a ring like the local C5's: positions count bytes since it was switched on. */
+bool c6_hub_debug_set(uint8_t gate, bool on);
+int  c6_hub_debug_gate(void);                  /* the target gate, -1 none */
+size_t c6_hub_log_read(uint32_t since, char *out, size_t max, uint32_t *next, bool *lost);   /* renews the lease */
+bool c6_hub_send_keys(uint8_t gate, const char *keys, size_t n);   /* KEY to the gate's node; false if not its target */

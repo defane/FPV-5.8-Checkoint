@@ -1,4 +1,4 @@
-# FPV 5.8 Checkpoint — global build/flash helper.
+# Lëtz Timer — global build/flash helper.
 # All logic lives in tools/fw.sh so the recipes stay single-line and portable
 # (works with stock macOS GNU make 3.81 — no .ONESHELL needed).
 #
@@ -7,7 +7,7 @@
 #   make build-<name>                        build one (e.g. build-detector-xiao-c5)
 #   make flash  [FW=<name>] [PORT=<port>]    flash one (interactive menu if omitted)
 #   make monitor [FW=<name>] [PORT=<port>]   serial monitor (Ctrl-] to quit)
-#   make clean                               remove all build dirs
+#   make clean                               remove every build dir and generated sdkconfig
 #   make web-master / web-node               the web pages on a mock server, no board
 #                                            (tools/web_mock.py; WEB_ARGS="--vtx --latency 300")
 #

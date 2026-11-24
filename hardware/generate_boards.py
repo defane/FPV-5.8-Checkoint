@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The two checkpoint carrier boards, written as KiCad 9 files, then exported.
+"""The two LetzTimer carrier boards, written as KiCad 9 files, then exported.
 
     python3 hardware/generate_boards.py            # needs KiCad 9 (pcbnew, kicad-cli)
     python3 hardware/generate_boards.py --no-kicad # writes the .kicad_pcb only
@@ -78,7 +78,7 @@ class Board:
 
     def id(self):
         self.count += 1
-        return f'(uuid "{uuid.uuid5(uuid.NAMESPACE_URL, f"fpv58/{self.name}/{self.count}")}")'
+        return f'(uuid "{uuid.uuid5(uuid.NAMESPACE_URL, f"letztimer/{self.name}/{self.count}")}")'
 
     def net(self, name):
         if name not in self.nets:
@@ -223,7 +223,7 @@ class Board:
                   (25, "Edge.Cuts", "user", None), (27, "Margin", "user", None),
                   (31, "F.CrtYd", "user", "F.Courtyard"), (29, "B.CrtYd", "user", "B.Courtyard"),
                   (35, "F.Fab", "user", None), (33, "B.Fab", "user", None)]
-        lines = ['(kicad_pcb (version 20241229) (generator "fpv58") (generator_version "9.0")',
+        lines = ['(kicad_pcb (version 20241229) (generator "letztimer") (generator_version "9.0")',
                  "(general (thickness 1.6) (legacy_teardrops no))", '(paper "A4")', "(layers"]
         lines += [f"({i} {q(n)} {t}{' ' + q(u) if u else ''})" for i, n, t, u in layers]
         lines += [")", "(setup (pad_to_mask_clearance 0) (allow_soldermask_bridges_in_footprints no))"]
@@ -254,7 +254,7 @@ def power_zone(b):
 
 
 def back_legend(b, what, current):
-    for i, line in enumerate(("FPV 5.8 Checkpoint", what)):
+    for i, line in enumerate(("LETZ TIMER", what)):
         b.text(line, (22.0, 11.5 + i * 1.6), 0.8, "B.SilkS")
     for i, line in enumerate((f"+5V {current}, 4.6 to 5.5 V", "D1 D2 SS34, R1 R2 1k")):
         b.text(line, (42.5, 11.5 + i * 1.6), 0.8, "B.SilkS")
@@ -266,7 +266,7 @@ def stitch(b, points):
 
 
 def node():
-    b = Board("checkpoint-node", C5_X + MOD_W + 2.5 + MOD_W + MARGIN)
+    b = Board("letztimer-node", C5_X + MOD_W + 2.5 + MOD_W + MARGIN)
     b.module("U1", "C5", C5_X, {"5V": "5V_C5", "GND": "GND", "6": "C5_TX", "8": "C5_RX"})
     b.module("U2", "C3", BRIDGE_X, {"5V": "5V_BRIDGE", "GND": "GND", "4": "BRIDGE_RX", "5": "BRIDGE_TX"})
     power_zone(b)
@@ -285,7 +285,7 @@ def node():
     b.text("1k", (MID, 15.2), 0.8)
     stitch(b, [(5.5, 12), (11.5, 12), (11.5, 16), (17, 3), (25, 3), (17, 13), (25, 13), (33.5, row(4) + PITCH / 2),
                (37.5, 3), (45.5, 3), (37.5, 13), (45.5, 13), (54.2, 8), (54.2, 16)])
-    b.text("FPV 5.8", (9.0, 13.0), 1.0)
+    b.text("LETZ TIMER", (9.0, 13.0), 0.8)
     b.text("NODE", (9.0, 14.7), 1.0)
     b.text("C5 + C3  v1", (9.0, 16.4), 0.8)
     back_legend(b, "node C5 + C3", "1 A")
@@ -296,7 +296,7 @@ def node():
 
 def master():
     amp = BRIDGE_X + MOD_W + 2.5 + AMP_INSET                   # the amplifier's pin row
-    b = Board("checkpoint-master", amp + AMP_DEPTH - AMP_INSET + MARGIN + 0.45)
+    b = Board("letztimer-master", amp + AMP_DEPTH - AMP_INSET + MARGIN + 0.45)
     b.module("U1", "C5", C5_X, {"5V": "5V_C5", "GND": "GND", "6": "C5_TX", "8": "C5_RX"})
     b.module("U2", "C6", BRIDGE_X, {"5V": "5V_BRIDGE", "GND": "GND", "5": "BRIDGE_RX", "4": "BRIDGE_TX",
                                     "18": "BCLK", "19": "LRC", "20": "DIN", "21": "SD"})
@@ -336,7 +336,7 @@ def master():
     stitch(b, [(5.5, 12), (11.5, 12), (11.5, 16), (17, 3), (25, 3), (17, 13), (25, 13), (33.5, row(4) + PITCH / 2),
                (37.5, 3), (45.5, 3), (37.5, 13), (45.5, 13), (60, 1.4), (68, 1.4), (60, 22.3), (68, 22.3),
                (76.25, 8), (76.25, 16)])
-    b.text("FPV 5.8", (9.0, 13.0), 1.0)
+    b.text("LETZ TIMER", (9.0, 13.0), 0.8)
     b.text("MASTER", (9.0, 14.7), 1.0)
     b.text("C5 + C6  v1", (9.0, 16.4), 0.8)
     back_legend(b, "master C5 + C6", "2 A")

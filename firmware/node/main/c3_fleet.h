@@ -16,5 +16,6 @@ esp_err_t c3_fleet_start_espnow(uint8_t channel); /* on the AP interface; after 
 bool c3_fleet_try_online(uint32_t timeout_ms);
 void c3_fleet_report_pass(const lp_event_t *e);   /* relay a local C5 pass to the C6 */
 void c3_fleet_report_stats(const lp_stats_t *s);  /* relay periodic status to the C6 */
+void c3_fleet_report_calib(const lp_calib_t *c);  /* relay the C5's passage-calibration state to the C6 */
 void c3_fleet_set_degraded(void);                 /* entered local AP + web fallback */
 sled_base_t c3_fleet_led_base(uint32_t now_ms);   /* status LED base from fleet state */

@@ -1,7 +1,9 @@
 #include "c6_web.h"
 #include "admin_hash.h"
 #include "c6_hub.h"
+#include "c6_link.h"
 #include "c6_store.h"
+#include "fleet_proto.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "sdkconfig.h"
@@ -14,11 +16,20 @@ static const char *TAG = "c6_web";
 
 extern const uint8_t index_html_start[] asm("_binary_index_html_start");
 extern const uint8_t index_html_end[]   asm("_binary_index_html_end");
+extern const uint8_t app_js_start[] asm("_binary_app_js_start");
+extern const uint8_t app_js_end[]   asm("_binary_app_js_end");
 
 static esp_err_t get_root(httpd_req_t *req) {
+    web_auth_page_headers(req);                 /* CSP: no inline script, so the page's code is /app.js */
     httpd_resp_set_type(req, "text/html");
     return httpd_resp_send(req, (const char *)index_html_start,
                            index_html_end - index_html_start - 1);
+}
+
+static esp_err_t get_app_js(httpd_req_t *req) {
+    web_auth_page_headers(req);
+    httpd_resp_set_type(req, "application/javascript");
+    return httpd_resp_send(req, (const char *)app_js_start, app_js_end - app_js_start);
 }
 
 /* Snapshots for the handlers: too large for the httpd stack (c6_fleet_t is
@@ -37,16 +48,25 @@ static const char *safe_fw(const char *fw, char out[LP_FW_LEN]) {
     return out;
 }
 
-/* The C5 health fields shared by "local" and each node. */
+/* The C5 health fields shared by "local" and each node, and the re-arm drop its C5 echoed
+ * (rearm_x10, FP_REARM_UNKNOWN: -1, none yet), set against the fleet's on the page. */
 static int put_health(char *b, size_t cap, uint32_t passes, uint8_t flags, uint8_t gain,
-                      uint32_t uptime_s, uint32_t heap_min, uint32_t faults, const char *fw) {
+                      uint32_t uptime_s, uint32_t heap_min, uint32_t faults, const char *fw,
+                      uint16_t rearm_x10, int32_t rearm_want_x10, bool rearm_own) {
     char f[LP_FW_LEN];
     return snprintf(b, cap, "\"passes\":%lu,\"cal_needed\":%s,\"calibrating\":%s,\"gain\":%u,"
-                    "\"c5_uptime_s\":%lu,\"heap_min\":%lu,\"faults\":%lu,\"fw\":\"%s\"",
+                    "\"c5_uptime_s\":%lu,\"heap_min\":%lu,\"faults\":%lu,\"fw\":\"%s\",\"rearm_db_x10\":%d,"
+                    "\"rearm_want_x10\":%ld,\"rearm_own\":%s",
                     (unsigned long)passes, (flags & LP_HEALTH_CAL_NEEDED) ? "true" : "false",
                     (flags & LP_HEALTH_CALIBRATING) ? "true" : "false", gain,
                     (unsigned long)uptime_s, (unsigned long)heap_min, (unsigned long)faults,
-                    safe_fw(fw, f));
+                    safe_fw(fw, f), rearm_x10 == FP_REARM_UNKNOWN ? -1 : (int)rearm_x10,
+                    (long)rearm_want_x10, rearm_own ? "true" : "false");
+}
+
+/* Gate 0's echoed drop as put_health takes it: FP_REARM_UNKNOWN until its C5's first CONFIG_STATE. */
+static uint16_t rearm_echo(bool known, int32_t x10) {
+    return known && x10 >= 0 && x10 < (int32_t)FP_REARM_UNKNOWN ? (uint16_t)x10 : (uint16_t)FP_REARM_UNKNOWN;
 }
 
 /* One level per Raceband channel, dB x10, LP_CN_UNKNOWN when not measured. */
@@ -59,30 +79,43 @@ static int put_levels(char *b, size_t cap, const int8_t *levels) {
     return o + snprintf(b + o, cap - o, "],");
 }
 
+#define STATES_LEN 16u   /* "3,3,3,3,3,3,3,3" + NUL */
+
+/* Each channel's detector state (pd_state_t, 0..3), R1 first, for a "states":[...]. */
+static const char *put_states(char out[STATES_LEN], uint16_t states) {
+    int o = 0;
+    for (unsigned ch = 0; ch < LP_LEVELS; ch++)
+        o += snprintf(out + o, STATES_LEN - o, "%s%u", ch ? "," : "", lp_state_of(states, ch));
+    return out;
+}
+
 static esp_err_t get_state(httpd_req_t *req) {
     c6_store_snapshot(&s_snap);
     c6_hub_snapshot(&s_fleet);
     const c6_snapshot_t *s = &s_snap;
     const c6_fleet_t *f = &s_fleet;
 
-    /* Worst case (every field at its widest) 9996 B: levels 59 x 16 gates, last_seen_ms
-     * 25 x 8 standings, header + local 394,
-     * 15 nodes x 392, 8 standings 838, 24 passes 1739; sized so it never truncates. */
-    static char body[10240];   /* larger than the stack; this handler is serialised by httpd */
+    /* Worst case (every field at its widest, every list full) 11460 B: header + local 525 (+20 for pairing_left_s, +38 for its D) (its
+     * states 27 and levels 59, the fleet's and gate 0's re-arm drop), 15 nodes 8114 (+16 "custom", +38 for its D each: 487 + 54 with
+     * its comma, states and levels included), 8 standings 1031, 24 passes 1727, the lists'
+     * brackets 38; sized so it never truncates. */
+    static char body[11776];   /* larger than the stack; this handler is serialised by httpd */
     const lp_stats_t *l = &s->local;
+    char states[STATES_LEN];
     int o = 0;
     o += snprintf(body + o, sizeof body - o,
-                  "{\"pairing\":%s,\"num_gates\":%u,\"has_local\":%s,"
-                  "\"local\":{\"channel\":%u,\"cn_x10\":%ld,\"state\":%u,",
-                  f->pairing ? "true" : "false", f->num_gates, s->has_local ? "true" : "false",
-                  l->channel, (long)l->cn_x10, l->state);
+                  "{\"pairing\":%s,\"pairing_left_s\":%u,\"num_gates\":%u,\"has_local\":%s,"
+                  "\"local\":{\"cn_x10\":%ld,\"states\":[%s],",
+                  f->pairing ? "true" : "false", f->pairing_left_s, f->num_gates, s->has_local ? "true" : "false",
+                  (long)l->cn_x10, put_states(states, s->has_local ? l->states : 0u));
     o += put_levels(body + o, sizeof body - o, s->has_local ? l->levels : NULL);
     o += put_health(body + o, sizeof body - o, l->passes, l->flags, l->gain, l->uptime_s,
-                    l->heap_min, l->faults, l->fw);
+                    l->heap_min, l->faults, l->fw, rearm_echo(s->has_local_cfg, s->local_cfg.rearm_db_x10),
+                    s->rearm0_x10 >= 0 ? s->rearm0_x10 : (int32_t)s->rearm_x10, s->rearm0_x10 >= 0);
     o += snprintf(body + o, sizeof body - o,
-                  "},\"total_passes\":%lu,\"volume\":%u,"
+                  "},\"total_passes\":%lu,\"volume\":%u,\"rearm_db_x10\":%u,"
                   "\"uptime_ms\":%lu,\"free_heap\":%lu,\"heap_total\":%lu,",
-                  (unsigned long)s->total_passes, (unsigned)f->volume,
+                  (unsigned long)s->total_passes, (unsigned)f->volume, (unsigned)s->rearm_x10,
                   (unsigned long)f->uptime_ms, (unsigned long)f->free_heap,
                   (unsigned long)f->heap_total);
 
@@ -91,18 +124,18 @@ static esp_err_t get_state(httpd_req_t *req) {
         const c6_node_t *n = &f->nodes[i];
         o += snprintf(body + o, sizeof body - o,
                       "%s{\"node_id\":%u,\"gate\":%u,\"channel\":%u,\"online\":%s,\"cn_x10\":%ld,"
-                      "\"state\":%u,\"last_seen_ms\":%lu,\"rssi\":%d,\"rx_frames\":%lu,"
-                      "\"status_rx\":%lu,\"status_lost\":%lu,"
+                      "\"states\":[%s],\"last_seen_ms\":%lu,\"rssi\":%d,\"rx_frames\":%lu,"
+                      "\"status_rx\":%lu,\"status_lost\":%lu,\"custom\":%s,"
                       "\"mac\":\"%02x:%02x:%02x:%02x:%02x:%02x\",",
                       i ? "," : "", n->node_id, n->gate_index, n->channel,
                       n->online ? "true" : "false", (long)n->cn_x10,
-                      n->state, (unsigned long)n->last_seen_ms,
+                      put_states(states, n->online ? n->states : 0u), (unsigned long)n->last_seen_ms,
                       (int)n->rssi, (unsigned long)n->rx_frames,
-                      (unsigned long)n->status_rx, (unsigned long)n->status_lost,
+                      (unsigned long)n->status_rx, (unsigned long)n->status_lost, n->custom ? "true" : "false",
                       n->mac[0], n->mac[1], n->mac[2], n->mac[3], n->mac[4], n->mac[5]);
         o += put_levels(body + o, sizeof body - o, n->online ? n->levels : NULL);
         o += put_health(body + o, sizeof body - o, n->passes, n->flags, n->gain, n->c5_uptime_s,
-                        n->heap_min, n->faults, n->fw);
+                        n->heap_min, n->faults, n->fw, n->rearm_x10, n->rearm_want_x10, n->rearm_own);
         o += snprintf(body + o, sizeof body - o, "}");
     }
     o += snprintf(body + o, sizeof body - o, "],\"standings\":[");
@@ -213,13 +246,31 @@ static esp_err_t post_pairing(httpd_req_t *req) {
     return ok_json(req, true);
 }
 
-static esp_err_t post_node(httpd_req_t *req) {
+/* The ints of the array "key":[1,2,3] of a flat body, at most max of them; -1 when the key or its array is absent. */
+static int json_ints(const char *body, const char *key, uint8_t *out, unsigned max) {
+    char pat[40];
+    snprintf(pat, sizeof pat, "\"%s\"", key);
+    const char *p = strstr(body, pat);
+    if (!p || !(p = strchr(p + strlen(pat), '['))) return -1;
+    unsigned n = 0;
+    for (p++; ; ) {
+        while (*p == ' ' || *p == ',') p++;
+        if (*p == ']') return (int)n;
+        char *end;
+        const long v = strtol(p, &end, 10);
+        if (end == p || v < 0 || v > 255 || n >= max) return -1;
+        out[n++] = (uint8_t)v;
+        p = end;
+    }
+}
+
+/* The order of the remote gates: {"order":[node ids, first gate first]}, every paired node once. */
+static esp_err_t post_order(httpd_req_t *req) {
     char buf[128];
     if (!web_auth_request(req, buf, sizeof buf)) return ESP_OK;
-    bool ok = c6_hub_set_node((uint8_t)json_i(buf, "node_id", -1),
-                              (uint8_t)json_i(buf, "gate", 0),
-                              (uint8_t)json_i(buf, "channel", 0));
-    return ok_json(req, ok);
+    uint8_t ids[C6_MAX_NODES];
+    const int n = json_ints(buf, "order", ids, sizeof ids);
+    return ok_json(req, n >= 0 && c6_hub_set_order(ids, (unsigned)n));
 }
 
 static esp_err_t post_node_remove(httpd_req_t *req) {
@@ -244,6 +295,17 @@ static esp_err_t post_volume(httpd_req_t *req) {
     return ok_json(req, true);
 }
 
+/* The relative re-arm drop D: {"rearm_db_x10": 0..400} sets it for every gate (the fleet's, saved and sent to all, and every gate's own D
+ * is dropped); with "gate": 0..15 it is that gate's own D alone (saved; -1 for "rearm_db_x10" gives the gate the fleet's again).
+ * {"ok":false} for a value out of range, a gate nobody paired or a body without the value. */
+static esp_err_t post_rearm(httpd_req_t *req) {
+    char buf[64];
+    if (!web_auth_request(req, buf, sizeof buf)) return ESP_OK;
+    const int32_t x10 = json_i(buf, "rearm_db_x10", -2), gate = json_i(buf, "gate", -1);
+    if (x10 == -2 || gate >= (int32_t)RT_MAX_GATES) return ok_json(req, false);
+    return ok_json(req, gate < 0 ? c6_hub_set_rearm(x10) : c6_hub_set_rearm_gate((uint8_t)gate, x10));
+}
+
 /* A JSON array of the gates set in mask. */
 static int put_gates(char *b, size_t cap, uint32_t mask) {
     int o = snprintf(b, cap, "[");
@@ -265,22 +327,17 @@ static const struct { const char *name; lp_cmd_t cmd; } k_cmds[] = {
  * to confirm and force. Otherwise each target goes to "sent" or "failed", and
  * for a calibration a gate already calibrating (its C5 would refuse, on its USB
  * console only) is not sent but listed in "busy". */
-static esp_err_t post_command(httpd_req_t *req) {
-    char buf[128], name[16];
-    if (!web_auth_request(req, buf, sizeof buf)) return ESP_OK;
-    const int32_t gate = json_i(buf, "gate", -2);
-    lp_cmd_t cmd = 0;
-    if (json_s(buf, "cmd", name, sizeof name))
-        for (unsigned i = 0; i < sizeof k_cmds / sizeof k_cmds[0]; i++)
-            if (strcmp(name, k_cmds[i].name) == 0) cmd = k_cmds[i].cmd;
-    if (!cmd || gate < -1 || gate >= (int32_t)RT_MAX_GATES) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "cmd/gate"); return ESP_FAIL;
-    }
+/* What one request does on a gate: send(gate) true when it reached it. */
+typedef bool (*gate_send_t)(uint8_t gate, void *arg);
 
-    /* Targets as a gate mask (a gate shared by two nodes is one target), the
-     * strongest C/N each one sees now and the gates already calibrating; an
-     * offline node's or an absent local C5's last C/N and flags are stale (an
-     * absent gate 0 asked by name lands in "failed"). */
+/* An action on one gate (gate >= 0) or on every reachable one (gate -1), with the calibrations' guards: a target already
+ * seeing a C/N above its active_db (a VTX probably on) blocks the whole request, listed in "vtx", unless forced or `no_vtx_guard`;
+ * a gate already calibrating is skipped as "busy" unless `reach_busy`. Otherwise each target goes to "sent" or "failed".
+ * Targets are a gate mask (a gate shared by two nodes is one target), the strongest C/N each one sees now and the gates
+ * calibrating; an offline node's or an absent local C5's last C/N and flags are stale (an absent gate 0 asked by name lands in
+ * "failed"). 400 for a gate nobody paired. */
+static esp_err_t run_on_gates(httpd_req_t *req, int32_t gate, bool force, bool no_vtx_guard, bool reach_busy,
+                              gate_send_t send, void *arg, const char *what) {
     c6_store_snapshot(&s_snap);
     c6_hub_snapshot(&s_fleet);
     int32_t cn[RT_MAX_GATES];
@@ -302,16 +359,16 @@ static esp_err_t post_command(httpd_req_t *req) {
         if (n->flags & LP_HEALTH_CALIBRATING) busy |= 1u << n->gate_index;
     }
     if (!known) { httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "gate"); return ESP_FAIL; }
-    busy = cmd == LP_CMD_REBOOT ? 0u : busy & targets;   /* a reboot still reaches a busy C5 */
+    busy = reach_busy ? 0u : busy & targets;   /* a reboot still reaches a busy C5 */
     targets &= ~busy;
 
-    char out[640];   /* worst case: 16 vtx entries x 34 B */
+    static char out[640];                      /* worst case: 16 vtx entries x 34 B; httpd runs one handler at a time */
     int o;
     uint32_t vtx = 0;
     /* Gate 0's own C5 tells its active_db; remote gates run the one the hub pushes. */
     const int32_t vtx_x10 = c6_hub_vtx_threshold_x10();
     const int32_t vtx0_x10 = s_snap.has_local_cfg ? s_snap.local_cfg.active_db_x10 : vtx_x10;
-    if (cmd != LP_CMD_REBOOT && json_i(buf, "force", 0) == 0)
+    if (!no_vtx_guard && !force)
         for (unsigned g = 0; g < RT_MAX_GATES; g++)
             if ((targets >> g & 1u) && cn[g] != LP_CN_UNKNOWN && cn[g] > (g ? vtx_x10 : vtx0_x10))
                 vtx |= 1u << g;
@@ -322,13 +379,12 @@ static esp_err_t post_command(httpd_req_t *req) {
                 o += snprintf(out + o, sizeof out - o, "%s{\"gate\":%u,\"cn_x10\":%ld}",
                               (vtx & ((1u << g) - 1u)) ? "," : "", g, (long)cn[g]);
         o += snprintf(out + o, sizeof out - o, "]}");
-        ESP_LOGW(TAG, "command %s gate %ld held: strong signal on gates 0x%04lx", name, (long)gate,
-                 (unsigned long)vtx);
+        ESP_LOGW(TAG, "%s gate %ld held: strong signal on gates 0x%04lx", what, (long)gate, (unsigned long)vtx);
     } else {
         uint32_t sent = 0, failed = 0;
         for (unsigned g = 0; g < RT_MAX_GATES; g++)
             if (targets >> g & 1u) {
-                if (c6_hub_send_command((uint8_t)g, cmd)) sent |= 1u << g;
+                if (send((uint8_t)g, arg)) sent |= 1u << g;
                 else failed |= 1u << g;
             }
         o = snprintf(out, sizeof out, "{\"ok\":true,\"sent\":");
@@ -338,32 +394,257 @@ static esp_err_t post_command(httpd_req_t *req) {
         o += snprintf(out + o, sizeof out - o, ",\"busy\":");
         o += put_gates(out + o, sizeof out - o, busy);
         o += snprintf(out + o, sizeof out - o, "}");
-        ESP_LOGI(TAG, "command %s gate %ld: sent 0x%04lx failed 0x%04lx busy 0x%04lx", name,
+        ESP_LOGI(TAG, "%s gate %ld: sent 0x%04lx failed 0x%04lx busy 0x%04lx", what,
                  (long)gate, (unsigned long)sent, (unsigned long)failed, (unsigned long)busy);
     }
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req, out, o);
 }
 
+static bool send_cmd(uint8_t gate, void *arg) { return c6_hub_send_command(gate, *(lp_cmd_t *)arg); }
+static bool send_gain(uint8_t gate, void *arg) { return c6_hub_send_gain(gate, *(uint8_t *)arg); }
+
+static esp_err_t post_command(httpd_req_t *req) {
+    char buf[128], name[16];
+    if (!web_auth_request(req, buf, sizeof buf)) return ESP_OK;
+    const int32_t gate = json_i(buf, "gate", -2);
+    lp_cmd_t cmd = 0;
+    if (json_s(buf, "cmd", name, sizeof name))
+        for (unsigned i = 0; i < sizeof k_cmds / sizeof k_cmds[0]; i++)
+            if (strcmp(name, k_cmds[i].name) == 0) cmd = k_cmds[i].cmd;
+    if (!cmd || gate < -1 || gate >= (int32_t)RT_MAX_GATES) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "cmd/gate"); return ESP_FAIL;
+    }
+    const bool reboot = cmd == LP_CMD_REBOOT;           /* not VTX-guarded, and it still reaches a calibrating C5 */
+    return run_on_gates(req, gate, json_i(buf, "force", 0) != 0, reboot, reboot, send_cmd, &cmd, name);
+}
+
+/* Force a gate's C5 RX gain: {"gate":0..15 or -1 (every reachable gate),"gain":LP_GAIN_MIN..LP_GAIN_MAX,"force":0|1}. Changing it
+ * makes the C5 learn its rests again (the gate is blind a moment), so it wants every VTX off: it follows post_command's rule
+ * (run_on_gates), answering {"ok":false,"vtx":[{"gate","cn_x10"}]} while a target sees a carrier, until the page asks the admin and
+ * retries with force. Otherwise {"ok":true,"sent":[...],"failed":[...],"busy":[...]}: "failed" a gate nobody answers for (offline, no C5),
+ * "busy" one calibrating (its C5 would take the gain, but the calibration's rests would be wrong). The gain is each C5's own (its NVS):
+ * "every gate" is one send to the ones reachable now, a gate that joins later keeps its own. The new gain comes back in /api/state. */
+static esp_err_t post_gain(httpd_req_t *req) {
+    char buf[64];
+    if (!web_auth_request(req, buf, sizeof buf)) return ESP_OK;
+    const int32_t gate = json_i(buf, "gate", -2), gain = json_i(buf, "gain", -1);
+    if (gate < -1 || gate >= (int32_t)RT_MAX_GATES || gain < (int32_t)LP_GAIN_MIN || gain > (int32_t)LP_GAIN_MAX) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "gate/gain");
+        return ESP_FAIL;
+    }
+    uint8_t g = (uint8_t)gain;
+    return run_on_gates(req, gate, json_i(buf, "force", 0) != 0, false, false, send_gain, &g, "gain");
+}
+
+/* Passage calibration (admin): with a drone in the passage, then 2 m away, a gate's C5 measures its
+ * channels' smoothed rise and proposes thresholds (link_proto CALIB_*, docs/detector.md). It never
+ * blinds the gate and the VTX stays ON, so there is no VTX guard; a pass rung during step 1 is real
+ * (sound, a lap): the page says to reset that channel. POST {"gate":0..15,"action":"state" | "start1" |
+ * "start2" | "cancel" | "apply" | "reset" (a remote gate back on the fleet's thresholds), "channel"?: 0..7 for start1, the
+ * channel to measure, else any: the one standing highest} answers the session as {"ok","msg"?,"gate","phase" (0 none, 1 measuring
+ * in the passage, 2 measured, 3 measuring away, 4 done),"secs_left","flags" (pass_calib.h PC_*),
+ * "channel" (255 before step 1),"passage":[p10,p50,p90,p95,max] and "away":[...] (half dB),"passage_sat"
+ * (% of clipped captures),"rec":{"active","hysteresis","drop","min_peak"} (dB x10, phase 4),
+ * "gain_steps"}. "apply" sends the proposal to the gate's C5 and ends the session. */
+static int put_calib(char *b, size_t cap, int32_t gate, bool ok, const char *msg, const lp_calib_t *k) {
+    int o = snprintf(b, cap, "{\"ok\":%s,\"msg\":\"%s\",\"gate\":%ld,\"phase\":%u,\"secs_left\":%u,\"flags\":%u,"
+                     "\"channel\":%u,\"passage\":[%d,%d,%d,%d,%d],\"passage_sat\":%u,\"away\":[%d,%d,%d,%d,%d],"
+                     "\"rec\":{\"active\":%d,\"hysteresis\":%d,\"drop\":%d,\"min_peak\":%d},\"gain_steps\":%d}",
+                     ok ? "true" : "false", msg, (long)gate, k->phase, k->secs_left, k->flags, k->channel,
+                     k->gate[0], k->gate[1], k->gate[2], k->gate[3], k->gate[4], k->gate_sat_pct,
+                     k->away[0], k->away[1], k->away[2], k->away[3], k->away[4],
+                     k->active_db_x10, k->hysteresis_db_x10, k->drop_db_x10, k->min_peak_db_x10, k->gain_steps);
+    return o;
+}
+
+static esp_err_t post_calib(httpd_req_t *req) {
+    char buf[64], action[12];
+    if (!web_auth_request(req, buf, sizeof buf)) return ESP_OK;
+    const int32_t gate = json_i(buf, "gate", -1);
+    if (gate < 0 || gate >= (int32_t)RT_MAX_GATES || !json_s(buf, "action", action, sizeof action)) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "gate/action");
+        return ESP_FAIL;
+    }
+    bool ok = true;
+    const char *msg = "";
+    const int32_t chv = json_i(buf, "channel", LP_CALIB_ANY);      /* step 1's: R1..R8 as 0..7, else any */
+    const uint8_t ch = chv >= 0 && chv < (int32_t)LP_LEVELS ? (uint8_t)chv : LP_CALIB_ANY;
+    if (strcmp(action, "start1") == 0) ok = c6_hub_calib_start((uint8_t)gate, 1, ch);
+    else if (strcmp(action, "start2") == 0) ok = c6_hub_calib_start((uint8_t)gate, 2, LP_CALIB_ANY);
+    else if (strcmp(action, "cancel") == 0) { c6_hub_calib_start((uint8_t)gate, 0, LP_CALIB_ANY); }
+    else if (strcmp(action, "apply") == 0) { ok = c6_hub_calib_apply((uint8_t)gate); if (!ok) msg = "nothing to apply"; }
+    else if (strcmp(action, "reset") == 0) { ok = c6_hub_calib_reset((uint8_t)gate); if (!ok) msg = gate == 0 ? "gate 0 keeps its own settings" : "no such gate"; }
+    else if (strcmp(action, "state") != 0) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "action");
+        return ESP_FAIL;
+    }
+    if (!ok && !msg[0]) msg = "no C5 linked";
+    lp_calib_t k;
+    (void)c6_hub_calib_get((uint8_t)gate, &k);
+    static char out[480];                           /* larger than the stack; httpd runs one handler at a time */
+    const int o = put_calib(out, sizeof out, gate, ok, msg, &k);
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_send(req, out, o);
+}
+
+/* Debug mode (admin): a gate's C5 console text and typed keys. Every body may carry "gate" (default
+ * 0, the master's own C5 over its UART; 1.. a remote gate, over its node: c6_hub_debug_*). One gate
+ * at a time is in debug mode: switching one on switches the previous off. */
+static int32_t body_gate(const char *buf) {
+    const int32_t g = json_i(buf, "gate", 0);
+    return g >= 0 && g < (int32_t)RT_MAX_GATES ? g : -1;
+}
+
+/* Is gate g in debug mode now? */
+static bool dbg_on(int32_t g) { return g == 0 ? c6_link_debug() : c6_hub_debug_gate() == g; }
+
+/* Is gate g's C5 reachable (the local one heard, a node of that gate online)? s_fleet is refreshed. */
+static bool dbg_reachable(int32_t g) {
+    if (g == 0) return c6_store_has_local();
+    c6_hub_snapshot(&s_fleet);
+    for (unsigned i = 0; i < s_fleet.num_nodes; i++)
+        if (s_fleet.nodes[i].gate_index == g && s_fleet.nodes[i].online) return true;
+    return false;
+}
+
+/* POST {"since":N,"gate":G} answers {"gate","debug","next","lost","c5_alive","text"}: the bytes after
+ * position N of the debug log (the text holds no quote, backslash or control other than the
+ * newline, which is escaped here). The page asks again from "next"; "gate" tells it which gate the
+ * answer is for (it may have changed the selector meanwhile). A gate that is not the one in debug
+ * mode answers debug 0 and no text; a remote gate's poll keeps its debug mode alive. */
+static esp_err_t post_log(httpd_req_t *req) {
+    char buf[64];
+    if (!web_auth_request(req, buf, sizeof buf)) return ESP_OK;
+    static char raw[C6_LOG_CHUNK];                  /* larger than the stack; httpd runs one handler at a time */
+    static char body[2 * C6_LOG_CHUNK + 96];
+    const int32_t gate = body_gate(buf);
+    const bool on = gate >= 0 && dbg_on(gate);
+    uint32_t next = 0;
+    bool lost = false;
+    size_t n = 0;
+    if (on) {
+        const uint32_t since = (uint32_t)json_i(buf, "since", 0);
+        n = gate == 0 ? c6_link_log_read(since, raw, sizeof raw, &next, &lost)
+                      : c6_hub_log_read(since, raw, sizeof raw, &next, &lost);
+    }
+    int o = snprintf(body, sizeof body, "{\"gate\":%ld,\"debug\":%u,\"next\":%lu,\"lost\":%u,\"c5_alive\":%u,\"text\":\"",
+                     (long)gate, on ? 1u : 0u, (unsigned long)next, lost ? 1u : 0u,
+                     gate >= 0 && dbg_reachable(gate) ? 1u : 0u);
+    for (size_t i = 0; i < n; i++) {
+        if (raw[i] == '\n') { body[o++] = '\\'; body[o++] = 'n'; }
+        else body[o++] = raw[i];
+    }
+    o += snprintf(body + o, sizeof body - o, "\"}");
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_send(req, body, o);
+}
+
+/* Debug mode of a gate on or off ({"on":0|1,"gate":G}; no "on" only asks). Off at every boot: nothing
+ * is mirrored from any C5, and /api/key sends nothing, until an admin switches a gate on. A remote
+ * gate with no online node answers {"ok":false}. */
+static esp_err_t post_debug(httpd_req_t *req) {
+    char buf[32];
+    if (!web_auth_request(req, buf, sizeof buf)) return ESP_OK;
+    const int32_t on = json_i(buf, "on", -1), gate = body_gate(buf);
+    if (gate < 0) { httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "gate"); return ESP_FAIL; }
+    bool ok = true;
+    if (on > 0) {
+        const int remote = c6_hub_debug_gate();
+        if (gate == 0) {
+            if (remote > 0) c6_hub_debug_set((uint8_t)remote, false);   /* one gate at a time */
+            c6_link_debug_set(true);
+        } else {
+            if (c6_link_debug()) c6_link_debug_set(false);
+            ok = c6_hub_debug_set((uint8_t)gate, true);
+        }
+    } else if (on == 0) {
+        if (gate == 0) c6_link_debug_set(false);
+        else c6_hub_debug_set((uint8_t)gate, false);
+    }
+    if (on >= 0) ESP_LOGW(TAG, "debug mode gate %ld %s from web%s", (long)gate, on ? "ON" : "off", ok ? "" : " (refused)");
+    char r[48];
+    snprintf(r, sizeof r, "{\"ok\":%s,\"debug\":%u}", ok ? "true" : "false", dbg_on(gate) ? 1u : 0u);
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, r);
+}
+
+/* {"keys":"Ka","force":0|1,"gate":G}: typed on the gate's C5 console as on its USB ("K" opens the
+ * settings menu, "T" is the status, "F"/"B" calibrate). The keys that blind the gate follow
+ * post_command's rule: refused with {"blind":true}, or {"vtx":true} while a carrier is seen
+ * (gate 0's C/N against its active_db, a remote gate's against the one the hub pushes), until the
+ * page asks the admin and retries with force. The C5's answer comes back through /api/log. */
+static esp_err_t post_key(httpd_req_t *req) {
+    char buf[96], keys[LP_KEY_MAX + 1];
+    if (!web_auth_request(req, buf, sizeof buf)) return ESP_OK;
+    const int32_t gate = body_gate(buf);
+    if (gate < 0 || !json_s(buf, "keys", keys, sizeof keys) || !keys[0]) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "no keys");
+        return ESP_FAIL;
+    }
+    if (!lp_keys_valid(keys)) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad key");
+        return ESP_FAIL;
+    }
+    const bool force = json_i(buf, "force", 0) != 0;
+
+    httpd_resp_set_type(req, "application/json");
+    if (!dbg_on(gate))
+        return httpd_resp_sendstr(req, "{\"ok\":false,\"msg\":\"debug mode is off\"}");
+    if (!dbg_reachable(gate))
+        return httpd_resp_sendstr(req, "{\"ok\":false,\"msg\":\"no C5 linked\"}");
+    if (lp_keys_blind(keys) && !force) {
+        c6_store_snapshot(&s_snap);
+        c6_hub_snapshot(&s_fleet);
+        int32_t cn = LP_CN_UNKNOWN, active = c6_hub_vtx_threshold_x10();
+        if (gate == 0) {
+            cn = s_snap.local.cn_x10;
+            if (s_snap.has_local_cfg) active = s_snap.local_cfg.active_db_x10;
+        } else {
+            for (unsigned i = 0; i < s_fleet.num_nodes; i++)
+                if (s_fleet.nodes[i].gate_index == gate && s_fleet.nodes[i].online && s_fleet.nodes[i].cn_x10 > cn)
+                    cn = s_fleet.nodes[i].cn_x10;
+        }
+        char r[72];
+        if (cn != LP_CN_UNKNOWN && cn > active)
+            snprintf(r, sizeof r, "{\"ok\":false,\"vtx\":true,\"cn_x10\":%ld}", (long)cn);
+        else
+            snprintf(r, sizeof r, "{\"ok\":false,\"blind\":true}");
+        return httpd_resp_sendstr(req, r);
+    }
+    if (gate == 0) c6_link_send_keys(keys, strlen(keys));
+    else if (!c6_hub_send_keys((uint8_t)gate, keys, strlen(keys)))
+        return httpd_resp_sendstr(req, "{\"ok\":false,\"msg\":\"not sent\"}");
+    ESP_LOGW(TAG, "keys \"%s\" to gate %ld from web%s", keys, (long)gate, force ? " (forced)" : "");
+    return httpd_resp_sendstr(req, "{\"ok\":true}");
+}
+
 void c6_web_start(void) {
     web_auth_init(s_admin_key, ADMIN_SALT, ADMIN_ITERATIONS, ADMIN_AUTH_OPEN);
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.lru_purge_enable = true;
-    cfg.max_uri_handlers = 12;   /* 10 here + web_auth's 2 */
+    cfg.max_uri_handlers = 20;   /* 18 here + web_auth's 2 */
     cfg.stack_size = 6144;       /* the signature's PSA HMAC under post_command: ~3.5 KB of the 4 KB default */
     httpd_handle_t srv = NULL;
     if (httpd_start(&srv, &cfg) != ESP_OK) { ESP_LOGE(TAG, "httpd start failed"); return; }
     const httpd_uri_t uris[] = {
         { .uri = "/",             .method = HTTP_GET,  .handler = get_root },
+        { .uri = "/app.js",       .method = HTTP_GET,  .handler = get_app_js },
         { .uri = "/api/state",    .method = HTTP_GET,  .handler = get_state },
         { .uri = "/api/results",  .method = HTTP_GET,  .handler = get_results },
         { .uri = "/api/auth",     .method = HTTP_GET,  .handler = get_auth },
         { .uri = "/api/pairing",  .method = HTTP_POST, .handler = post_pairing },
-        { .uri = "/api/node",     .method = HTTP_POST, .handler = post_node },
+        { .uri = "/api/order",    .method = HTTP_POST, .handler = post_order },
         { .uri = "/api/node_remove", .method = HTTP_POST, .handler = post_node_remove },
         { .uri = "/api/reset",    .method = HTTP_POST, .handler = post_reset },
         { .uri = "/api/volume",   .method = HTTP_POST, .handler = post_volume },
+        { .uri = "/api/rearm",    .method = HTTP_POST, .handler = post_rearm },
         { .uri = "/api/command",  .method = HTTP_POST, .handler = post_command },
+        { .uri = "/api/gain",     .method = HTTP_POST, .handler = post_gain },
+        { .uri = "/api/calib",    .method = HTTP_POST, .handler = post_calib },
+        { .uri = "/api/log",      .method = HTTP_POST, .handler = post_log },
+        { .uri = "/api/key",      .method = HTTP_POST, .handler = post_key },
+        { .uri = "/api/debug",    .method = HTTP_POST, .handler = post_debug },
     };
     for (unsigned i = 0; i < sizeof uris / sizeof uris[0]; i++) httpd_register_uri_handler(srv, &uris[i]);
     web_auth_register(srv);   /* POST /api/session, GET /auth.js */

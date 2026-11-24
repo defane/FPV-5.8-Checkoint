@@ -1,7 +1,8 @@
 /* C3 side of the UART link to its local C5 (link_proto): deliver the C5's
  * passes/stats to registered handlers (fleet relay, or the degraded local
- * store), adopt the C5's CONFIG_STATE into c3_store (asked for on its HELLO),
- * and push configuration / channel retune / commands down to the C5. */
+ * store), adopt the C5's CONFIG_STATE into c3_store (asked for every second and on
+ * its HELLO, or the echo of the master's config a relay pushes then), and push
+ * configuration / channel retune / commands down to the C5. */
 #pragma once
 #include "link_proto.h"
 #include <stdbool.h>
@@ -10,7 +11,36 @@ void c3_link_set_handlers(void (*on_pass)(const lp_event_t *),
                           void (*on_stats)(const lp_stats_t *));
 void c3_link_start(void);
 void c3_link_push_config(const lp_config_t *c);   /* CONFIG_SET to the C5 */
+/* Relay mode: the master's CONFIG for this gate. Pushed now (CONFIG_SET), and kept (RAM) to push
+ * again when the C5 says HELLO: it booted after this one went out (lost), or it was swapped. */
+void c3_link_set_master_config(const lp_config_t *c);
+/* The C5's latest passage-calibration state (it sends one a second while a session exists); false when none
+ * or older than 4 s, or after the C5 rebooted. */
+bool c3_link_calib_get(lp_calib_t *out);
+void c3_link_calib_start(uint8_t step, uint8_t channel);   /* CALIB_START to the C5: 0 ends the passage calibration, 1 passage, 2 away; channel 0..7 or LP_CALIB_ANY (step 1) */
+void c3_link_send_gain(uint8_t gain);             /* GAIN to the C5 (LP_GAIN_MIN..MAX; the C5 clamps and relearns its rests) */
 void c3_link_send_command(lp_cmd_t cmd);          /* COMMAND (console B/F, reboot) to the C5 */
 /* A valid frame from the C5 within the last 3 s (it STATS every second);
  * false when it never spoke, or went silent (unplugged, rebooting, hung, v1). */
 bool c3_link_c5_alive(void);
+/* The re-arm drop *10 of the C5's last CONFIG_STATE (what it runs, polled every second, so a
+ * console K e/E shows), -1 before its first one. Link task only (the fleet relay's NODE_STATUS). */
+int32_t c3_link_c5_rearm_x10(void);
+
+/* Debug mode (web): the C5's console text and typed keys. The text of its LOG frames is kept in
+ * a ring (lp_logring: sanitized, no quote, backslash or control other than newline, so it can sit in JSON);
+ * positions count bytes since boot. */
+#define C3_LOG_CHUNK 700u
+/* Copies up to max bytes from position `since`. *next is where to continue; *lost is set when the
+ * ring had already dropped bytes after `since` (they are skipped). `since` past the end (the C3
+ * rebooted) restarts at the oldest byte kept. */
+size_t c3_link_log_read(uint32_t since, char *out, size_t max, uint32_t *next, bool *lost);
+/* Debug mode, off at every boot (the C5 switches off on our HELLO too): the log is kept and the keys
+ * go out only while it is on. */
+void c3_link_debug_set(bool on);
+/* Debug mode switched on by the C6 (fleet_proto DEBUG): it expires `ms` after the call unless a
+ * later one renews it (each LOG_REQ), so a master that vanished leaves nothing on. Call after
+ * c3_link_debug_set(true); the web's own c3_link_debug_set() clears the lease. */
+void c3_link_debug_lease(uint32_t ms);
+bool c3_link_debug(void);
+void c3_link_send_keys(const char *keys, size_t n);   /* KEY frame: typed on the C5's console */

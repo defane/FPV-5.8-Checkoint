@@ -4,7 +4,7 @@
  * integer-only little-endian payloads, guarded by a version byte and a CRC16 so
  * a mismatched firmware or a stray frame is rejected.
  *
- * Frame: [VER=1][TYPE][payload...][CRC16_lo][CRC16_hi], CRC16-CCITT over
+ * Frame: [VER=6][TYPE][payload...][CRC16_lo][CRC16_hi], CRC16-CCITT over
  * VER,TYPE,payload (reuses link_proto's lp_crc16). Detector/audio tunables ride
  * as link_proto's lp_config_t so the C6 forwards them to a C5 over UART
  * unchanged.
@@ -22,7 +22,11 @@
 extern "C" {
 #endif
 
-#define FP_VERSION      3u   /* 3: NODE_STATUS levels, the C5 scans; 2: seq + health, COMMAND */
+#define FP_VERSION      6u   /* 6: GAIN (the master sets a gate's RX gain), CALIB_START / CALIB_STATE (passage calibration);
+                              * 5: DEBUG, KEY, LOG_REQ, LOG_CHUNK (a remote gate's console on the master's page);
+                              * 4: CONFIG's lp_config_t and NODE_STATUS carry the re-arm drop,
+                              * NODE_STATUS each channel's detector state;
+                              * 3: NODE_STATUS levels, the C5 scans; 2: seq + health, COMMAND */
 #define FP_MAX_PAYLOAD  64u
 #define FP_MAX_FRAME    (4u + FP_MAX_PAYLOAD)   /* VER+TYPE + payload + CRC16(2) */
 
@@ -32,9 +36,16 @@ typedef enum {
     FP_MSG_TIME_BEACON  = 3,  /* master -> all:   fleet time for offset estimation */
     FP_MSG_CONFIG       = 4,  /* master -> node:  gate/channel/enable + detector cfg */
     FP_MSG_GATE_PASS    = 5,  /* node  -> master: a pass at this gate (fleet-timed) */
-    FP_MSG_NODE_STATUS  = 6,  /* node  -> master: periodic C/N, state, counters, C5 health */
-    FP_MSG_HEARTBEAT    = 7,  /* either:          keepalive */
+    FP_MSG_NODE_STATUS  = 6,  /* node  -> master: periodic C/N, states, counters, C5 health */
+    FP_MSG_HEARTBEAT    = 7,  /* node  -> master: boot probe, until it hears us; answered with CONFIG */
     FP_MSG_COMMAND      = 8,  /* master -> node:  forward an lp_cmd_t to the node's C5 */
+    FP_MSG_DEBUG        = 9,  /* master -> node:  debug mode (the C5's console log + keys) on or off */
+    FP_MSG_KEY          = 10, /* master -> node:  keys to type on the node's C5 console (debug on) */
+    FP_MSG_LOG_REQ      = 11, /* master -> node:  the console text after a position (stop-and-wait) */
+    FP_MSG_LOG_CHUNK    = 12, /* node  -> master: up to LP_TEXT_MAX bytes of it, and the node's debug state */
+    FP_MSG_GAIN         = 13, /* master -> node:  force the node's C5 RX gain (link_proto GAIN) */
+    FP_MSG_CALIB_START  = 14, /* master -> node:  a passage-calibration step for its C5 (0 end, 1 passage, 2 away) and the channel (LP_CALIB_ANY: any) */
+    FP_MSG_CALIB_STATE  = 15, /* node  -> master: the C5's session (link_proto CALIB_STATE), relayed each time it sends one */
 } fp_type_t;
 
 typedef enum { FP_ROLE_NODE = 1, FP_ROLE_MASTER = 2 } fp_role_t;
@@ -73,27 +84,55 @@ typedef struct {
 } fp_gate_pass_t;
 
 /* The node's C5 STATS (link_proto lp_stats_t) relayed, plus the fleet's own
- * gate/seq. */
+ * gate/seq and the re-arm drop its C5 echoed. Its 64-byte payload fills FP_MAX_PAYLOAD. */
 typedef struct {
     uint8_t  gate_index;
-    uint8_t  channel;
-    int32_t  cn_x10;          /* LP_CN_UNKNOWN when none */
-    uint8_t  state;           /* pd_state_t */
+    uint8_t  channel;         /* the node's assigned channel code */
+    int32_t  cn_x10;          /* the C5's strongest rise *10, LP_CN_UNKNOWN when none */
+    uint16_t states;          /* each channel's detector state as lp_stats_t carries it (lp_state_of) */
     uint32_t passes;          /* passes the C5 detected since its boot */
     uint8_t  flags;           /* LP_HEALTH_* of the C5 */
     uint32_t seq;             /* per-node status counter; master infers loss from gaps */
     uint8_t  gain;            /* C5 RX gain index */
     uint32_t uptime_s;        /* C5 uptime */
     uint32_t heap_min;        /* C5 lowest free internal heap since boot, bytes */
-    uint32_t faults;          /* C5 transport fault counters */
+    uint32_t faults;          /* C5 capture faults (timeouts, short/overrun dumps, DSP errors)
+                               * + scan stalls, since its boot */
     int8_t   levels[LP_LEVELS];   /* C5 dB above each channel's rest, LP_LEVEL_UNKNOWN when none */
+    uint16_t rearm_db_x10;    /* the C5's re-arm drop *10 from its last CONFIG_STATE echo,
+                               * FP_REARM_UNKNOWN before the first one */
     char     fw[LP_FW_LEN];   /* C5 firmware id; always NUL-terminated after a decode */
 } fp_node_status_t;
+
+#define FP_REARM_UNKNOWN 0xFFFFu
 
 typedef struct {
     uint8_t  gate_index;      /* the gate it is meant for (a node ignores another's) */
     uint8_t  cmd;             /* lp_cmd_t */
 } fp_command_t;
+
+/* Debug mode of one remote gate, pulled by the master (a push would load the air for every gate):
+ * the node's C3 keeps its C5's console text in a ring (link_proto's LOG frames) and answers each
+ * LOG_REQ with the next bytes. All four count only from the node's own master (its MAC). The node
+ * leaves debug mode itself when no LOG_REQ came for FP_DEBUG_LEASE_MS (a master that rebooted or
+ * lost its DEBUG off). */
+#define FP_DEBUG_LEASE_MS 30000u
+#define FP_LOG_DEBUG      1u   /* LOG_CHUNK flag: the node's debug mode is on (off after its reboot) */
+#define FP_LOG_LOST       2u   /* LOG_CHUNK flag: the ring had dropped bytes after the position asked */
+typedef struct { uint8_t on; } fp_debug_t;
+typedef struct { uint32_t since; } fp_log_req_t;
+typedef struct {
+    uint32_t from;            /* position (bytes since debug was switched on) of text[0]: the master drops
+                               * what it already has and marks a gap */
+    uint8_t  flags;           /* FP_LOG_* */
+    uint8_t  len;             /* 0..LP_TEXT_MAX */
+    char     text[LP_TEXT_MAX];   /* sanitized by the node (lp_logring) */
+} fp_log_chunk_t;
+
+typedef struct {
+    uint8_t  gate_index;      /* the gate it is meant for (a node answers to its master's MAC, as COMMAND) */
+    uint8_t  gain;            /* LP_GAIN_MIN..LP_GAIN_MAX */
+} fp_gain_t;
 
 typedef struct {
     uint8_t  role;            /* fp_role_t */
@@ -111,6 +150,13 @@ typedef struct {
         fp_node_status_t  node_status;
         fp_heartbeat_t    heartbeat;
         fp_command_t      command;
+        fp_debug_t        debug;
+        lp_text_t         key;        /* 1..LP_KEY_MAX bytes */
+        fp_log_req_t      log_req;
+        fp_log_chunk_t    log_chunk;
+        fp_gain_t         gain;
+        struct { uint8_t step, channel; } calib_req;   /* CALIB_START */
+        lp_calib_t        calib;      /* CALIB_STATE */
     };
 } fp_msg_t;
 
@@ -124,6 +170,20 @@ size_t fp_encode_gate_pass(uint8_t *buf, size_t cap, const fp_gate_pass_t *m);
 size_t fp_encode_node_status(uint8_t *buf, size_t cap, const fp_node_status_t *m);
 size_t fp_encode_heartbeat(uint8_t *buf, size_t cap, const fp_heartbeat_t *m);
 size_t fp_encode_command(uint8_t *buf, size_t cap, const fp_command_t *m);   /* 0 for an unknown cmd */
+size_t fp_encode_gain(uint8_t *buf, size_t cap, const fp_gain_t *m);   /* 0 outside LP_GAIN_MIN..LP_GAIN_MAX */
+size_t fp_encode_calib_start(uint8_t *buf, size_t cap, uint8_t step, uint8_t channel);   /* 0 for a step over 2, a channel over 7 but LP_CALIB_ANY */
+size_t fp_encode_calib_state(uint8_t *buf, size_t cap, const lp_calib_t *c);   /* 0 for an unknown phase */
+size_t fp_encode_debug(uint8_t *buf, size_t cap, bool on);
+size_t fp_encode_key(uint8_t *buf, size_t cap, const char *keys, size_t len);   /* 0 unless 1..LP_KEY_MAX */
+size_t fp_encode_log_req(uint8_t *buf, size_t cap, uint32_t since);
+size_t fp_encode_log_chunk(uint8_t *buf, size_t cap, const fp_log_chunk_t *m);   /* 0 over LP_TEXT_MAX */
+
+/* The master's side of the pull: what to keep of a LOG_CHUNK. *expected is the position of the next
+ * byte it has not got; the chunk's text starts at c->from. A repeat (a request asked twice) gives
+ * nothing, one that overlaps what we have gives its tail (*skip bytes of head to drop), and one
+ * that starts later means bytes were lost (*gap of them, the node's ring or the air). Returns true
+ * when there is text to keep, and moves *expected past it. */
+bool fp_log_take(uint32_t *expected, const fp_log_chunk_t *c, uint8_t *skip, uint32_t *gap);
 
 /* Decode one received datagram. True and fills *out on a valid frame. */
 bool fp_decode(const uint8_t *buf, size_t n, fp_msg_t *out);

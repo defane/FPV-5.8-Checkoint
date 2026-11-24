@@ -1,6 +1,7 @@
 #include "c3_fleet.h"
 #include "c3_link.h"
 #include "espnow_link.h"
+#include "esp_app_desc.h"
 #include "esp_log.h"
 #include "esp_wifi_types.h"
 #include "esp_random.h"
@@ -10,6 +11,7 @@
 #include "freertos/task.h"
 #include "nvs.h"
 #include "status_led.h"
+#include <stdlib.h>
 #include <string.h>
 
 static const char *TAG = "c3_fleet";
@@ -60,7 +62,28 @@ void c3_fleet_init(void) {
 static void apply_config(const fp_config_t *c) {
     s_gate = c->gate_index;
     s_channel = c->channel;
-    c3_link_push_config(&c->det);       /* detector/audio tunables to the C5 */
+    /* Detector/audio tunables to the C5. A relay keeps them for its C5's next HELLO; a degraded
+     * C3's page owns its C5's settings, so it only passes this one on. */
+    if (s_degraded) c3_link_push_config(&c->det);
+    else c3_link_set_master_config(&c->det);
+}
+
+/* One LOG_CHUNK for a LOG_REQ: the console text from `since`, with whether debug is on here (it
+ * is off after a reboot, which tells the master). A request while on renews the lease. */
+static void send_log_chunk(uint32_t since) {
+    fp_log_chunk_t c = { 0 };
+    const bool on = c3_link_debug();
+    uint32_t next = since;
+    bool lost = false;
+    if (on) {
+        c3_link_debug_lease(FP_DEBUG_LEASE_MS);
+        c.len = (uint8_t)c3_link_log_read(since, c.text, sizeof c.text, &next, &lost);
+    }
+    c.from = next - c.len;
+    c.flags = (on ? FP_LOG_DEBUG : 0u) | (lost ? FP_LOG_LOST : 0u);
+    uint8_t buf[FP_MAX_FRAME];
+    const size_t n = fp_encode_log_chunk(buf, sizeof buf, &c);
+    if (n) espnow_link_send(s_c6, buf, n);
 }
 
 static void on_msg(const uint8_t mac[6], const fp_msg_t *msg, int8_t rssi) {
@@ -97,12 +120,45 @@ static void on_msg(const uint8_t mac[6], const fp_msg_t *msg, int8_t rssi) {
     /* Calibrate/reboot: only from our master. Not keyed on gate_index: the
      * master addresses us by MAC, and our saved gate can lag its record (a
      * CONFIG sent while we were off is lost), which would drop it silently. */
+    case FP_MSG_CALIB_START:
+        if (ours) {
+            ESP_LOGI(TAG, "master passage calibration step %u (channel %u) -> C5", msg->calib_req.step, msg->calib_req.channel);
+            c3_link_calib_start(msg->calib_req.step, msg->calib_req.channel);
+        }
+        break;
+    case FP_MSG_GAIN:
+        if (ours) {
+            ESP_LOGI(TAG, "master gain %u -> C5", msg->gain.gain);
+            c3_link_send_gain(msg->gain.gain);
+        }
+        break;
     case FP_MSG_COMMAND:
         if (s_paired && memcmp(mac, s_c6, 6) == 0) {
             ESP_LOGI(TAG, "master command %u (1=cal_full 2=cal_quick 3=reboot) -> C5",
                      msg->command.cmd);
             c3_link_send_command((lp_cmd_t)msg->command.cmd);
         }
+        break;
+    /* Debug mode, only from our master (a KEY can start a calibration or a bench): switch it
+     * on or off, type keys on the C5's console, hand over the console text after a position. */
+    case FP_MSG_DEBUG:
+        if (!ours) break;
+        c3_link_debug_set(msg->debug.on != 0);
+        if (msg->debug.on) c3_link_debug_lease(FP_DEBUG_LEASE_MS);
+        ESP_LOGW(TAG, "debug mode %s from the master", msg->debug.on ? "ON" : "off");
+        break;
+    case FP_MSG_KEY: {
+        char keys[LP_KEY_MAX + 1];
+        memcpy(keys, msg->key.text, msg->key.len);
+        keys[msg->key.len] = '\0';
+        if (ours && c3_link_debug() && lp_keys_valid(keys)) {
+            c3_link_send_keys(keys, msg->key.len);
+            ESP_LOGW(TAG, "keys \"%s\" from the master", keys);
+        }
+        break;
+    }
+    case FP_MSG_LOG_REQ:
+        if (ours) send_log_chunk(msg->log_req.since);
         break;
     default:
         break;
@@ -113,8 +169,14 @@ esp_err_t c3_fleet_start_espnow(uint8_t channel) {
     return espnow_link_start(WIFI_IF_AP, channel, on_msg);
 }
 
+/* The major number of this image's version (VERSION at the repository root: 1 for 1.0.x). */
+static uint8_t fw_major(void) {
+    const esp_app_desc_t *d = esp_app_get_description();
+    return d ? (uint8_t)atoi(d->version) : 0;
+}
+
 static void send_pair_request(void) {
-    const fp_pair_request_t r = { .nonce = s_nonce, .seen_channel = s_channel, .fw_major = 5 };
+    const fp_pair_request_t r = { .nonce = s_nonce, .seen_channel = s_channel, .fw_major = fw_major() };
     uint8_t buf[FP_MAX_FRAME];
     size_t n = fp_encode_pair_request(buf, sizeof buf, &r);
     if (n) espnow_link_send(espnow_link_broadcast_addr(), buf, n);
@@ -147,7 +209,7 @@ bool c3_fleet_try_online(uint32_t timeout_ms) {
         ESP_LOGW(TAG, "paired master %02x:%02x:%02x:%02x:%02x:%02x not heard", s_c6[0], s_c6[1], s_c6[2],
                  s_c6[3], s_c6[4], s_c6[5]);
     else
-        ESP_LOGW(TAG, "not paired: open pairing on the master, then reboot this node");
+        ESP_LOGW(TAG, "not paired: open pairing on the master (5 min), then reboot this node");
     return s_master_seen;
 }
 
@@ -174,13 +236,26 @@ void c3_fleet_report_pass(const lp_event_t *e) {
     if (n) espnow_link_send(s_c6, buf, n);
 }
 
+/* The C5 sends its session's state every STATS period while one exists: each goes on to the master, which
+ * keeps the last (a lost one is replaced a second later). */
+void c3_fleet_report_calib(const lp_calib_t *c) {
+    if (!s_paired || s_degraded) return;
+    uint8_t buf[FP_MAX_FRAME];
+    const size_t n = fp_encode_calib_state(buf, sizeof buf, c);
+    if (n) espnow_link_send(s_c6, buf, n);
+}
+
 void c3_fleet_report_stats(const lp_stats_t *s) {
     if (!s_paired) return;
     fp_node_status_t ns = { .gate_index = s_gate, .channel = s_channel,
-                            .cn_x10 = s->cn_x10, .state = s->state,
+                            .cn_x10 = s->cn_x10, .states = s->states,
                             .passes = s->passes, .flags = s->flags, .seq = s_status_seq++,
                             .gain = s->gain, .uptime_s = s->uptime_s,
                             .heap_min = s->heap_min, .faults = s->faults };
+    /* What the C5 echoed it runs (polled every second), so the C6 sees a gate that missed a CONFIG
+     * or whose console K e/E changed it. */
+    const int32_t rearm = c3_link_c5_rearm_x10();
+    ns.rearm_db_x10 = rearm >= 0 && rearm < (int32_t)FP_REARM_UNKNOWN ? (uint16_t)rearm : (uint16_t)FP_REARM_UNKNOWN;
     memcpy(ns.levels, s->levels, sizeof ns.levels);
     strlcpy(ns.fw, s->fw, sizeof ns.fw);
     uint8_t buf[FP_MAX_FRAME];

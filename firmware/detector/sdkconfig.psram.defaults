@@ -1,6 +1,6 @@
 # Opt-in XIAO ESP32-C5HR8 image; requires working in-package PSRAM.
 # Wi-Fi BSS and EXT_RAM_BSS_ATTR buffers move out of internal SRAM.
-# CAPS_ALLOC keeps ordinary allocations and the video path internal.
+# CAPS_ALLOC keeps ordinary allocations internal.
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_MODE_QUAD=y
 CONFIG_SPIRAM_SPEED_80M=y

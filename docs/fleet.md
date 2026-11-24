@@ -20,25 +20,57 @@ flash FW=master-wave-c5` (or `idf.py -DIDF_TARGET=esp32c5 -DSDKCONFIG=sdkconfig.
 `firmware/master`, → `build-c5/master-c5.bin`). Later swap that C5 for a real C6
 with no change on the gate side.
 
-- **Protocols:** `components/link_proto` v3 (C5↔bridge UART: `CONFIG_*`,
-  `EVENT_PASS` with the pass's age, `STATS` with the 8 channels' levels and the C5's
-  health, `COMMAND`); `components/fleet_proto` v3
-  (C6↔C3 ESP-NOW: pairing, time beacons, `CONFIG`, `GATE_PASS`, `NODE_STATUS`
-  relaying that, `COMMAND`); `components/espnow_link` (transport);
+- **Protocols:** `components/link_proto` v6 (C5↔bridge UART: `CONFIG_*` with the
+  detector settings, the relative re-arm drop included, `EVENT_PASS` with the pass's age,
+  `STATS` with the 8 channels' levels, each channel's detector state, the strongest rise
+  (the calibration guard's) and the C5's health, `COMMAND`, `GAIN`, `CALIB_START`/`CALIB_STATE`, `LOG` console text, `KEY` console keystrokes, `DEBUG`);
+  `components/fleet_proto` v6 (C6↔C3 ESP-NOW: pairing, time beacons, `CONFIG` (the gate
+  and its detector settings, link_proto's `lp_config_t` as it goes to the C5, re-arm drop
+  included), `GATE_PASS`, `NODE_STATUS` relaying the C5's `STATS` and the re-arm drop its
+  last `CONFIG_STATE` echoed, `COMMAND`, `GAIN`, `CALIB_START`/`CALIB_STATE`, and `DEBUG`/`KEY`/`LOG_REQ`/`LOG_CHUNK` for a remote gate's debug mode); `components/espnow_link` (transport);
   `components/race_timing` (laps/sectors per channel). A board left on an older
-  firmware is not misread, it simply does not talk: **reflash every C5, C3 and the
-  C6 together** after a protocol change.
+  firmware is not misread, it simply does not talk (v4 added the re-arm drop and the
+  channels' states, v5 the remote gate's debug mode, v6 the RX gain: a C3 left on v5 drops off the race, not only
+  the debug): **reflash every C5, C3 and the C6 together** after a protocol change.
+- **Detector states:** the C5 reports each channel's detector state in `STATS`, 2 bits per
+  channel (`states`, R1 in bits 1..0, R8 in bits 15..14: 0 idle, 1 rising, 2 peak passed,
+  3 cooldown; `lp_state_of()` in `link_proto.h`), and `NODE_STATUS` relays them as they are.
+  Peak passed lasts one reading, then cooldown until the channel re-arms (the refractory
+  period over, then the level under the release or the relative re-arm:
+  [detector.md](detector.md)): both mean the channel waits to re-arm, and it rings no pass
+  meanwhile. `/api/state` gives them as `"states"`, 8 integers 0..3 with R1 first, in the
+  C3's `stats`, the C6's `local` and each of its `nodes`; all 0 while the C5 does not scan (a
+  calibration, a bench, a stalled scan, no engine), for an absent C5 (on the C3 and for gate
+  0: none yet, or silent for 3 s; its levels then read unknown too) and for an offline node
+  (a remote gate whose C5 goes silent sends no more `NODE_STATUS`, so its node reads offline
+  after 8 s). The pages draw a dashed blue frame on a channel while it waits to re-arm
+  ("Channels panel" below).
 - **C6** (`c6_hub`): node table in NVS, periodic time beacons, the `race_timing`
   engine, **centralized sound**, and an **admin web** (AP) to pair, order the
   gates and see the timings. Every C5 sweeps R1 to R8, so a gate has no channel: a pass
   carries the channel it was seen on.
-- **Pairing:** C6 web → *pairing open*; an unpaired C3 broadcasts a
+- **Pairing:** **closed at every boot**: the admin presses *Toggle pairing* on the C6 web and it
+  stays open **5 minutes**, then closes by itself (the page counts it down; pressing again closes it
+  at once; `pairing_left_s` in `/api/state`). Only a new node needs it: paired ones reconnect
+  with pairing closed. An unpaired C3 broadcasts a
   `PAIR_REQUEST`; the C6 assigns it a gate (`PAIR_ACCEPT` + `CONFIG`),
   persisted on both sides. The channel those frames still carry is ignored. A node only asks
   while it boots, so with pairing closed it ends up degraded: open pairing, then reboot it.
+- **Gate order** (admin, C6 *Gates / nodes*): drag a row by its **⠿** handle, or focus the handle and press ↑ ↓, to
+  put the gates in the order of the track; they are numbered 1, 2, 3… as listed (gate 0 stays the master's own C5). The
+  page sends the whole list once the row is dropped, `POST /api/order` `{"order": [node ids, first gate first]}` →
+  `{"ok": true}` (or `{"ok": false}`, nothing changed, unless the list holds every paired node's id once: the page's
+  list may be stale). One call renumbers every gate, so the race timing restarts once and only the nodes whose gate
+  changed get a new `CONFIG`; the same order changes nothing. A remote gate in debug mode follows its node; the pages'
+  gate selectors go back to gate 0, since a number now names another node. *Remove* (red, asks first) forgets a
+  node, which must pair again; the others keep their numbers. A node's id is the lowest free one at pairing, so
+  it never repeats after a removal.
 - **Degraded C3:** if the C6 is unreachable for `CONFIG_C3_FLEET_TIMEOUT_MS` at
-  boot, the C3 serves its own local AP + web (pass display, the channels' levels,
-  detector settings).
+  boot, the C3 serves its own local AP + web (pass display, the channels' levels and
+  states, detector settings). Its *Detector* card has the relative re-arm drop too, with an info
+  bubble (the round "i": a click, a tap or Enter opens it, a second one, a tap elsewhere
+  or Escape closes it) on what it does and its recommended value, 16 dB
+  ([detector.md](detector.md#setting-d)).
 - **Simple and advanced:** the C6 page opens on what spectators came for, the standings
   and the last results. Each channel in the standings has its status: online while a pass is under 30 s old, else offline; hover or tap the badge
   for when it was last seen, on the master's clock. The advanced toggle adds the channels, the gates
@@ -52,20 +84,61 @@ with no change on the gate side.
   until it is released. An admin can reset one channel (`POST /api/reset` `{"channel": N}`):
   its times and its lap in progress go, it stays listed with when it was last seen.
   *Reset all* (`{}`) clears the whole race, standings included.
-- **Channels panel:** the C6 page shows one row per gate, the degraded C3 page one
-  tile per channel, R1 to R8, with its level in dB above the channel's rest and a yellow
-  mark on a pass; `—` while the C5 is away or calibrating. A VTX left on keeps showing.
+- **Channels panel:** the C6 page shows one row per gate (advanced view), the degraded C3
+  page one tile per channel, R1 to R8, with its level in dB above the channel's rest: no
+  green under 3 dB, full green from 20 dB; `—` while the C5 is away or calibrating. A VTX
+  left on keeps showing. A pass frames its channel in solid yellow for 3 s, and a dashed
+  blue frame marks a channel that waits to re-arm (cooldown, "Detector states" above): it
+  explains a lap not counted, e.g. a VTX left near the gate. The yellow covers the blue
+  while it lasts, and the dashes tell the two apart without their colours. Rising gets no
+  frame: it is too short for a page that polls every second, and the green already shows
+  it. Peak passed lasts one reading and is framed and named as cooldown. A tile's or cell's
+  tooltip names the channel and its state (`Gate 2 · R5 · cooldown`).
+- **Re-arm drop (D):** the C6 keeps one relative re-arm drop as the fleet's default (NVS, 16 dB
+  until an admin sets one; what it does: [detector.md](detector.md#setting-d)), and a gate may have a **D of its own**.
+  The advanced view's *Detector (every gate)* card sets it (admin only), with the same info bubble as the
+  C3's: what it does, the recommended 16 dB and how to tune it, for *All gates* or for one gate chosen in its menu.
+  **All gates** sets the fleet's D and drops every gate's own D, so every gate runs it; **a gate alone** keeps a D of its own
+  (gate 0 in `c6_store`, a remote gate by its nodes' MACs in the `ovr2` record the calibrated thresholds share, as separate
+  flags, so one never erases the other), merged into every `CONFIG` it is sent; *Use the fleet's D* drops it. A gate with its own D
+  shows an *own D* pill beside its health, and the *D 12* pill now means its C5 echoes another D than the one it should run.
+  `POST /api/rearm` `{"rearm_db_x10": 0..400, "gate": 0..15}` (no `gate`: all; `-1` for the value with a gate: the fleet's again) →
+  `{"ok": true}`, or `{"ok": false}` out of range or for a gate nobody paired. `/api/state` gives each gate `rearm_want_x10`
+  (the D it should run) and `rearm_own`. The online
+  remote gates get it at once in their `CONFIG`, and a remote gate again at pairing, on its
+  save, when it comes back online and when its C3 boots ("Back online" below). Its C3 keeps
+  the last `CONFIG` (RAM) and gives it to its C5 again when that C5 says `HELLO`: one sent
+  while the C5 booted is lost (its UART comes up after its radio), and a swapped C5 gets it
+  too. Gate 0 keeps its other settings: the C6 sends its C5 a `CONFIG_SET` of the values
+  that C5 echoed with the fleet's drop, when the C6 boots, when that C5 says `HELLO` (it
+  rebooted) and on each *Apply*. A gate whose C5 echoes another drop (its bridge asks every
+  second, and `NODE_STATUS` relays a remote gate's) shows it in its health, after the
+  calibration badge, e.g. `D 12`: it missed the last `CONFIG` (lost on the air) or a
+  console `K` `e`/`E` changed it; *Apply* sends the fleet's again. `/api/state` carries the
+  fleet's value (`rearm_db_x10`) and each gate's echo (`local` and every node, `-1` until its
+  C5 told it).
 - **Web roles:** two levels. A **spectator** sees timings/status read-only (no
-  login); **admin** actions (pairing, gate order, reset, volume, a
-  gate's calibration or reboot; detector tuning on a degraded
+  login); **admin** actions (pairing, gate order, reset, volume, the fleet's re-arm drop,
+  a gate's calibration or reboot; detector tuning on a degraded
   C3) need the admin password (`CONFIG_*_ADMIN_PASSWORD`, no
   username, any length): the header's admin toggle opens a password
   dialog; turning it off forgets it. An empty password disables
   admin auth. See "Signed admin requests" below.
+- **The pages' code and policy:** each page is `www/index.html` plus its script `www/app.js` (and `/auth.js`),
+  all embedded and served by the firmware. Every page and script carries a **Content-Security-Policy**
+  (`WA_CSP` in `web_auth_esp.h`, `web_auth_page_headers()`): scripts only from the page's own origin
+  (`script-src 'self'`: no inline script, no `eval`; the pages hold no `on...=` attribute), connections to its own origin only
+  (`connect-src 'self'`), no framing, no form post, no base URL; styles may be inline (a style cannot run
+  code); plus `nosniff` and `no-referrer`. `tools/web_mock.py` sends the same headers (read from the C macro), so a page
+  the real policy would block is blocked in `make web-master` too. The pages use the platform's own controls where they help: the four switches (admin,
+  advanced, pause, debug mode) stay buttons with `role="switch"` and `aria-checked` (the native `<input switch>` was tried and the
+  operator preferred the buttons), the "i" notes are popovers (light dismiss, Escape and focus return are the browser's; the script only places the note under its button, or
+  above, inside the window; a browser without the Popover API falls back to a click toggle), `accent-color` follows the theme, and
+  the switch's glide stops under `prefers-reduced-motion`. A page with no `popover` support, or an older one, still works.
 - **Signed admin requests** (`components/web_auth`): the password never crosses
   the Wi-Fi and the firmware never holds it. The build turns it into
   K = PBKDF2-HMAC-SHA256(password, salt, 200000), 32 bytes in `admin_hash.h`,
-  with a salt `fpv58-checkpoint/<c3|c6>/<16 hex>` random at each configure
+  with a salt `letztimer/<c3|c6>/<16 hex>` random at each configure
   (`components/web_auth/project_include.cmake`, `admin_key.py`). At login the page
   opens a session (`POST /api/session`: a random 128-bit id from the hardware RNG,
   plus the salt and the iterations) and derives the same K from the typed password
@@ -78,7 +151,13 @@ with no change on the gate side.
   increasing order, so a captured request replayed, or one with a changed body or
   path, is refused. Sessions live in RAM (4, least recently used evicted): after
   an ESP reboot the page reopens one with K, without asking for the password
-  again. The page sends one request at a time and gives up on each HTTP exchange
+  again. **Staying admin across pages and reloads:** the page keeps K, as 64 hex digits, in the tab's
+  `sessionStorage` (key `letztimer.adminKey`), never the password; a reload or the Maintenance view of the same tab
+  `restore()`s it with one signed `GET /api/auth` (no PBKDF2), opening a session of its own. It is cleared by the admin
+  switch, by a 401 (the password changed: K no longer matches) and by closing the tab, never shared with another tab
+  or device; an ESP that does not answer (it reboots) leaves it for the next try. Whoever can run script on the
+  page's origin can read it: the pages are served by the firmware alone and show foreign text only as plain text.
+  Storage that refuses (a private window) just means a login after each reload. The page sends one request at a time and gives up on each HTTP exchange
   after 10 s (one that must reopen its session can take up to 30 s). On logout,
   or when the login dialog is closed during a login, queued requests are dropped;
   one already sent may still have run on the ESP and its reply reaches its
@@ -88,7 +167,7 @@ with no change on the gate side.
     is open) who captures a single signed request, and every login sends one, can
     test password guesses offline; PBKDF2 makes each guess cost 200000 HMACs, but
     a short or common password still falls: use a long random one (the default
-    `checkpoint` is public);
+    `letztimer` is public);
   - plain HTTP still lets an *active* attacker on the AP serve a modified page
     that reads the password as it is typed (only HTTPS prevents that);
   - anyone with the `.bin` holds K and can sign without the password;
@@ -96,10 +175,16 @@ with no change on the gate side.
 - **Constraint:** the C6 and C3 APs **and** ESP-NOW share the **same Wi-Fi
   channel** (`CONFIG_*_AP_CHANNEL` / `CONFIG_C6_AP_CHANNEL`).
 - **Limit:** the time base (ESP-NOW beacons) aims for ~10 ms; not a sub-ms photo
-  finish. A pass is timed at its peak by the C5, and a lap by gate 0's C5 alone. A sector
-  also depends on when a remote gate's pass reaches its C3, after a 100 ms UART poll
-  (`LINK_READ_MS`): count ±0.1 s on it for now. The first passes after a boot teach the
-  master the local C5's clock, so a lap there can read a little short.
+  finish. A pass is timed at its smoothed peak by the C5, which lags the true peak by
+  ~40–60 ms on every gate alike, and a lap by gate 0's C5 alone. A sector also depends on
+  when a remote gate's pass reaches its C3: the C5 now reads its UART every 10 ms, but the
+  bridges still poll every 100 ms (`LINK_READ_MS`), so count ±0.1 s on a remote gate's
+  sector until they change too (a C3 and C6 reflash). The first passes after a boot teach
+  the master the local C5's clock, so a lap there can read a little short. The master also
+  takes any pass from its C5 that is older than the one before as that C5's reboot and
+  learns the clock again: two drones on different channels whose passes ring out of peak
+  order can make one gate-0 lap read a few tens of ms long and the next as much short (a
+  C6 change: time gate 0 from the pass's age, as the C3 does).
 
 ## Gate health and remote commands (no console in production)
 
@@ -108,17 +193,39 @@ needs from it goes through its bridge: the C6 admin web for the fleet (gate 0 is
 its own C5 over UART, the others go through their C3), or the degraded C3's own
 page for a gate with no master.
 
-- **Health**, from the C5's `STATS` every `CONFIG_CHECKPOINT_LINK_STATS_MS`
-  (relayed in `NODE_STATUS`): a calibration badge (OK / calibration needed, i.e.
-  `CAL_NEEDED`/`DC_FAULT` / calibrating), RX gain, passes since boot, C5 uptime,
-  lowest free heap, transport fault counters and the firmware id. A C5 silent for
-  **3 s** is shown as absent: no stale health, and commands to it fail.
-- **Commands** (admin): *Cal B* = the console's `B` (full RF optimisation),
-  *Cal F* = `F` (quick filter calibration), *Reboot*; on the C6 also *Calibrate
-  all gates (B)*. They call the same engine functions as the console
-  (`filter_request_full()`, `filter_request()`), so the engine still refuses a
-  calibration that is already running.
-- **Guard:** a calibration blinds the gate for minutes and wants the VTXs off.
+- **Health**, from the C5's `STATS` every `CONFIG_LETZTIMER_LINK_STATS_MS`
+  (relayed in `NODE_STATUS`): a calibration badge (OK / calibration needed / calibrating),
+  RX gain, passes since boot, C5 uptime, lowest free heap, the capture fault counters
+  and the firmware id. *Calibration needed* (`CAL_NEEDED`) is an LO's DC offset or IQ
+  estimate out of range, or most of its captures failing, for 3 s; no engine (its start
+  failed); or a stalled scan (no rotation for 1 s outside a calibration or a bench). A
+  channel with no reading for 1 s while the gate scans shows an unknown level, not a rise
+  of 0: its LO's captures fail, or the pair guard holds it while the other channel of its
+  LO clips the ADC (a drone parked close to the gate; no fault, no badge;
+  [detector.md](detector.md#pair-ghost-guard)). *Calibrating* is a calibration,
+  the rests' learning (3 s) or a console bench: the gate is blind. The faults count
+  capture timeouts, short or overrun dumps, DSP errors and scan stalls, since boot. A C5
+  silent for **3 s** is shown as absent: no stale health, and commands to it fail.
+  The C6 page shows the health in the *Health* column of *Gates / nodes* (hover for the
+  details) and in gate 0's *C5 health*, its details on the line below, each followed by
+  the gate's re-arm drop when its C5 runs another than the fleet's (`D 12`, "Re-arm drop
+  (fleet)" above). The degraded C3's page has its *C5 health* card, and its *Live* card
+  sums it up in a *detector* badge: `no C5 yet`, `C5 silent`, `calibrating`, `calibration
+  needed` or `OK`.
+- **Maintenance page** (admin, a link in the header of the C6 and of the degraded C3 page; the same
+  document at `#maintenance`, so the login carries over): the radio calibrations and reboot, and the
+  debug console below. They are kept off the everyday page: the C5 calibrates its oscillators at every
+  boot and the chip recalibrates itself while it runs, so *Cal B/F* are for a gate that says
+  *calibration needed*, and the debug console is for a bench. The C6 lists each gate (0, then the
+  nodes) with its calibration badge, *Cal B*, *Cal F*, *Reboot*, and *Calibrate all gates (B)*.
+- **Commands** (admin, from the Maintenance page): *Cal B* = the console's `B` (recalibrate every LO, then verify
+  its image rejection, up to 3 tries per LO), *Cal F* = `F` (recalibrate every LO),
+  *Reboot*; on the C6 also *Calibrate all gates (B)*. They post the same `sdr_rx`
+  recalibration request as the console (`sdr_rx_request_recal()`, applied by the scan
+  task), so the C5 refuses one while a calibration is pending or running, or a console
+  bench runs (`LETZTIMER command=… refused=busy` on its console).
+- **Guard:** a calibration blinds the gate for about 3–4 s (~0.2 s of calibration,
+  more for B's retries, then 3 s of learning the rests) and wants the VTXs off.
   The page asks for confirmation; then the bridge refuses, unless forced, any
   gate whose strongest channel is above that C5's activity threshold (`active_db`,
   read from its `CONFIG_STATE` echo), i.e. a VTX is probably on. The C6 also skips gates
@@ -130,5 +237,78 @@ page for a gate with no master.
   degraded C3's `POST /api/command` `{"cmd": ..., "force": 0|1}` (its one gate)
   replies `{"ok": true}`, `{"ok": false, "vtx": true, "cn_x10": x}` or
   `{"ok": false, "msg": "no C5 linked"}`.
-- **Back online:** the C6 re-sends a node's `CONFIG` (gate, detector settings) when the
-  node comes back online, so a rebooted gate returns to its assignment.
+- **RX gain** (admin): the C5 forces its gain (no AGC, 40 by default, saved in its NVS), set from the
+  web in the *Detector* card on the C6, under the re-arm drop (a gate selector, a field that follows the gate's
+  current gain, *Set gain*; the menu's *All gates* sends it to every reachable gate at once, each C5 keeping its own,
+  so a gate that joins later keeps its own) and in the degraded C3's *Detector* card (labelled *G*, as the re-arm drop is *D*). It goes as `GAIN` (`link_proto`) to
+  a C5, relayed by `FP_MSG_GAIN` to a remote gate (from its master's MAC only, as `COMMAND`), and the C5
+  does what the console's `K g/G` does, to that index: clamped to 10..the PHY's maximum (83), saved,
+  the rests learnt again (a bench refuses it: `LETZTIMER gain refused=busy`). It blinds the gate for
+  about 3 s and the rests are learnt at the new gain, so it has the **calibrations' guard**: the page
+  asks, then a gate seeing a strong signal is refused unless forced, and a gate calibrating is skipped
+  (*busy*). **API:** C6 `POST /api/gain` `{"gate": 0..15 or -1 (every reachable gate), "gain": 10..83, "force": 0|1}` → `{"ok": true,
+  "sent": [...], "failed": [...], "busy": [...]}` or `{"ok": false, "vtx": [...]}`; the degraded C3's
+  `POST /api/gain` `{"gain": ..., "force": 0|1}` → `{"ok": true}`, `{"ok": false, "vtx": true, "cn_x10": x}`
+  or `{"ok": false, "msg": "no C5 linked"}`. The new gain shows in the next `STATS`.
+- **Passage calibration** (admin, C6 page *Passage calibration*; [detector.md](detector.md#passage-calibration-the-web-a-real-drone)):
+  a drone with its VTX on, in the passage then 2 m away, 5 s each: the gate's C5 measures and proposes its thresholds
+  (min peak, active, hysteresis, drop), the page shows the two levels, the warnings and the proposal, *Apply* sets them.
+  It does not blind the gate (no VTX guard), and a pass rung in step 1 is real (reset that channel). Gate 0 goes over
+  the UART (`CALIB_START` / `CALIB_STATE`); a remote gate through its node (`FP_MSG_CALIB_START`, and each `CALIB_STATE` the C5
+  sends, once a second while a session exists, relayed): the C6 keeps the last one per node and a node that rebooted
+  has none. **Per-gate thresholds:** the fleet's `CONFIG` is one value for every gate, so a calibrated gate has its own
+  four thresholds stored on the C6 (NVS key `ovr`, by MAC, partial: D and alpha stay the fleet's), merged into every
+  `CONFIG` it sends that node (pairing, back online, a change of D), so a re-send never erases it. The nodes table shows a
+  *calibrated* pill; *Use the fleet's thresholds* (`action: "reset"`) drops it. API: `POST /api/calib`
+  `{"gate": 0..15, "action": "state" | "start1" | "start2" | "cancel" | "apply" | "reset", "channel": 0..7 (start1; absent or other: any)}` answers the session
+  (phase, seconds left, flags, the drone's channel, the two measurements, the proposal). The degraded C3's page has the
+  same card (`POST /api/calib` `{"action": ...}`, no gate and no *reset*): *Apply & save* puts the four thresholds in
+  its stored config and pushes them to its C5.
+- **Back online:** the C6 re-sends a node's `CONFIG` (gate, detector settings with the
+  fleet's re-arm drop) when the node comes back online, and to each heartbeat (a C3 sends
+  them only while it boots, until it hears its master), so a rebooted gate returns to its
+  assignment even when it was back within the 8 s before the C6 marks it offline. After
+  flashing a gate with the sdr_rx engine, review the detector config the C6 stores for it:
+  the C6 re-sends it, and its thresholds were tuned on the C5VRX meter. Keep the defaults
+  until the bench retunes them ([bench.md](bench.md), B6).
+
+## Debug mode (degraded C3 page and C6 master page, admin)
+
+For development: the C5's console text and its keys, over the web of the board its UART is wired to (a degraded C3, or the C6 for its own gate 0), without a USB cable.
+**Off by default, at every boot**: an admin switches it on with the "debug mode" switch of the
+**Debug** panel of the *Maintenance* page (`POST /api/debug` `{"on": 0|1}`, a `DEBUG` frame to the C5; the C3 repeats it with
+every `STATS` while on, and the C5 switches off on a `HELLO`, i.e. when the C3 reboots). While it is
+off the C5 mirrors nothing (no `LOG` traffic), the C3 keeps no text and `/api/key` refuses.
+On: the C5 mirrors what its console prints (`lt_printf`: `PASS`, `LETZTIMER ...`, `K` menus, `T`,
+`K l` traces, bench summaries) into a 2 KiB heap ring that `lt_link` sends as `LOG` frames (two per
+loop, so a pass never waits); a full ring drops the newest text and says how much. The C3 keeps
+the last 4 KiB (`c3_link.c`; the C6 keeps the same in `c6_link.c`, both through `link_proto`'s `lp_logring`) and serves it to `POST /api/log` `{"since": N}` (admin, signed; the
+page polls it once a second while the Debug panel is open). `POST /api/key` `{"keys": "Ka",
+"force": 0|1}` sends a `KEY` frame: the C5 types the keys on its console queue in order, so
+`K` + key, `T` (status), `F` and `B` behave as on USB (the download key is never sent). Keys that
+blind the gate (`F`, `B`, `K` + `s z x n p S g G i`) are refused first with `{"blind":true}` (or
+`{"vtx":true}` while a carrier is seen); the page asks, then retries with `force`.
+Not mirrored: the `K S` scan-recording rows and what the engine (`sdr_rx`) and the USB heartbeat
+print. Logging out of the page leaves debug mode on until the board reboots.
+
+**The C6 master's page** has the same panel (admin, *Maintenance* page), with the same three routes (`/api/debug`, `/api/log`, `/api/key`) and a **gate**
+selector (gate 0 and each online remote gate); every body carries `"gate"` (default 0). **One gate
+is in debug mode at a time**: switching one on switches the previous one off, and the page's choice
+of gate moves the debug mode along if it was on. A blind key's VTX guard uses that gate's C/N: gate
+0's against its `active_db`, a remote gate's against the one the hub pushes.
+
+*Gate 0* is the C6's own C5 over its UART, as on the C3 (`c6_link.c`). A *remote gate* goes through
+its node, **pulled by the master** (a node pushing its C5's console would load the air for every
+gate): `DEBUG` (on/off), `KEY` (the keys, 1..16 bytes), `LOG_REQ` (`since`) answered by `LOG_CHUNK`
+(`from`, flags, up to 56 bytes). All four count only between a node and its own master (MAC). The
+node's C3 keeps its C5's console in the same 4 KiB ring and answers each request with the next
+bytes; the C6 polls **stop-and-wait** (one request in flight, a new one at once after a full
+chunk, else every 100 ms, so at most 20 per second; re-asked after 300 ms) and keeps the text in a
+ring of its own (`c6_hub.c`) for the page. Duplicates are dropped and gaps counted
+(`fp_log_take`, host-tested). **Leases** keep nothing on unattended: the master switches the node off
+when no page polled `/api/log` for 10 s, and the node switches itself off when no `LOG_REQ` came for
+`FP_DEBUG_LEASE_MS` (30 s: a C6 that rebooted). A node that rebooted answers `LOG_CHUNK` with
+debug off, and the master releases it (the page shows it off again). Throughput is about 0.5 to 1
+KB/s per gate: enough for `PASS`, `T` and the `K` menus, while a busy trace (`K l`) shows
+`[log: N bytes lost]` gaps. Keys type on the node's C5 like on USB, so a blind one asks first, as
+for gate 0; a node out of reach answers `no C5 linked`.

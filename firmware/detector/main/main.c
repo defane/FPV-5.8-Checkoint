@@ -1,118 +1,34 @@
-/* C5VRX-5 by Twotoz and the C5VRX contributors: ESP32-C5 analog 5.8 GHz FPV
- * receiver. https://github.com/Twotoz/C5VRX - https://twotoz.github.io/C5VRX/ */
-#include "receiver.h"
-#include "checkpoint.h"
+/* Lëtz Timer detector (ESP32-C5): the sdr_rx engine sweeps R1-R8 in LO pairs, the
+ * LetzTimer glue detects passes and reports them over the UART link. No local output. */
 #include <fcntl.h>
 #include <stdio.h>
-#include <unistd.h>
 #include "driver/usb_serial_jtag_vfs.h"
-#include "esp_app_desc.h"
 #include "esp_timer.h"
-#include "rf.h"
-#include "phy.h"
-
-volatile const char *s_boot_stage = "start";
-static int64_t s_boot_radio_ms = -1, s_boot_ready_ms = -1;
-void firmware_boot_timing(int64_t *radio_ms, int64_t *ready_ms)
-{
-    *radio_ms = s_boot_radio_ms; *ready_ms = s_boot_ready_ms;
-}
-
-/* The splash window while the receiver tasks start and Direct Gain makes
- * its first decision (a hold, also without a carrier). Nothing is drawn
- * (menu_stub.c): it owns TX so BOOT_PHASE can align the sampling phase,
- * for at least SPLASH_MIN_MS and up to SPLASH_MAX_MS while the gain has not
- * held yet, so the detector (checkpoint_start) starts on a found gain. */
-#define SPLASH_MIN_MS 3000
-#define SPLASH_MAX_MS 4000
-
-static void splash_wait_gain(int64_t t0, uint32_t holds, int64_t deadline)
-{
-    int settled_ms = -1;
-    for (;;) {
-        vTaskDelay(pdMS_TO_TICKS(50));
-        const int ms = (int)((esp_timer_get_time() - t0) / 1000);
-        if (settled_ms < 0 && s_gain.state == DG_HOLD && s_gain.holds != holds) settled_ms = ms;
-        menu_splash_progress(ms * 100 / SPLASH_MIN_MS);
-        if ((settled_ms >= 0 && ms >= SPLASH_MIN_MS) || ms >= SPLASH_MAX_MS || esp_timer_get_time() >= deadline) break;
-    }
-    if (settled_ms >= 0) printf("SPLASH gain G%u held after %d ms\n", s_current_gain, settled_ms);
-    else printf("SPLASH ended at %d ms before a gain hold\n", SPLASH_MAX_MS);
-}
+#include "nvs_flash.h"
+#include "letztimer.h"
+#include "sdr_rx.h"
 
 void app_main(void)
 {
-    const int64_t app_t0 = esp_timer_get_time();
-    /* USB output never blocks a task when no host is attached. */
-    setvbuf(stdin, NULL, _IONBF, 0);
+    const int64_t t0 = esp_timer_get_time();
+    setvbuf(stdin, NULL, _IONBF, 0);                 /* USB output never blocks a task (as today) */
     setvbuf(stdout, NULL, _IONBF, 0);
     fcntl(fileno(stdout), F_SETFL, fcntl(fileno(stdout), F_GETFL, 0) | O_NONBLOCK);
     usb_serial_jtag_vfs_use_nonblocking();
-    /* The console first: flashing (download key) and diagnostics must stay
-     * reachable whatever a later boot step does. */
-    console_start();
-    firmware_print();   /* first log line names the exact build */
-    checkpoint_antenna_boot();
-    if(!control_prepare()) {
-        s_boot_stage="control_memory";
-        printf("CONTROL stack reservation failed; USB status/download remain available\n");
-        return;
+    letztimer_reserve();          /* scan task stack + TCB first: lowest heap, below the dump bank */
+    letztimer_console_start();    /* first: the download key '`' must work whatever follows */
+    firmware_print();
+    letztimer_boot_stage("nvs");
+    esp_err_t e = nvs_flash_init();
+    if (e == ESP_ERR_NVS_NO_FREE_PAGES || e == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        (void)nvs_flash_erase();
+        e = nvs_flash_init();
     }
-    s_boot_stage = "rf";
-    ESP_ERROR_CHECK(rf_start());
-    s_boot_radio_ms = (esp_timer_get_time() - app_t0) / 1000;
-    printf("BOOT_TIMING radio_ms=%lld\n", s_boot_radio_ms);
-    s_boot_stage = "settings";
-    settings_load();
-    /* Start at the first index of the highest RF stage; Direct Gain takes
-     * over at once (table maximum without a carrier). */
-    receiver_set_gain(arc_gain_highest_rf_stage_start(rf_gain_table()));
-    s_boot_stage = "calibration";
-    calibration_start();
-    /* The receive profile (filter class + tracker) of this channel is
-     * chosen before live TX starts; it never changes under live video. */
-    profile_load();
-    profile_boot();
-    {   /* Menu choices of the last session (settings prefs). */
-        settings_prefs_t p;
-        if (settings_prefs_load(&p)) {
-            if (p.dfilt_mode != PHY_DFILT_MODE_DEFAULT && !phy_dfilt_select(p.dfilt_mode))
-                printf("PREFS dfilt=%u not applied; mode %d\n", p.dfilt_mode, phy_dfilt_mode());
-            if (receiver_gain_mode_auto(p.gain_mode) && p.gain_mode != GAIN_MODE_DEFAULT)
-                receiver_set_gain_mode(p.gain_mode, false);
-            profile_select_restore(p.filter_select);
-            printf("PREFS restored filter_select=%d gain_mode=%u dfilt=%d\n", p.filter_select, receiver_gain_mode(),
-                   phy_dfilt_mode());
-        }
-        uint8_t demod;   /* the decoder of the last session (console m, NVS "demod"); set before the first start */
-        if (blob_load("demod", &demod, sizeof(demod)) && demod < TRANSPORT_DEMODS && transport_set_demod(demod))
-            printf("PREFS restored demod=%s\n", transport_demod_name(demod));
-    }
-    s_boot_stage = "transport";
-    if (transport_start() != ESP_OK) {
-        s_boot_stage = "transport_fault";
-        printf("TRANSPORT boot failed: live OFF; USB status/download remain available\n");
-        return;
-    }
-    s_boot_stage = "splash";
-    const int64_t splash_t0 = esp_timer_get_time();
-    const uint32_t splash_holds = s_gain.holds;
-    /* Leave one second of a ten-second target for final TX handover.
-     * Never add a fixed warning screen after the normal splash. */
-    const int64_t ready_deadline = app_t0 + 9000000;
-    const bool splash = esp_timer_get_time() < ready_deadline && menu_splash_begin();
-    s_boot_stage = "tasks";
-    receiver_start();
-    control_start();
-    if (splash) splash_wait_gain(splash_t0, splash_holds, ready_deadline);
-    menu_splash_end();
-    checkpoint_start();   /* after the splash: its memory is not part of the boot peak */
-    s_boot_stage = "ready";
-    s_boot_ready_ms = (esp_timer_get_time() - app_t0) / 1000;
-    printf("BOOT_TIMING ready_ms=%lld target_ms=10000\n", s_boot_ready_ms);
-    char gain_name[16];
-    printf("C5VRX5 %s ready: %s %u MHz, %s, ultrafine IQ, gain %s ('h' for keys) fw=%s\n",
-           esp_app_get_description()->version, rf_channel()->name, rf_frequency_mhz(),
-           transport_program_name(), receiver_gain_mode_name(receiver_gain_mode(), gain_name, sizeof(gain_name)),
-           firmware_id());
+    if (e != ESP_OK) { printf("BOOT failed step=nvs err=%s (console stays up)\n", esp_err_to_name(e)); return; }
+    letztimer_antenna_boot();     /* GPIO 26 before the PHY's boot calibration (IPEX variant) */
+    letztimer_boot_stage("radio");
+    e = sdr_rx_radio_start();
+    if (e != ESP_OK) { printf("BOOT failed step=radio err=%s (console stays up)\n", esp_err_to_name(e)); return; }
+    printf("BOOT_TIMING radio_ms=%lld\n", (esp_timer_get_time() - t0) / 1000);
+    letztimer_start(t0);          /* prefs, detector, scan task (calibrates, then sweeps), UART link */
 }

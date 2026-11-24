@@ -1,4 +1,4 @@
-/* Checkpoint C3 node bridge: UART to the local C5 + ESP-NOW uplink to the C6
+/* LetzTimer C3 node bridge: UART to the local C5 + ESP-NOW uplink to the C6
  * master. At boot it probes the C6; if reached it runs as a headless relay
  * (forwarding passes and the C5's health, applying the C6's config/channel and
  * commands). If the C6 is not reached within the timeout it falls back to a

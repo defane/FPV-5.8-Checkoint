@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Checkpoint C3</title>
+<title>Lëtz Timer C3</title>
 <style>
-  :root { color-scheme: dark; }
+  :root { color-scheme: dark; accent-color: #2f6feb; }
   body { font-family: system-ui, sans-serif; margin: 0; background: #14171c; color: #e7ebf0; }
   header { padding: 14px 16px; background: #1b2026; font-weight: 600; font-size: 1.1rem; }
   main { padding: 16px; max-width: 640px; margin: 0 auto; }
@@ -16,7 +16,7 @@
   .row { display: flex; gap: 18px; flex-wrap: wrap; }
   .stat { flex: 1 1 120px; }
   .stat b { display: block; font-size: 1.4rem; }
-  .stat span { color: #8b97a7; font-size: .8rem; }
+  .stat > span { color: #8b97a7; font-size: .8rem; }
   button { margin-top: 12px; background: #2f6feb; color: #fff; border: 0; border-radius: 8px; padding: 10px 16px; font-size: .95rem; cursor: pointer; }
   button:active { background: #255ac2; }
   button:disabled { opacity: .45; cursor: default; }
@@ -29,7 +29,12 @@
   .ch { background: #0f1216; border-radius: 6px; padding: 8px 2px; text-align: center; font-variant-numeric: tabular-nums; }
   .ch span { display: block; font-size: .75rem; color: #8b97a7; }
   .ch b { font-size: 1rem; } .ch.none b { color: #4a5563; }
+  /* A tile's frame (the same colours as the C6's cells): solid yellow for a pass, dashed blue while
+     its channel waits to re-arm; an outline, so the tile keeps its size. */
   .ch.hit { outline: 2px solid #fcd34d; outline-offset: -2px; }
+  .ch.cool { outline: 2px dashed #93c5fd; outline-offset: -2px; }
+  .key { display: inline-block; width: 14px; height: 10px; box-sizing: border-box; border-radius: 3px; vertical-align: -1px; }
+  .key.hit { border: 2px solid #fcd34d; } .key.cool { border: 2px dashed #93c5fd; }
   @media (max-width: 420px) { .chans { grid-template-columns: repeat(4, 1fr); } }
   .pill { font-size: .8rem; padding: 2px 8px; border-radius: 999px; background: #2a313a; }
   .pill.ok { background: #14532d; color: #86efac; }
@@ -42,6 +47,7 @@
                      border-radius: 50%; background: #8b97a7; transition: left .15s; }
   .switch[aria-checked=true] { background: #14532d; color: #86efac; }
   .switch[aria-checked=true] i::after { left: 16px; background: #2ecc71; }
+  @media (prefers-reduced-motion: reduce) { .switch i::after { transition: none; } }
   button.ghost { background: #2a313a; }
   dialog { background: #1b2026; color: #e7ebf0; border: 1px solid #2a313a; border-radius: 10px; padding: 16px;
            width: min(300px, calc(100vw - 64px)); }
@@ -51,36 +57,70 @@
   dialog button { margin: 0; }
   .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   input[type=text], input[type=password] { background: #0f1216; color: #e7ebf0; border: 1px solid #2a313a; border-radius: 6px; padding: 6px; }
+  #dbg_log { height: 260px; overflow: auto; margin: 0; padding: 8px; background: #0f1216; border-radius: 6px;
+             font: .75rem/1.35 ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; word-break: break-all; }
+  header h1 { display: inline; font: inherit; margin: 0; }
+  details > summary { cursor: pointer; }
+  a.maint-link { color: #93c5fd; font-size: .85rem; text-decoration: none; border: 1px solid #2a313a; border-radius: 999px; padding: 4px 10px; }
   .admin-only { display: none; }
   body.is-admin .admin-only { display: revert; }
+  .field { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 8px 0; font-size: .92rem; }
+  .field label { display: inline; margin: 0; }   /* the row is the flex box, its label only text */
+  /* Info bubbles (the same snippet on the C3 and C6 pages): a round "i" button opens its note, a popover placed by script. */
+  button.info { margin: 0 0 0 6px; padding: 0; width: 24px; height: 24px; flex: none; border-radius: 50%;
+                border: 1px solid #8b97a7; background: transparent; color: #8b97a7; cursor: pointer;
+                font: italic 700 .85rem/22px Georgia, serif; text-align: center; vertical-align: middle; }
+  button.info:active, button.info.on { background: #2f6feb; border-color: #2f6feb; color: #fff; }
+  button.info:focus-visible { outline: 2px solid #93c5fd; outline-offset: 2px; }
+  .note { position: fixed; inset: auto; margin: 0; z-index: 2; box-sizing: border-box; width: max-content; max-width: min(22rem, calc(100vw - 16px));
+          max-height: calc(100dvh - 16px); overflow: auto; overscroll-behavior: contain;
+          padding: 10px 12px; border: 1px solid #3a4350; border-radius: 8px; background: #0e1014; color: #e7ebf0;
+          font-size: .82rem; font-weight: 400; line-height: 1.4; text-align: left; box-shadow: 0 6px 18px rgba(0, 0, 0, .5); }
+  .note:not([data-placed]) { visibility: hidden; }
+  html.no-popover .note:not(.open) { display: none; }
+  .note::before { content: ""; position: absolute; top: -6px; left: var(--arrow, 16px); width: 10px; height: 10px; margin-left: -6px;
+                  background: #0e1014; border: solid #3a4350; border-width: 1px 0 0 1px; transform: rotate(45deg); }
+  .note.above::before { top: auto; bottom: -6px; border-width: 0 1px 1px 0; }
+  .note p { margin: 0 0 6px; } .note p:last-child { margin: 0; }
+  /* Touch: bigger targets (WCAG 2.5.8 asks 24 px at least; a finger wants more). After every size rule above. */
+  @media (pointer: coarse) {
+    button, select, input[type=number], input[type=text], input[type=password] { min-block-size: 2.75rem; }
+    button { min-inline-size: 2.75rem; }
+    button.info { width: 2.25rem; height: 2.25rem; line-height: 2.1rem; }
+    button.grip { min-inline-size: 2.75rem; }
+    .switch { min-block-size: 2.75rem; }
+  }
 </style>
 </head>
 <body>
 <header style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
-  <span>Checkpoint C3 <span id="link" class="pill">…</span></span>
-  <span class="bar"><button id="role" class="switch" role="switch" aria-checked="false"><i></i><span>admin</span></button></span>
+  <div><h1>Lëtz Timer C3</h1> <span id="link" class="pill">…</span></div>
+  <span class="bar"><a id="maint_link" class="admin-only maint-link" href="#maintenance">Maintenance</a><button id="role" class="switch" role="switch" aria-checked="false"><i></i><span>admin</span></button></span>
 </header>
 <main>
   <dialog id="login">
     <form id="login_form">
       <h3>Admin</h3>
       <input id="p" type="password" placeholder="password" autocomplete="current-password" autofocus>
-      <div class="bar" style="margin-top:12px"><span id="login_msg" class="muted"></span>
+      <div class="bar" style="margin-top:12px"><span id="login_msg" class="muted" role="status"></span>
         <button type="button" id="login_cancel" class="ghost" style="margin-left:auto">Cancel</button>
         <button id="unlock">Unlock</button></div>
     </form>
   </dialog>
 
+  <div id="home">
   <h2>Live</h2>
   <div class="card row">
-    <div class="stat"><b id="s_state">—</b><span>state</span></div>
+    <div class="stat"><b><span id="s_det" class="pill">—</span></b><span>detector</span></div>
     <div class="stat"><b id="s_passes">—</b><span>passes</span></div>
   </div>
 
   <h2>Channels</h2>
   <div class="card">
     <div id="chans" class="chans"></div>
-    <div class="muted" style="margin-top:10px;font-size:.85rem">dB above the noise, yellow on a pass. — not measured: the C5 is away or calibrating.</div>
+    <div class="muted" style="margin-top:10px;font-size:.85rem">dB above the noise. <i class="key hit" aria-hidden="true"></i> yellow
+      for 3 s on a pass, <i class="key cool" aria-hidden="true"></i> dashed blue while the channel waits to re-arm (cooldown).
+      — not measured: the C5 is away or calibrating.</div>
   </div>
 
   <h2>C5 health</h2>
@@ -90,16 +130,11 @@
       <div class="stat"><b id="h_gain">—</b><span>gain</span></div>
       <div class="stat"><b id="h_up">—</b><span>C5 uptime</span></div>
       <div class="stat"><b id="h_heap">—</b><span>min free heap</span></div>
-      <div class="stat"><b id="h_faults">—</b><span>transport faults</span></div>
+      <div class="stat"><b id="h_faults">—</b><span>capture faults</span></div>
     </div>
     <div class="muted" style="margin-top:10px;font-size:.85rem;word-break:break-all">firmware <span id="h_fw" style="color:#e7ebf0">—</span></div>
     <div class="admin-only">
-      <div class="bar">
-        <button data-cmd="cal_full">Full calibration (B)</button>
-        <button data-cmd="cal_quick">Quick calibration (F)</button>
-        <button data-cmd="reboot" class="danger">Reboot C5</button>
-      </div>
-      <span id="cmd_msg" class="muted"></span>
+      <div class="muted" style="margin-top:8px;font-size:.8rem">Radio calibration, reboot and the debug console are on the <a href="#maintenance" class="maint-link-inline" style="color:#93c5fd">Maintenance</a> page.</div>
     </div>
   </div>
 
@@ -111,182 +146,131 @@
     <label>Hysteresis (dB) <input id="hyst" type="number" step="0.5"></label>
     <label>Pass drop (dB) <input id="drop" type="number" step="0.5"></label>
     <label>Minimum peak (dB) <input id="minpeak" type="number" step="0.5"></label>
+    <div class="field infobox">
+      <span><label for="rearm">Re-arm drop (D, dB)</label><button type="button" class="info" aria-label="About the re-arm drop"
+        popovertarget="rearm_note">i</button></span>
+      <input id="rearm" type="number" step="1" min="0" max="40">
+      <div id="rearm_note" class="note" popover>
+        <p>After a pass, the gate re-arms once the signal's 1 s average falls this many dB under its highest
+          level since the pass; the next pass must then climb as far over the lowest level since.</p>
+        <p>It lets laps count when a drone never goes far from the gate: a small indoor track, a strong VTX.</p>
+        <p><b>Recommended: 16 dB.</b></p>
+        <p>Laps missed on a small track or with a strong VTX: lower it, 12–14. Extra laps outdoors: raise it, 18–20.
+          A lap counts when the gate pass stands about this much plus 2 dB above the far side of the track,
+          where the lap reads lowest.
+          0 turns it off: the gate then re-arms only near the noise floor.</p>
+      </div>
+    </div>
     <label>Refractory (ms) <input id="refr" type="number" step="250" min="0"></label>
     <label>Stale (ms) <input id="stale" type="number" step="250" min="1"></label>
     <button id="save">Apply &amp; save</button>
-    <span id="msg" class="muted"></span>
+    <span id="msg" class="muted" role="status"></span>
+    <div class="field infobox">
+      <span><label for="gain_in">RX gain (G)</label><button type="button" class="info" aria-label="About the RX gain"
+        popovertarget="gain_note">i</button></span>
+      <input id="gain_in" type="number" min="10" max="83" step="2">
+      <div id="gain_note" class="note" popover>
+        <p>The C5's receive gain, forced (no AGC): 10 to 83, 40 by default. It sets how far a drone rises over the noise.</p>
+        <p>Lower it when a strong signal clips (a VTX close to the antenna), raise it for a weak or far drone: the Passage calibration below says which.</p>
+        <p><b>Recommended: 40.</b></p>
+        <p>The C5 saves it and learns its rests again, so that gate is blind for a few seconds: every VTX off.</p>
+      </div>
+    </div>
+    <button id="gain_set">Set gain</button>
+    <span id="gain_msg" class="muted" role="status"></span>
+  </div>
+  </div>
+
+  <div class="admin-only">
+  <h2>Passage calibration</h2>
+  <div class="card" id="cal_card">
+    <div class="bar"><span id="cal_pill" class="pill">—</span></div>
+    <p class="muted" style="margin:10px 0 6px;font-size:.85rem">Tunes this gate's thresholds on a real drone, its <b>VTX on</b> (this does not blind the gate).
+      Step 1: hold the drone <b>in the passage</b>, where it flies through, for 5 s. Step 2: hold it <b>2 m away</b> along the track, for 5 s.
+      The thresholds proposed put a pass between what it reads at 2 m and in the passage. A pass may ring during step 1: it is a real one.</p>
+    <div class="bar">
+      <label class="muted">Channel <select id="cal_ch_sel" title="The drone's channel; Any measures the one that stands highest in the passage"><option value="255">Any (the strongest)</option><option value="0">R1</option><option value="1">R2</option><option value="2">R3</option><option value="3">R4</option><option value="4">R5</option><option value="5">R6</option><option value="6">R7</option><option value="7">R8</option></select></label>
+      <button id="cal_s1" class="ghost">1 · Measure in the passage</button>
+      <button id="cal_s2" class="ghost" disabled>2 · Measure 2 m away</button>
+      <button id="cal_cancel" class="ghost" disabled>Cancel</button>
+      <span id="cal_msg" class="muted" role="status"></span>
+    </div>
+    <div id="cal_result" hidden>
+      <div class="chans" style="margin-top:12px;font-size:.9rem">Drone <b id="cal_ch">—</b> ·
+        in the passage <b id="cal_pass">—</b> · 2 m away <b id="cal_away">—</b> <span class="muted">(median · p95, dB over the rest)</span></div>
+      <ul id="cal_warn" style="margin:10px 0 0;padding-left:18px;font-size:.85rem"></ul>
+      <div id="cal_rec" hidden>
+        <div class="row" style="margin-top:12px">
+          <div class="stat"><b id="cr_min">—</b><span>min peak (dB)</span></div>
+          <div class="stat"><b id="cr_act">—</b><span>active (dB)</span></div>
+          <div class="stat"><b id="cr_hys">—</b><span>hysteresis (dB)</span></div>
+          <div class="stat"><b id="cr_drop">—</b><span>drop (dB)</span></div>
+        </div>
+        <div class="bar" style="margin-top:10px"><button id="cal_apply">Apply &amp; save</button>
+          <span class="muted" style="font-size:.8rem">a first proposal, to confirm on real passes; the re-arm drop and the smoothing stay as they are</span></div>
+      </div>
+    </div>
   </div>
   </div>
 
   <h2>Recent passes</h2>
   <ul id="events" class="card"></ul>
+  </div>
+
+  <div id="maint" hidden>
+  <p><a href="#home" class="maint-link" id="maint_back">← Back</a></p>
+  <h2>Maintenance (admin)</h2>
+  <p class="muted" style="font-size:.85rem;margin-top:0">For a bench or a fault, not for a race: the radio calibration blinds the gate, and the debug console stays off until it is switched on.</p>
+  <h2>Radio calibration</h2>
+  <div class="card">
+    <div class="muted" style="font-size:.85rem;margin-bottom:10px">The C5 calibrates every oscillator at each boot and the chip recalibrates itself while it runs: use these when the health card says <i>calibration needed</i>. Every VTX must be OFF.</div>
+    <div class="bar">
+      <button data-cmd="cal_full">Full calibration (B)</button>
+      <button data-cmd="cal_quick">Quick calibration (F)</button>
+      <button data-cmd="reboot" class="danger">Reboot C5</button>
+    </div>
+    <span id="cmd_msg" class="muted" role="status"></span>
+  </div>
+
+  <div>
+  <h2>Debug</h2>
+  <details id="dbg" class="card">
+    <summary>C5 console: log and keys</summary>
+    <div class="bar">
+      <button id="dbg_on" class="switch" role="switch" aria-checked="false"><i></i><span>debug mode</span></button>
+      <span class="muted" style="font-size:.8rem">off at every boot; while off the C5 sends no log and ignores keys</span>
+    </div>
+    <div id="dbg_body" hidden>
+    <pre id="dbg_log" role="log" aria-live="off" aria-label="C5 console log" tabindex="0"></pre>
+    <div class="bar">
+      <button id="dbg_pause" class="ghost">Pause</button>
+      <button id="dbg_clear" class="ghost">Clear</button>
+      <button id="dbg_copy" class="ghost">Copy</button>
+      <input id="dbg_filter" type="text" placeholder="filter (PASS, LETZTIMER…)" style="flex:1;min-width:120px;margin-top:12px">
+    </div>
+    <div class="bar">
+      <input id="dbg_keys" type="text" maxlength="16" placeholder="keys, e.g. Ka  (K = settings, T = status)" autocomplete="off" spellcheck="false" style="flex:1;min-width:160px;margin-top:12px">
+      <button id="dbg_send">Send</button>
+    </div>
+    <div class="bar">
+      <button data-keys="T" class="ghost">T status</button>
+      <button data-keys="K" class="ghost">K menu</button>
+      <button data-keys="Kk" class="ghost">K k show</button>
+      <button data-keys="Kl" class="ghost">K l trace</button>
+      <button data-keys="Kq" class="ghost">K q close</button>
+      <button data-keys="F" class="ghost">F</button>
+      <button data-keys="B" class="ghost">B</button>
+    </div>
+    </div>
+    <span id="dbg_msg" class="muted" role="status"></span>
+    <div class="muted" style="margin-top:8px;font-size:.8rem">Keys are typed on the C5's console in order. Calibrations, benches, gain and antenna blind the gate: they ask first. Benches' scan recording (K S) and the engine's own prints stay on USB.</div>
+  </details>
+  </div>
+
+  </div>
 </main>
-<footer class="muted" style="padding:0 16px 20px;text-align:center;font-size:.75rem">FPV 5.8 Checkpoint, based on C5VRX by Twotoz and the C5VRX contributors · GPL-3.0-only, without any warranty · license and source: <a class="muted" href="https://github.com/defane/FPV-5.8-Checkoint">github.com/defane/FPV-5.8-Checkoint</a></footer>
+<footer class="muted" style="padding:0 16px 20px;text-align:center;font-size:.75rem">Lëtz Timer · receive engine from widscan58 (CapnBry) and esp-sdr (ESPARGOS) · GPL-3.0-only, without any warranty · license and source: <a class="muted" href="https://github.com/defane/letztimer">github.com/defane/letztimer</a></footer>
 <script src="/auth.js"></script>
-<script>
-const $ = id => document.getElementById(id);
-const CH = n => "R" + (n + 1);
-const STATES = ["IDLE", "RISING", "PEAK_PASSED", "COOLDOWN"];
-let dirty = false, admin = false;
-["alpha","active","hyst","drop","minpeak","refr","stale"].forEach(
-  id => $(id).addEventListener("input", () => { dirty = true; }));
-
-function setAdmin(on) {             // back to spectator forgets the key and unsaved detector edits
-  admin = on;
-  if (!on) { AdminAuth.logout(); dirty = false; }
-  document.body.classList.toggle("is-admin", on);
-  $("role").setAttribute("aria-checked", on);
-}
-
-$("role").addEventListener("click", () => {
-  if (admin) return setAdmin(false);
-  $("p").value = ""; $("login_msg").textContent = "";
-  $("login").showModal();
-});
-// One login at a time (the key derivation takes a moment); closing the dialog
-// (Cancel, Esc) abandons a login still running, and its result is ignored.
-// Signed requests (auth.js): the password never goes out.
-let attempt = 0, pending = false;
-$("login_cancel").addEventListener("click", () => $("login").close());
-$("login").addEventListener("close", () => {
-  $("p").value = "";
-  if (pending) { pending = false; attempt++; AdminAuth.logout(); $("unlock").disabled = false; }
-});
-$("login_form").addEventListener("submit", async e => {
-  e.preventDefault();
-  if (pending) return;
-  const my = ++attempt;
-  pending = true; $("unlock").disabled = true; $("login_msg").textContent = "checking…";
-  let ok = false, msg = "wrong password";
-  try { ok = await AdminAuth.login($("p").value); } catch (_) { msg = "offline"; }
-  if (my !== attempt || !$("login").open) return;   // abandoned (its close event may still be queued)
-  pending = false; $("unlock").disabled = false;
-  if (ok) { setAdmin(true); $("login").close(); }
-  else { $("login_msg").textContent = msg; $("p").select(); }
-});
-
-function fillConfig(c) {
-  if (dirty) return;                 // don't stomp on edits in progress
-  $("alpha").value  = (c.alpha_milli / 1000).toFixed(2);
-  $("active").value = (c.active_db_x10 / 10).toFixed(1);
-  $("hyst").value   = (c.hysteresis_db_x10 / 10).toFixed(1);
-  $("drop").value   = (c.drop_db_x10 / 10).toFixed(1);
-  $("minpeak").value= (c.min_peak_db_x10 / 10).toFixed(1);
-  $("refr").value   = c.refractory_ms;
-  $("stale").value  = c.stale_ms;
-}
-
-const upTime = s => s >= 3600 ? `${Math.floor(s / 3600)}h ${String(Math.floor(s / 60) % 60).padStart(2, "0")}m`
-                  : s >= 60 ? `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s` : `${s}s`;
-
-function fillHealth(s) {
-  const st = s.stats || {}, ok = s.has_stats;
-  const cal = !ok ? ["—", "pill"] : st.calibrating ? ["calibrating", "pill busy"]
-            : st.cal_needed ? ["calibration needed", "pill warn"] : ["OK", "pill ok"];
-  $("h_cal").textContent = cal[0]; $("h_cal").className = cal[1];
-  $("h_gain").textContent = ok ? st.gain : "—";
-  $("h_up").textContent = ok ? upTime(st.uptime_s) : "—";
-  $("h_heap").textContent = ok ? (st.heap_min / 1024).toFixed(1) + " KB" : "—";
-  $("h_faults").textContent = ok ? st.faults : "—";
-  $("h_fw").textContent = ok && st.fw ? st.fw : "—";
-  document.querySelectorAll('button[data-cmd^="cal_"]').forEach(b => { b.disabled = ok && st.calibrating; });
-}
-
-// Channels: R1..R8; a pass lights its tile for HIT_MS, its age taken here, since a
-// pass and this page do not share a clock.
-const HIT_MS = 3000;
-const hits = new Map();
-let seenEvents = null;
-// Each tile shows the channel's level, its dB above the noise: a VTX reads the same
-// whenever the page was opened and however long it stays on.
-const QUIET_DB = 3, RISE_HIGH = 20;
-const riseAlpha = rise => Math.min(1, Math.max(0, (rise - QUIET_DB)/(RISE_HIGH - QUIET_DB)));
-const riseTxt = rise => rise < QUIET_DB ? "0" : "+" + rise.toFixed(0);
-function fillChannels(s) {
-  const fresh = seenEvents === null ? 0 : Math.max(0, s.total_events - seenEvents);
-  seenEvents = s.total_events;
-  (s.events || []).slice(0, fresh).forEach(e => hits.set(e.channel, Date.now() + HIT_MS));
-  const levels = (s.stats || {}).levels || [];
-  $("chans").innerHTML = levels.map((x10, ch) => {
-    const name = "R" + (ch + 1), hit = (hits.get(ch) || 0) > Date.now() ? " hit" : "";
-    if (x10 <= -990) return `<div class="ch none${hit}"><span>${name}</span><b>—</b></div>`;
-    const rise = x10/10;
-    return `<div class="ch${hit}" style="background:rgba(46,204,113,${riseAlpha(rise).toFixed(2)})"><span>${name}</span><b>${riseTxt(rise)}</b></div>`;
-  }).join("");
-}
-
-async function poll() {
-  try {
-    const s = await (await fetch("/api/state")).json();
-    fillChannels(s);
-    // c5_alive: a C5 frame within 3 s; has_stats alone stays true after it goes silent
-    const lk = s.c5_alive ? ["linked", "pill ok"] : s.has_stats ? ["C5 silent", "pill warn"] : ["no C5 yet", "pill"];
-    $("link").textContent = lk[0]; $("link").className = lk[1];
-    if (s.has_config) fillConfig(s.config);
-    const st = s.stats || {};
-    $("s_state").textContent = s.has_stats ? (STATES[st.state] || st.state) : "—";
-    $("s_passes").textContent = s.total_events;
-    fillHealth(s);
-    $("events").innerHTML = (s.events || []).map(e =>
-      `<li>${CH(e.channel)} &middot; peak ${(e.peak_db_x10/10).toFixed(1)} dB &middot; <span class="muted">${e.at_ms} ms</span></li>`
-    ).join("") || '<li class="muted">none yet</li>';
-  } catch (e) { $("link").textContent = "offline"; $("link").className = "pill"; }
-}
-
-$("save").addEventListener("click", async () => {
-  const body = {
-    alpha_milli: Math.round(parseFloat($("alpha").value) * 1000),
-    active_db_x10: Math.round(parseFloat($("active").value) * 10),
-    hysteresis_db_x10: Math.round(parseFloat($("hyst").value) * 10),
-    drop_db_x10: Math.round(parseFloat($("drop").value) * 10),
-    min_peak_db_x10: Math.round(parseFloat($("minpeak").value) * 10),
-    refractory_ms: parseInt($("refr").value, 10),
-    stale_ms: parseInt($("stale").value, 10),
-  };
-  $("msg").textContent = "saving…";
-  try {
-    const r = await AdminAuth.request("POST", "/api/config", JSON.stringify(body));
-    if (r.status === 401) { setAdmin(false); $("msg").textContent = "password required"; return; }
-    if (!r.ok) { $("msg").textContent = "failed (" + r.status + ")"; return; }
-    dirty = false;
-    $("msg").textContent = "saved";
-    setTimeout(() => $("msg").textContent = "", 1500);
-  } catch (e) { $("msg").textContent = "failed"; }
-});
-
-// Calibrate / reboot the C5 (nobody opens its USB console in production). A
-// calibration blinds the gate and wants every VTX off; the C3 refuses it while
-// the gate sees a strong carrier unless we force it, and refuses any command
-// while no C5 is linked ({ok:false, msg}).
-async function sendCommand(cmd, force) {
-  const r = await AdminAuth.request("POST", "/api/command", JSON.stringify({ cmd, force }));
-  if (r.status === 401) { setAdmin(false); return { ok: false, msg: "password required" }; }
-  return r.ok ? r.json() : { ok: false, msg: "failed (" + r.status + ")" };
-}
-
-const CMD_DONE = { cal_full: "full calibration started", cal_quick: "quick calibration started",
-                   reboot: "C5 rebooting" };
-document.querySelectorAll("button[data-cmd]").forEach(b => b.addEventListener("click", async () => {
-  const cmd = b.dataset.cmd;
-  if (!confirm(cmd === "reboot" ? "Reboot the C5? The gate stops detecting until it is back up."
-      : "All VTXs must be OFF. The gate stops detecting while it calibrates (minutes for a full one). Continue?"))
-    return;
-  $("cmd_msg").textContent = "sending…";
-  try {
-    let r = await sendCommand(cmd, 0);
-    if (r.vtx) {
-      if (!confirm(`The gate sees a strong signal (C/N ${(r.cn_x10 / 10).toFixed(1)} dB): a VTX may be on. Force the calibration?`)) {
-        $("cmd_msg").textContent = "cancelled"; return;
-      }
-      r = await sendCommand(cmd, 1);
-    }
-    $("cmd_msg").textContent = r.ok ? CMD_DONE[cmd] : (r.msg || "failed");
-    if (r.ok) setTimeout(() => $("cmd_msg").textContent = "", 4000);
-  } catch (e) { $("cmd_msg").textContent = "failed"; }
-}));
-
-poll();
-setInterval(poll, 1000);
-</script>
+<script src="/app.js"></script>
 </body>
 </html>

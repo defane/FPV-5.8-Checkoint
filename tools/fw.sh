@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Build / flash / monitor the FPV 5.8 Checkpoint firmwares.
+# Build / flash / monitor the Lëtz Timer firmwares.
 #
 # Called by the root Makefile, but usable directly:
 #   tools/fw.sh build [name...]        build the named firmwares (default: all)
 #   tools/fw.sh flash  [FW] [PORT]     flash one (interactive menu if omitted)
 #   tools/fw.sh monitor [FW] [PORT]    open the serial monitor
-#   tools/fw.sh clean                  remove all build dirs
+#   tools/fw.sh clean                  remove every build dir and generated sdkconfig
 #
 # build always needs ESP-IDF (sourced from $IDF_EXPORT, default
 # ~/esp/esp-idf-v6.0.2/export.sh). flash/monitor use ESP-IDF when it is
@@ -28,7 +28,7 @@ IDF_EXPORT="${IDF_EXPORT:-$HOME/esp/esp-idf-v6.0.2/export.sh}"
 # the base RAM/Wi-Fi/PHY tuning is never duplicated. To add a variant: drop a
 # resolve() case below + a sdkconfig.<tag>.defaults in the role dir, and list it
 # in FIRMWARES.
-FIRMWARES="detector detector-xiao-c5 detector-wave-c5-lcd node master master-wave-c5"
+FIRMWARES="detector detector-ipex detector-xiao-c5 detector-wave-c5-lcd node master master-wave-c5"
 
 # resolve <name> -> sets DIR CHIP SDKCFG DEFAULTS BUILDDIR BIN LABEL
 resolve() {
@@ -37,6 +37,11 @@ resolve() {
         detector)
             DIR=firmware/detector; CHIP=esp32c5; BIN=detector-c5.bin
             LABEL="RF detector  -- ESP32-C5-Zero / C5-LCD, 4 MB no-PSRAM (default)" ;;
+        detector-ipex)
+            DIR=firmware/detector; CHIP=esp32c5; BIN=detector-c5.bin
+            SDKCFG=sdkconfig.ipex; BUILDDIR=build-ipex
+            DEFAULTS="sdkconfig.defaults;sdkconfig.ipex.defaults"
+            LABEL="RF detector  -- ESP32-C5-Zero on its IPEX connector (external antenna)" ;;
         detector-xiao-c5)
             DIR=firmware/detector; CHIP=esp32c5; BIN=detector-c5.bin
             SDKCFG=sdkconfig.xiao-c5; BUILDDIR=build-xiao-c5
@@ -174,8 +179,24 @@ case "$cmd" in
         fi
         ;;
     clean)
-        for fw in $FIRMWARES; do resolve "$fw"; rm -rf "$DIR/$BUILDDIR"; done
-        echo ">>> build dirs removed."
+        # Every build dir and generated sdkconfig of the FIRMWARES table (resolve's BUILDDIR
+        # and SDKCFG): ESP-IDF never reapplies the *.defaults to an existing sdkconfig, so a
+        # stale one wins over an edited default. Never a *.defaults file, committed or local.
+        for fw in $FIRMWARES; do
+            resolve "$fw"
+            if [ -d "$DIR/$BUILDDIR" ]; then
+                echo ">>> removing $DIR/$BUILDDIR/"
+                rm -rf "$DIR/$BUILDDIR"
+            fi
+            case "$SDKCFG" in
+                *.defaults) ;;
+                *)  if [ -f "$DIR/$SDKCFG" ]; then
+                        echo ">>> removing $DIR/$SDKCFG"
+                        rm -f "$DIR/$SDKCFG"
+                    fi ;;
+            esac
+        done
+        echo ">>> clean: build dirs and generated sdkconfigs removed (the *.defaults kept)."
         ;;
     variants|list)
         echo "Firmware variants (FW=<name>):"
@@ -186,13 +207,15 @@ case "$cmd" in
         ;;
     help|-h|--help)
         cat <<EOF
-FPV 5.8 Checkpoint firmware helper (firmwares: $FIRMWARES)
+Lëtz Timer firmware helper (firmwares: $FIRMWARES)
 
   tools/fw.sh build [name...]      build named firmwares (default: all)
   tools/fw.sh flash  [FW] [PORT]   flash one (menu if omitted)
   tools/fw.sh monitor [FW] [PORT]  serial monitor
   tools/fw.sh variants             list the FW= names and their boards
-  tools/fw.sh clean                remove all build dirs
+  tools/fw.sh clean                remove every build dir and generated sdkconfig
+                                   (never a *.defaults; a menuconfig change is lost:
+                                   put it in sdkconfig.local.defaults)
 
 FW= names: a role (detector/node/master) is its default board; "<role>-<tag>"
 is a variant. build needs ESP-IDF; flash/monitor use it when present, else fall

@@ -1,4 +1,4 @@
-menu "Checkpoint C6 master"
+menu "LetzTimer C6 master"
 
     comment "UART to the local C5 (link_proto). Defaults assume a C5 on TX6/RX8."
     config C6_UART_NUM
@@ -32,7 +32,7 @@ menu "Checkpoint C6 master"
     comment "Wi-Fi SoftAP (admin web + ESP-NOW share this channel)."
     config C6_AP_SSID
         string "Wi-Fi SoftAP SSID"
-        default "checkpoint-c6"
+        default "letztimer-c6"
     config C6_AP_PASSWORD
         string "Wi-Fi SoftAP password (8 to 63 chars, empty = open)"
         default "dronepass"
@@ -44,7 +44,7 @@ menu "Checkpoint C6 master"
     comment "Web roles: spectators read live results; admin actions need this password."
     config C6_ADMIN_PASSWORD
         string "Admin web password (empty disables admin auth)"
-        default "checkpoint"
+        default "letztimer"
         help
             Any length. Only a key derived from it (PBKDF2) enters the firmware,
             to check the page's signed admin requests (components/web_auth); it

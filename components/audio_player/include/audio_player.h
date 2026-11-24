@@ -1,4 +1,4 @@
-/* Checkpoint audio: short sounds on a MAX98357A I2S amplifier.
+/* LetzTimer audio: short sounds on a MAX98357A I2S amplifier.
  *
  * One low-priority task plays requests from a queue of at most two (a full
  * queue drops its oldest request). The I2S channel, and with it a GDMA TX

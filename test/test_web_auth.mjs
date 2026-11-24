@@ -19,7 +19,7 @@ const ITER = 1000;   // the mock's iterations (firmware: 200000), keeps the test
 // stalls.add(path): the next request to path hangs until the page aborts it.
 // bodyStalls.add(path): its headers arrive, its body never does (until aborted).
 // holds.add(path): the next request to path waits for release(status, json), unprocessed.
-function mockEsp({ password = "checkpoint", salt = "fpv58-checkpoint/c6/0123456789abcdef", open = false } = {}) {
+function mockEsp({ password = "letztimer", salt = "letztimer/c6/0123456789abcdef", open = false } = {}) {
   const esp = { sessions: new Map(), log: [], salt, open, nextSid: 0, stalls: new Set(), bodyStalls: new Set(),
                 holds: new Set(), held: [] };
   esp.setPassword = pw => { esp.key = pbkdf2Sync(pw, salt, ITER, 32, "sha256"); };
@@ -55,10 +55,14 @@ function mockEsp({ password = "checkpoint", salt = "fpv58-checkpoint/c6/01234567
   return esp;
 }
 
-function loadAuth(fetchImpl) {
+// A tab's sessionStorage: shared by the pages (loadAuth instances) of one tab.
+const tabStorage = () => { const m = new Map(); return { getItem: k => m.has(k) ? m.get(k) : null,
+  setItem: (k, v) => { m.set(k, String(v)); }, removeItem: k => { m.delete(k); }, _m: m }; };
+
+function loadAuth(fetchImpl, storage) {
   const ctx = vm.createContext({ fetch: (...a) => fetchImpl(...a), TextEncoder, Promise, Error, Uint8Array,
                                  Uint32Array, DataView, Array, Math, String, JSON, setTimeout, clearTimeout,
-                                 AbortController, Response });
+                                 AbortController, Response, RegExp, parseInt, ...(storage ? { sessionStorage: storage } : {}) });
   const src = readFileSync(new URL("../components/web_auth/www/auth.js", import.meta.url), "utf8");
   vm.runInContext(src + "\nthis.AdminAuth = AdminAuth;", ctx);
   return ctx.AdminAuth;
@@ -95,7 +99,7 @@ check("pbkdf2 matches node:crypto (passwords 0..100 bytes, 1..4096 iterations)",
 {
   const dir = mkdtempSync(join(tmpdir(), "web_auth-"));
   try {
-    const pw = "é ünïcödé \"q\" ${x} \\ ;", salt = "fpv58-checkpoint/c6/0123456789abcdef";
+    const pw = "é ünïcödé \"q\" ${x} \\ ;", salt = "letztimer/c6/0123456789abcdef";
     writeFileSync(join(dir, "sdkconfig.json"), JSON.stringify({ C6_ADMIN_PASSWORD: pw, C3_ADMIN_PASSWORD: "" }));
     const script = fileURLToPath(new URL("../components/web_auth/admin_key.py", import.meta.url));
     const run = name => execFileSync("python3", ["-I", script, join(dir, "sdkconfig.json"), name, salt, "200000"],
@@ -107,12 +111,12 @@ check("pbkdf2 matches node:crypto (passwords 0..100 bytes, 1..4096 iterations)",
 }
 
 // Vectors shared with test_web_auth.c (Python hmac), for an arbitrary 32-byte key.
-const K = sha256(new TextEncoder().encode("fpv58-checkpoint/c6:checkpoint"));
+const K = sha256(new TextEncoder().encode("letztimer/c6:letztimer"));
 const SID = "00112233445566778899aabbccddeeff";
-check("key vector", hex(K) === "13a66609c44b40550b8ea5ce655b116e9543439a7870301fc94edf5b217c530e");
-check("vector 1", sign(K, SID, "1", "POST", "/api/reset", "{}") === "4ca74e9d9a99af7f5f9a48e8cec40d2e2892d8541214aeb11a5305087ea9c40e");
-check("vector 2", sign(K, SID, "2", "GET", "/api/auth", "") === "391ec91e5996b3a933f648d53cc00156fa0ce40b43859d7b6e358d4d58b62a3d");
-check("vector 3", sign(K, SID, "3", "POST", "/api/node", '{"node_id":1,"gate":2,"channel":3}') === "ef7f3361727f8339a720e97a887a73fab0b78cc74b778d36db241b504e79aacf");
+check("key vector", hex(K) === "78913f7944bf6ed95b8252a3f041270cf220b8cfd07256ce35a77c83bea7b441");
+check("vector 1", sign(K, SID, "1", "POST", "/api/reset", "{}") === "ec5ed5962d68079d7534e13c33946de4b48db48a2e4ca7ba574bdbc0d7441d8e");
+check("vector 2", sign(K, SID, "2", "GET", "/api/auth", "") === "7289286c502f1f68a1a2dc55e803d1f7d744ef07be166767b7b2234b6946b181");
+check("vector 3", sign(K, SID, "3", "POST", "/api/node", '{"node_id":1,"gate":2,"channel":3}') === "7445610216db2dfb139bc06e89e06ca5f1548fc1cd8d7c4f6830e3ed93554fd3");
 
 // Protocol against the mock ESP.
 {
@@ -121,7 +125,7 @@ check("vector 3", sign(K, SID, "3", "POST", "/api/node", '{"node_id":1,"gate":2,
   check("not logged in: request rejects", await auth.request("POST", "/api/node", "{}").then(() => false, () => true));
   check("wrong password refused", (await auth.login("nope")) === false);
   check("refused login leaves no key", await auth.request("POST", "/api/node", "{}").then(() => false, () => true));
-  check("right password accepted", (await auth.login("checkpoint")) === true);
+  check("right password accepted", (await auth.login("letztimer")) === true);
   const r = await auth.request("POST", "/api/node", '{"gate":2}');
   check("signed POST accepted", r.ok && (await r.json()).echo === '{"gate":2}');
   check("login used seq 1, the POST seq 2", esp.log.at(-2).seq === 1 && esp.log.at(-1).seq === 2);
@@ -150,7 +154,7 @@ check("vector 3", sign(K, SID, "3", "POST", "/api/node", '{"node_id":1,"gate":2,
   const bad = await auth.request("POST", "/api/node", "{}");
   check("bad signature returned as 401", bad.status === 401);
   check("bad signature not retried", esp.log.length === before + 1);
-  esp.setPassword("checkpoint");
+  esp.setPassword("letztimer");
 
   auth.logout();
   check("logout forgets the key", await auth.request("POST", "/api/node", "{}").then(() => false, () => true));
@@ -160,7 +164,7 @@ check("vector 3", sign(K, SID, "3", "POST", "/api/node", '{"node_id":1,"gate":2,
   const esp = mockEsp();
   const auth = loadAuth(esp.fetch);
   auth._test.cfg.timeoutMs = 100;
-  check("login before the stall", await auth.login("checkpoint"));
+  check("login before the stall", await auth.login("letztimer"));
   esp.stalls.add("/api/node");
   const stalled = auth.request("POST", "/api/node", '{"stalled":1}');
   const nextOk = auth.request("POST", "/api/pairing", "{}");
@@ -174,7 +178,7 @@ check("vector 3", sign(K, SID, "3", "POST", "/api/node", '{"node_id":1,"gate":2,
   const ghost = auth.request("POST", "/api/reset", '{"ghost":1}');
   await sleep(10);
   auth.logout();
-  const relog = await Promise.race([auth.login("checkpoint"), sleep(1000).then(() => "blocked")]);
+  const relog = await Promise.race([auth.login("letztimer"), sleep(1000).then(() => "blocked")]);
   check("login right after a logout is not blocked by a stuck request", relog === true);
   check("a click made before the logout is dropped", await ghost.then(() => false, () => true));
   await stuck.catch(() => {});
@@ -187,12 +191,12 @@ for (const late of [{ ok: false, auth: true, session: false }, { ok: false, auth
   const esp = mockEsp();
   const auth = loadAuth(esp.fetch);
   const what = late.session === false ? "session:false" : "bad-signature";
-  check("login 1", await auth.login("checkpoint"));
+  check("login 1", await auth.login("letztimer"));
   esp.holds.add("/api/reset");
   const stale = auth.request("POST", "/api/reset", '{"stale":1}');
   await sleep(10);
   auth.logout();
-  check("login 2", await auth.login("checkpoint"));
+  check("login 2", await auth.login("letztimer"));
   const sid2 = esp.log.at(-1).sid;
   esp.release(401, late);
   check(`late ${what} 401 rejects as logged out`, await stale.then(() => false, e => /logged out/.test(e.message)));
@@ -207,7 +211,7 @@ for (const late of [{ ok: false, auth: true, session: false }, { ok: false, auth
   const esp = mockEsp();
   const auth = loadAuth(esp.fetch);
   esp.holds.add("/api/auth");
-  const first = auth.login("checkpoint");
+  const first = auth.login("letztimer");
   while (!esp.held.length) await sleep(5);
   auth.logout();
   esp.release(200, { admin: true });
@@ -215,16 +219,16 @@ for (const late of [{ ok: false, auth: true, session: false }, { ok: false, auth
   check("...and stays logged out", await auth.request("POST", "/api/node", "{}").then(() => false, () => true));
 
   esp.holds.add("/api/auth");
-  const one = auth.login("checkpoint");
+  const one = auth.login("letztimer");
   while (!esp.held.length) await sleep(5);
-  const two = auth.login("checkpoint");
+  const two = auth.login("letztimer");
   esp.release(200, { admin: true });
   check("login 1 superseded by login 2 rejects", await one.then(() => false, e => /logged out/.test(e.message)));
   check("login 2 succeeds", (await two) === true);
   check("...and keeps its key", (await auth.request("POST", "/api/node", "{}")).ok);
 
   esp.holds.add("/api/auth");
-  const right = auth.login("checkpoint");
+  const right = auth.login("letztimer");
   while (!esp.held.length) await sleep(5);
   const wrong = auth.login("nope");
   check("a newer wrong login fails", (await wrong) === false);
@@ -233,7 +237,7 @@ for (const late of [{ ok: false, auth: true, session: false }, { ok: false, auth
   check("...nor leave a key", await auth.request("POST", "/api/node", "{}").then(() => false, () => true));
 
   // Logout while a send() reopens its session after a session:false: no re-sign afterwards.
-  check("login for the reopen case", await auth.login("checkpoint"));
+  check("login for the reopen case", await auth.login("letztimer"));
   esp.sessions.clear();
   esp.holds.add("/api/session");
   const reopening = auth.request("POST", "/api/reset", '{"reopen":1}');
@@ -252,8 +256,8 @@ for (const late of [{ ok: false, auth: true, session: false }, { ok: false, auth
   const auth = loadAuth(esp.fetch);
   auth._test.cfg.timeoutMs = 100;
   esp.bodyStalls.add("/api/session");
-  check("a session reply without a body rejects the login", await auth.login("checkpoint").then(() => false, () => true));
-  check("login works again afterwards", await auth.login("checkpoint"));
+  check("a session reply without a body rejects the login", await auth.login("letztimer").then(() => false, () => true));
+  check("login works again afterwards", await auth.login("letztimer"));
 }
 {
   // A login whose /api/auth never answers fails and leaves no key behind.
@@ -261,7 +265,7 @@ for (const late of [{ ok: false, auth: true, session: false }, { ok: false, auth
   const auth = loadAuth(esp.fetch);
   auth._test.cfg.timeoutMs = 100;
   esp.stalls.add("/api/auth");
-  check("login with a silent ESP rejects", await auth.login("checkpoint").then(() => false, () => true));
+  check("login with a silent ESP rejects", await auth.login("letztimer").then(() => false, () => true));
   check("...and leaves no key", await auth.request("POST", "/api/node", "{}").then(() => false, e => /not logged in/.test(e.message)));
 }
 {
@@ -273,6 +277,67 @@ for (const late of [{ ok: false, auth: true, session: false }, { ok: false, auth
   const esp = mockEsp({ password: "é ünïcödé \"q\" ${x}" });
   const auth = loadAuth(esp.fetch);
   check("UTF-8 password with quotes and ${...}", (await auth.login("é ünïcödé \"q\" ${x}")) === true);
+}
+
+// The key a tab keeps in its sessionStorage: a reload stays admin, the password is never stored.
+{
+  const pw = "s3cret-pw";   // not the default password: the tab key name contains "letztimer"
+  const esp = mockEsp({ password: pw }), tab = tabStorage();
+  const auth = loadAuth(esp.fetch, tab);
+  check("nothing kept before a login", (await auth.restore()) === false && tab._m.size === 0);
+  check("login ok", (await auth.login(pw)) === true);
+  const kept = [...tab._m.values()];
+  const want = pbkdf2Sync(pw, esp.salt, ITER, 32, "sha256").toString("hex");
+  check("the tab keeps the derived key, as 64 hex digits", kept.length === 1 && kept[0] === want);
+  check("...and never the password", !kept.some(v => v.includes(pw)) && ![...tab._m.keys()].some(k => k.includes(pw)));
+
+  // A reload: a new page (a fresh AdminAuth) in the same tab.
+  const page2 = loadAuth(esp.fetch, tab);
+  check("a new page of the tab restores admin", (await page2.restore()) === true);
+  const r = await page2.request("POST", "/api/node", '{"node_id":1}');
+  check("...and signs requests with the kept key", r.status === 200);
+  check("...in a session of its own", new Set(esp.log.map(e => e.sid)).size >= 2);
+
+  // Logging out forgets it.
+  page2.logout();
+  check("logout clears the kept key", tab._m.size === 0);
+  check("...so the next page is not admin", (await loadAuth(esp.fetch, tab).restore()) === false);
+
+  // A key the ESP refuses (its password changed) is forgotten.
+  await auth.login(pw);
+  esp.setPassword("another");
+  check("a key the ESP refuses does not restore", (await loadAuth(esp.fetch, tab).restore()) === false);
+  check("...and is dropped from the tab", tab._m.size === 0);
+}
+{
+  // An ESP that does not answer (it reboots) keeps the key for the next try.
+  const esp = mockEsp(), tab = tabStorage();
+  await loadAuth(esp.fetch, tab).login("letztimer");
+  const page = loadAuth(esp.fetch, tab);
+  page._test.cfg.timeoutMs = 100;
+  esp.stalls.add("/api/session");
+  check("an ESP that is silent: not restored", (await page.restore()) === false);
+  check("...the key stays for the next try", tab._m.size === 1);
+  check("...which restores once it answers", (await page.restore()) === true);
+}
+{
+  // Damaged storage content is dropped; storage that refuses (a private window) changes nothing.
+  const esp = mockEsp(), tab = tabStorage();
+  tab.setItem("letztimer.adminKey", "not-a-key");
+  check("a damaged kept value is not a key", (await loadAuth(esp.fetch, tab).restore()) === false && tab._m.size === 0);
+  const broken = { getItem() { throw new Error("denied"); }, setItem() { throw new Error("denied"); },
+                   removeItem() { throw new Error("denied"); } };
+  const auth = loadAuth(esp.fetch, broken);
+  check("storage that refuses: the login still works", (await auth.login("letztimer")) === true);
+  check("...and restore finds nothing", (await loadAuth(esp.fetch, broken).restore()) === false);
+  check("no sessionStorage at all: login and restore are unchanged", (await loadAuth(esp.fetch).login("letztimer")) === true &&
+        (await loadAuth(esp.fetch).restore()) === false);
+}
+{
+  // An ESP with no password: its admin is kept the same way.
+  const esp = mockEsp({ open: true }), tab = tabStorage();
+  await loadAuth(esp.fetch, tab).login("whatever");
+  check("no password on the ESP: the tab restores admin too", (await loadAuth(esp.fetch, tab).restore()) === true);
 }
 
 if (fails) { console.log(`${fails} test(s) FAILED`); process.exit(1); }

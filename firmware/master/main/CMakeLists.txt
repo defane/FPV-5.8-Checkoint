@@ -4,7 +4,7 @@ idf_component_register(
     REQUIRES link_proto fleet_proto race_timing espnow_link audio_player status_led
              web_auth nvs_flash esp_wifi esp_netif esp_event esp_http_server
              esp_driver_uart esp_timer
-    EMBED_FILES "www/index.html")
+    EMBED_FILES "www/index.html" "www/app.js")
 
 # admin_hash.h: the key of the admin web's signed requests, derived from
 # CONFIG_C6_ADMIN_PASSWORD (components/web_auth/project_include.cmake); the

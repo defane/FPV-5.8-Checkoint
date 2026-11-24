@@ -1,4 +1,4 @@
-/* Checkpoint audio player (audio_player.h). */
+/* LetzTimer audio player (audio_player.h). */
 #include "audio_player.h"
 #include <stdio.h>
 #include <string.h>
