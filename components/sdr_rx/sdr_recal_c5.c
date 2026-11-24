@@ -9,10 +9,10 @@
  * analog channel setup redirects them to the measurement frequency only
  * during this synchronous call.
  * SPDX-License-Identifier: GPL-3.0-or-later
- * Ported to FPV 5.8 Checkpoint from widscan58 by CapnBry (https://github.com/CapnBry/widscan58),
+ * Ported to Lëtz Timer from widscan58 by CapnBry (https://github.com/CapnBry/widscan58),
  * commit a9fff97, firmware/src/radio/c5/recal_c5.c. widscan58 derived it from esp-sdr by ESPARGOS
  * (https://github.com/ESPARGOS/esp-sdr), commit a8eaac1, main/common/rx_recalibration.c.
- * Changes for FPV 5.8 Checkpoint: include names; c5_foreign_dc_count() and c5_cal_forget() added,
+ * Changes for Lëtz Timer: include names; c5_foreign_dc_count() and c5_cal_forget() added,
  * and the cache size static-asserted against C5_CAL_MEM_BYTES. IDF 6.0.2 links the same libphy
  * (SHA-256 pinned in CMakeLists.txt), so the ABI note above still holds.
  * This file keeps its GPL-3.0-or-later notice; the repository as a whole is GPL-3.0-only. */

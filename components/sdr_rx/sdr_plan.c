@@ -1,9 +1,9 @@
 /* GPL-3.0-or-later.
  * SPDX-License-Identifier: GPL-3.0-or-later
- * Ported to FPV 5.8 Checkpoint from widscan58 by CapnBry (https://github.com/CapnBry/widscan58),
+ * Ported to Lëtz Timer from widscan58 by CapnBry (https://github.com/CapnBry/widscan58),
  * commit a9fff97, firmware/src/scan/planner.c, with the c5-race LO-planning constants of
  * firmware/src/scan/profile.c.
- * Changes for FPV 5.8 Checkpoint: profile_t replaced by sdr_plan_cfg_t, no ISM plan and no enable
+ * Changes for Lëtz Timer: profile_t replaced by sdr_plan_cfg_t, no ISM plan and no enable
  * mask; the integer bin windows (sdr_plan_band, sdr_plan_bands) added.
  * This file keeps its GPL-3.0-or-later notice; the repository as a whole is GPL-3.0-only. */
 #include <stdlib.h>

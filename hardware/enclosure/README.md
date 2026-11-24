@@ -138,7 +138,7 @@ $CLI commands                                    # every command and its paramet
   the worst arm angle, plus the way round the hub. At the antenna it needs a straight plug: the
   cable runs down the roll axis, through the 12 mm bore of the clamp and the seat, then along
   the arm. No arm angle or roll reaches the plug on the wall, whatever its height.
-- **Firmware:** flash the C5 with `make flash FW=detector-ipex` (`CONFIG_CHECKPOINT_ANTENNA_IPEX=y`),
+- **Firmware:** flash the C5 with `make flash FW=detector-ipex` (`CONFIG_LETZTIMER_ANTENNA_IPEX=y`),
   then calibrate again with every VTX off. Without it, the C5 listens on its onboard antenna,
   inside the box.
 

@@ -92,11 +92,11 @@ permitted GPL reuse. Credit external sources used by C5VRX with the same care.
   The C5VRX-5 engine, `components/c5vrx_rx/`, was removed on this branch per
   issue #2 (operator decision); `main` keeps it until a board bench validates
   sdr_rx.
-- `components/checkpoint/`, `components/pass_detector/`,
+- `components/letztimer/`, `components/pass_detector/`,
   `components/audio_player/`, `components/link_proto/` — the platform's own
   code (pass detection, the C6 master's coin sound, the C5<->bridge UART
-  protocol). In `components/checkpoint`, `cp_console.c` and `fw_id.c` re-home
-  C5VRX-5 `console.c` code, `cp_nvs.c` its `settings.c` blobs and `CMakeLists.txt`
+  protocol). In `components/letztimer`, `lt_console.c` and `fw_id.c` re-home
+  C5VRX-5 `console.c` code, `lt_nvs.c` its `settings.c` blobs and `CMakeLists.txt`
   its commit id, each credited in place.
 - `components/fleet_proto/`, `components/race_timing/`, `components/espnow_link/`
   — the race-timing fleet: the C6<->C3 ESP-NOW protocol, the lap/sector engine,
@@ -107,7 +107,7 @@ permitted GPL reuse. Credit external sources used by C5VRX with the same care.
 - `firmware/detector/`, `firmware/node/` (node bridge) and `firmware/master/` (ESP32-C6
   race-timing master) — the ESP32 applications.
 - `test/` host tests, `tools/` console/log/build helpers, `docs/` the
-  platform's feature notes (`docs/CHECKPOINT.md`) and wiring.
+  platform's feature notes (`docs/LETZTIMER.md`) and wiring.
 
 The detector's receive engine is `components/sdr_rx` (widscan58/esp-sdr,
 GPL-3.0-or-later files). Changes to its radio files, `hot_iram.lf`,
@@ -374,14 +374,14 @@ When proposing a new CPU, source, DMA, DSP or DAC route:
 
 ### Workflows
 
-- `.github/workflows/checkpoint.yml` ("FPV 5.8 Checkpoint Build") is the firmware workflow.
+- `.github/workflows/letztimer.yml` ("Lëtz Timer Build") is the firmware workflow.
   It runs the host tests (the platform's pure-C components, sdr_rx's DSP and LO
   planner, the web mock, the boards and the tools) and builds firmware/detector,
   firmware/node and firmware/master with ESP-IDF v6.0.2. Its images stay workflow
   artifacts: this derivative publishes no GitHub Release, since one under the C5VRX
   name would read as an official release (`assets/BRANDING.md`).
 - Keep its concurrency group separated by event type and PR identity
-  (`checkpoint-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}`):
+  (`letztimer-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}`):
   a `github.ref`-only group let a merged PR's cleanup cancel the main build.
 
 The former C5VRX-3 Production CI (semantic `v3.x` releases, `pr-N`), the

@@ -1,4 +1,4 @@
-/* Checkpoint pass detector: "a drone has just passed" from a per-channel
+/* LetzTimer pass detector: "a drone has just passed" from a per-channel
  * signal level in dB (C/N or dBm, any dB scale). Pure C, no hardware.
  *
  * Per channel: exponential smoothing, then
@@ -84,7 +84,7 @@ void pd_init(pass_detector_t *d, const pd_config_t *cfg);
  * next sample, and turning it off sends a relatively armed channel (rel) back to COOLDOWN,
  * waiting for the release as without it (one mid-pass in RISING goes on as an ordinary pass).
  * Not part of pd_config_t: the C5 glue keeps it beside the config, saved with it and carried
- * by the link (lp_config_t.rearm_db_x10; CONFIG_CHECKPOINT_REARM_DROP_DB on a first boot). */
+ * by the link (lp_config_t.rearm_db_x10; CONFIG_LETZTIMER_REARM_DROP_DB on a first boot). */
 void pd_set_rearm(pass_detector_t *d, float drop_db);
 /* New thresholds; channel states are kept. False (nothing changed) when invalid. */
 bool pd_set_config(pass_detector_t *d, const pd_config_t *cfg);

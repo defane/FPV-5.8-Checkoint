@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build / flash / monitor the FPV 5.8 Checkpoint firmwares.
+# Build / flash / monitor the Lëtz Timer firmwares.
 #
 # Called by the root Makefile, but usable directly:
 #   tools/fw.sh build [name...]        build the named firmwares (default: all)
@@ -207,7 +207,7 @@ case "$cmd" in
         ;;
     help|-h|--help)
         cat <<EOF
-FPV 5.8 Checkpoint firmware helper (firmwares: $FIRMWARES)
+Lëtz Timer firmware helper (firmwares: $FIRMWARES)
 
   tools/fw.sh build [name...]      build named firmwares (default: all)
   tools/fw.sh flash  [FW] [PORT]   flash one (menu if omitted)

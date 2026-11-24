@@ -2,9 +2,9 @@
  * the S3, fft_r4_sc16.h elsewhere).
  * GPL-3.0-or-later.
  * SPDX-License-Identifier: GPL-3.0-or-later
- * Ported to FPV 5.8 Checkpoint from widscan58 by CapnBry (https://github.com/CapnBry/widscan58),
+ * Ported to Lëtz Timer from widscan58 by CapnBry (https://github.com/CapnBry/widscan58),
  * commit a9fff97, firmware/src/dsp/psd.c.
- * Changes for FPV 5.8 Checkpoint: the S16R path only (fft_r4_sc16.h; no esp-dsp, float FFTs,
+ * Changes for Lëtz Timer: the S16R path only (fft_r4_sc16.h; no esp-dsp, float FFTs,
  * psd_set_fft or psd_release_unused), the buffers in a caller-provided workspace, iq_applied,
  * psd_moments_add/psd_moments_mean/psd_iq_irr_db added; timing fields read 0 on the host.
  * Deviation: a capture with saturated > 0 does not update the psd_iq_t state (the state is still

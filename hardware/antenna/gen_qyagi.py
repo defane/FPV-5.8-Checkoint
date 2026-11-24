@@ -142,7 +142,7 @@ def main():
 
     # --- silkscreen (text as outlines -> regions, the letters' counters in clear polarity) ---
     silk = []
-    silk += silk_text(f"FPV 5.8 Checkpoint {VERSION}", CX, 45.0, 1.6)
+    silk += silk_text(f"Lëtz Timer {VERSION}", CX, 45.0, 1.6)
     spec = ["Quasi-Yagi 5.8 GHz", "5658-5917 MHz", "Raceband R1-R8", "50 Ω · linear pol."]
     for i, line in enumerate(spec):
         silk += silk_text(line, 0.8, 14.4 - i * 1.7, SILK, anchor="start")

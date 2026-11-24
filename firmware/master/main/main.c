@@ -1,4 +1,4 @@
-/* Checkpoint C6 master (skeleton): UART to the local C5, centralized speaker,
+/* LetzTimer C6 master (skeleton): UART to the local C5, centralized speaker,
  * Wi-Fi SoftAP + admin web. ESP-NOW fleet hub and race timing are added next. */
 #include "c6_hub.h"
 #include "c6_link.h"

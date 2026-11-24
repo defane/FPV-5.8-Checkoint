@@ -1,4 +1,4 @@
-# FPV 5.8 Checkpoint
+# Lëtz Timer
 
 A "drone just passed" platform, started from C5VRX-5 (https://github.com/Twotoz/C5VRX;
 no longer a fork, the git remote `upstream` only points at its history): a two-ESP checkpoint
@@ -16,7 +16,7 @@ no longer a fork, the git remote `upstream` only points at its history): a two-E
   local Wi-Fi SoftAP + web UI that tunes the detector and shows its channels' levels,
   stats and passes.
 
-It also scales to a **race-timing fleet** (`docs/CHECKPOINT.md`): an **ESP32-C6
+It also scales to a **race-timing fleet** (`docs/LETZTIMER.md`): an **ESP32-C6
 master** (`firmware/master`, UART to its own C5 + the speaker + a Wi-Fi AP admin
 web) aggregates passes from remote **C3 nodes** over **ESP-NOW**, each node a
 gate wired to a C5. The C6 orders gates, pairs nodes, times laps/sectors per channel
@@ -32,14 +32,14 @@ C5VRX-5 (upstream `6bc9e4b`) and is no longer a fork: its receive engine was rem
 first: it is upstream's agent policy (attribution, research provenance) and still
 governs the C5VRX material this tree keeps (the I/Q dump research, the console
 structure, the firmware id and NVS helpers, `tools/flash.py`). Credits: README
-"Attribution". Full feature notes: `docs/CHECKPOINT.md`; bench: `docs/bench.md`.
+"Attribution". Full feature notes: `docs/LETZTIMER.md`; bench: `docs/bench.md`.
 
 ## Layout
 
 ```
 components/
   sdr_rx/        receive engine (C5 only): dump capture, LO pairs, PSD + IQ correction (pure-C parts host-tested)
-  checkpoint/    our glue: the scan task, console, benches, detector + NVS + the C5<->C3 UART link (no audio, no LED)
+  letztimer/     our glue: the scan task, console, benches, detector + NVS + the C5<->C3 UART link (no audio, no LED)
   pass_detector/ pure-C pass detector and scan detector (host-tested)
   audio_player/  I2S coin-sound player (the C6 speaker in a fleet)
   link_proto/    pure-C C5<->bridge UART protocol (host-tested)
@@ -58,14 +58,14 @@ hardware/enclosure/ 3D-printed node/master box: enclosure.sc (SolidCraft, a conf
 ```
 
 Every firmware builds only `main`'s dependency closure (`set(COMPONENTS main)`): of
-`components/`, the detector links `checkpoint`, `sdr_rx`, `pass_detector` and
+`components/`, the detector links `letztimer`, `sdr_rx`, `pass_detector` and
 `link_proto` only. `sdr_rx` is found by the C3/C6 builds but built only for the esp32c5.
 
 ## Priorities
 
 - The engine owns the PHY, and only the scan task calls it
-  (`components/checkpoint/cp_scan.c`: `sdr_rx_step`, the requests, the benches). The
-  console and the link only post requests (the mailbox in `cp_internal.h`); the scan task
+  (`components/letztimer/lt_scan.c`: `sdr_rx_step`, the requests, the benches). The
+  console and the link only post requests (the mailbox in `lt_internal.h`); the scan task
   applies them between two hops. Production has no console, so every operator need goes
   through the link (`COMMAND`: F, B, reboot).
 - It depends on a private libphy ABI (`phy_param` offsets, wrapped internals; listed in
@@ -75,14 +75,14 @@ Every firmware builds only `main`'s dependency closure (`set(COMPONENTS main)`):
   `--wrap` list need a board bench (`docs/bench.md` "Engine bench"). Keep them close to
   widscan58 and record each deviation in the file's header.
 - Tasks: the scan task is priority 1, blocks one tick every 100 ms in every loop (scan,
-  benches, recording: `cp_yield()`) and is watched by the task watchdog (panic: a hung
-  gate reboots). The C5<->C3 UART task (`cp_link`) is priority 1 too, console 2,
+  benches, recording: `lt_yield()`) and is watched by the task watchdog (panic: a hung
+  gate reboots). The C5<->C3 UART task (`lt_link`) is priority 1 too, console 2,
   usb_reader 10 (the download key). Benches run in the scan task, never in the console.
 - RAM: static IRAM, data and BSS must end below `0x40820000` (`sram_guard.ld` fails the
   link otherwise) with an 8 KiB margin: `_iram_end`, `_data_end`, `_bss_end` ≤
   `0x4081E000` (`riscv32-esp-elf-nm`; `_bss_end` is `0x4081b018` today). Buffers go on
-  the heap or in the bank's regions (`sdr_bench_scratch()`); checkpoint state is
-  heap-allocated (`checkpoint_start()`), so do not add static `.bss` buffers. Nothing but
+  the heap or in the bank's regions (`sdr_bench_scratch()`); LetzTimer state is
+  heap-allocated (`letztimer_start()`), so do not add static `.bss` buffers. Nothing but
   the scan task touches `0x40820000`–`0x4083FFFF` (the RF dump bank), never during a
   capture.
 - Conventional Commits, one commit per feature.
@@ -90,7 +90,7 @@ Every firmware builds only `main`'s dependency closure (`set(COMPONENTS main)`):
 ## Wiring
 
 A detector is wired to its power and the crossed C5↔bridge UART link
-(`CONFIG_CHECKPOINT_LINK_*`) only: **TX 6, RX 8**. **No amplifier on a detector**
+(`CONFIG_LETZTIMER_LINK_*`) only: **TX 6, RX 8**. **No amplifier on a detector**
 (the MAX98357A sits on the C6 master). The detector builds `COMPONENTS main`, so
 neither `audio_player` nor `status_led` is in its image. Full per-board pinout:
 README "Pinout" + `docs/wiring-*.svg`.
@@ -102,7 +102,7 @@ README "Pinout" + `docs/wiring-*.svg`.
 | 6, 8 | C5 ↔ bridge UART | TX 6, RX 8 (frozen by the carrier PCB, `test/test_pcb.py`; GPIO 15 is not broken out on the C5-Zero) |
 | 13, 14 | USB-Serial-JTAG (console, flashing) | forbidden |
 | 16–22 | SPI flash | forbidden |
-| 26 | antenna switch (C5-Zero): high IPEX, low onboard | never driven by default; only `CONFIG_CHECKPOINT_ANTENNA_IPEX` or `K` `i`, C5-Zero only |
+| 26 | antenna switch (C5-Zero): high IPEX, low onboard | never driven by default; only `CONFIG_LETZTIMER_ANTENNA_IPEX` or `K` `i`, C5-Zero only |
 | 27 | C5-Zero onboard WS2812 | free since the dump engine uses no GPIO; strapping pin; the detector still has no LED (follow-up) |
 | 28 | BOOT button | input, strapping |
 | 0, 1, 3–5, 9–12, 23, 24 | free | |
@@ -119,7 +119,7 @@ of 3, then an average whose `alpha` is the weight per 17.5 ms reference sweep
 (τ = −17.5 ms / ln(1 − α), 61 ms at 0.25); the rests follow the smoothed level and never
 move on a saturated capture; after a gap over 100 ms a channel waits for a full median
 again, then its average resumes (re-primes after a gap over `stale_ms`). Each hop goes
-through the pair ghost guard (`sd_feed_hop()`, `CONFIG_CHECKPOINT_PAIR_GUARD`, default y): on
+through the pair ghost guard (`sd_feed_hop()`, `CONFIG_LETZTIMER_PAIR_GUARD`, default y): on
 a saturated capture the reading of a channel 15 dB under its partner (smoothed) is held, as
 the rails' products ring ghosts on it; after a jump into the rails (a VTX switched on beside the
 antenna) the source's partner, named by the last 3 readings (docs/detector.md "Pair ghost
@@ -128,16 +128,16 @@ wire is the smoothed peak (the console's `PASS` line adds a delay estimate). Sta
 `IDLE → RISING → PEAK_PASSED → COOLDOWN`; re-arm needs the refractory period
 elapsed AND either the level under `active_db - hysteresis_db` or its 1 s average the
 re-arm drop D (`rearm_db`, a runtime parameter: 16 dB by default from
-`CONFIG_CHECKPOINT_REARM_DROP_DB`, 0 = off) under the highest level since the pass
+`CONFIG_LETZTIMER_REARM_DROP_DB`, 0 = off) under the highest level since the pass
 (the relative re-arm, for a drone that stays up between laps; the next pass must then rise
 that much over the lowest 1 s average since: docs/detector.md "Relative re-arm"). The glue is
-`components/checkpoint`; the parameters (alpha, active, hysteresis, drop, min peak,
+`components/letztimer`; the parameters (alpha, active, hysteresis, drop, min peak,
 refractory, stale, D) are editable from the console (`K`+key:
-`components/checkpoint/cp_console.c` and `checkpoint.c`; D is `e`/`E`) and over the link
+`components/letztimer/lt_console.c` and `letztimer.c`; D is `e`/`E`) and over the link
 (the bridges' `CONFIG_SET`, `lp_config_t`, echoed as `CONFIG_STATE`; the degraded C3's page
 sets them all, D with an info bubble; the C6 keeps a fleet D, its admin sets it in the advanced view
 for all gates or one gate, which then keeps a D of its own), saved in NVS namespace
-`checkpoint` key `prefs` (`checkpoint_prefs_t`, `PREFS_VERSION` 4, a version-3 record read
+`letztimer` key `prefs` (`letztimer_prefs_t`, `PREFS_VERSION` 4, a version-3 record read
 with the build's D — bump it on a layout or meaning change). Parameter table (defaults +
 console keys): **`docs/detector.md`**.
 
@@ -149,7 +149,7 @@ self-test; priority-1 task; ~15%). Onboard GPIO: node **10**, master **8**, both
 order (`CONFIG_STATUS_LED_RGB_ORDER`), not GRB
 (C5-as-master **27**). **The detector has no status LED**: the C5-Zero's WS2812
 (**GPIO27**) is free since the dump engine uses no GPIO, but `status_led` is not in the
-detector's build and the checkpoint glue has no LED code (follow-up); a C3 SuperMini has
+detector's build and the LetzTimer glue has no LED code (follow-up); a C3 SuperMini has
 no WS2812 either. Full scheme (colours per state and role): **`docs/status-led.md`**.
 
 ## Fleet (C6 master + C3 nodes)
@@ -244,7 +244,7 @@ cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/status_led/include \
   test_status_led.c ../components/status_led/status_led.c -o /tmp/t && /tmp/t
 cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/web_auth/include \
   test_web_auth.c ../components/web_auth/web_auth.c -o /tmp/t && /tmp/t
-cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/checkpoint test_hop_stats.c -lm -o /tmp/t && /tmp/t
+cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/letztimer test_hop_stats.c -lm -o /tmp/t && /tmp/t
 node test_web_auth.mjs   # auth.js (page side of web_auth)
 node test_web_bubble.mjs # the C3/C6 pages' info bubbles (popover notes, one snippet; placement, fallback)
 python3 test_web_mock.py # tools/web_mock.py against the firmware's /api/state and buffers
@@ -253,6 +253,6 @@ python3 test_scan_analyze.py   # tools/scan_analyze.py on synthetic recordings
 python3 test_flash_tool.py     # tools/flash.py: download key, --check, logs
 ```
 
-CI (`.github/workflows/checkpoint.yml`) runs the host tests and builds all three
+CI (`.github/workflows/letztimer.yml`) runs the host tests and builds all three
 firmwares. Sound: `python3 tools/coin_sound.py` (needs `assets/coin_source.mp3`, not
 versioned).

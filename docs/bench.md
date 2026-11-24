@@ -30,7 +30,7 @@ Startup prints, in order:
 
 - `FIRMWARE id=… elf_sha256=… engine=sdr_rx chip_rev=v…`.
 - `BOOT_TIMING radio_ms=…` once Wi-Fi hosts the PHY (no traffic: `WIFI_MODE_NULL`).
-- `CHECKPOINT prefs=saved|saved_v3|defaults gain=40 rearm_db=16.0` (a C5VRX-era record reads
+- `LETZTIMER prefs=saved|saved_v3|defaults gain=40 rearm_db=16.0` (a C5VRX-era record reads
   `defaults`; `saved_v3` a record from before the re-arm drop was saved, read with the
   build's).
 - One `SDR cal lo=5677 ms=41 irr_db=37.4 verify_gain=60 tries=1 dc=6 sat=0` per LO: each
@@ -41,9 +41,9 @@ Startup prints, in order:
   `irr_db=skip_faults` means the captures failed (8 failed captures end a verify try).
 - `SDR ready lo=5677,5751,5825,5899 gain=40 verify_tries=3 pair_guard=1 rearm_db=16.0 cal_ms=…
   boot_ms=… chip_rev=v…` (`verify_tries` is the build's `CONFIG_SDR_RX_VERIFY_TRIES`: 1 only in
-  B0's control; `pair_guard` its `CONFIG_CHECKPOINT_PAIR_GUARD`: 0 only in B11's control;
+  B0's control; `pair_guard` its `CONFIG_LETZTIMER_PAIR_GUARD`: 0 only in B11's control;
   `rearm_db` the relative re-arm's drop D in effect, saved like the other detector settings,
-  `CONFIG_CHECKPOINT_REARM_DROP_DB` on a first boot), expected
+  `CONFIG_LETZTIMER_REARM_DROP_DB` on a first boot), expected
   within about 2 s of the reset; `tools/flash.py --check` waits for it. Passes can ring 3 s
   later, once the rests are learnt.
 - `HB t_s=… stage=… live=… rot_hz_x10=… faults=… cal=…` every 5 s, from the USB reader,
@@ -77,9 +77,9 @@ capture (8 per LO, so 33, when the dump never answers).
   refresh slower or not at all. A channel that gets no reading at all for 1 s shows an
   unknown level on the bridges: every capture of its LO fails, or the pair guard holds it
   while the other channel of its LO clips the ADC ([detector.md](detector.md#pair-ghost-guard)).
-- `CHECKPOINT source=sdr live= learning= bench= engine_failed= stalled= stalls= gain= top=
+- `LETZTIMER source=sdr live= learning= bench= engine_failed= stalled= stalls= gain= top=
   rise_db= state= rotations= readings= passes= alpha= tau_ms= active_db= …`, and
-  `CHECKPOINT last_pass …` once a pass rang.
+  `LETZTIMER last_pass …` once a pass rang.
 
 `tools/flash.py PORT --check` (`--monitor-only --check` on a running board) runs `T` and
 ends with `CHECK result=pass|fail …`: it fails on a crash or a reboot (`task_wdt`
@@ -89,7 +89,7 @@ from the `CHECK` line, or pass `--heap-min-warn 20000`.
 
 ## 2. Signal
 
-- Send `K` then `l` (trace): `CP_TRACE t_ms=… rise_db=r1,r2,…,r8 top=R… state=… sat=a,b,c,d
+- Send `K` then `l` (trace): `LT_TRACE t_ms=… rise_db=r1,r2,…,r8 top=R… state=… sat=a,b,c,d
   held=h1,…,h8`, 5 lines a second, each channel's rise above its rest in dB. VTX off, every
   rise stays near 0. VTX on and close, its channel rises well above the others (20 dB or
   more at 0.9 m for 25 mW).
@@ -122,7 +122,7 @@ responsiveness ([detector.md](detector.md)).
 
 ## 4. Engine bench
 
-`K` then `s`, `z`, `x`, `n` or `p` (`components/checkpoint/cp_bench.c`, console only).
+`K` then `s`, `z`, `x`, `n` or `p` (`components/letztimer/lt_bench.c`, console only).
 Each bench runs inside the scan task:
 
 - No detection meanwhile: the bridges show *calibrating*, and `STATS` keep flowing.
@@ -247,7 +247,7 @@ as strong.
 ## 5. Scan recording: do real passes stand out?
 
 This records every channel's level, to find the passes offline and tune the detector.
-`K` then `S` (`cp_bench.c`); a bench like the others: no detection while it runs.
+`K` then `S` (`lt_bench.c`); a bench like the others: no detection while it runs.
 
 1. Log the console to a file (`python tools/flash.py PORT --monitor-only --log run.log`).
    Set a VTX on a known channel, with the power low enough that it does not clip up close.
@@ -308,9 +308,9 @@ close. The C5VRX meter's 24 means nothing here.
 
 **Antenna.** The C5-Zero's antenna switch is GPIO 26, high for the IPEX connector, low for
 the onboard antenna, and the firmware leaves it alone. `K` then `i` switches it at run
-time (C5-Zero only, not saved, back to onboard after a reset), prints `CHECKPOINT
+time (C5-Zero only, not saved, back to onboard after a reset), prints `LETZTIMER
 antenna=ipex (GPIO 26 high) recal=quick`, recalibrates every LO on that antenna and learns
-the rests again. `CONFIG_CHECKPOINT_ANTENNA_IPEX=y` (the `detector-ipex` build) boots on
+the rests again. `CONFIG_LETZTIMER_ANTENNA_IPEX=y` (the `detector-ipex` build) boots on
 the IPEX connector, set before the radio starts so the boot calibration sees that antenna.
 A boot with nothing on the IPEX connector is deaf.
 
@@ -409,7 +409,7 @@ at gains 30 to 50 in steps of 4 (`K` `G` twice a step), reading R4's level at ea
   (the [host] model gives exactly that in 40 runs of 40 with a still VTX). Record each
   pass's `peak_db` and the rise at 3 m: the drop between them is what the default (16 dB,
   [detector.md](detector.md#relative-re-arm)) must stay under. D is set without a rebuild,
-  from the console (`K` `e`/`E`, 1 dB a key, `rearm_db=` on the `CHECKPOINT set` line) or a
+  from the console (`K` `e`/`E`, 1 dB a key, `rearm_db=` on the `LETZTIMER set` line) or a
   bridge: to try another, set it and redo (d).
   - **Not a fault**: a `PASS` as the VTX is switched on (or reaches 3 m), when it wobbles.
     The channel then waits until its 1 s average falls 16 dB under its highest level, so
@@ -444,7 +444,7 @@ and B1, with `faults` 0 over 10 min (the PSRAM and the dump bank coexist).
 
 **B9, IPEX.** `tools/fw.sh build detector-ipex`, flashed on a C5-Zero with an antenna on
 its IPEX connector (`python tools/flash.py PORT --build firmware/detector/build-ipex`);
-`K` `i` twice. Pass: the boot prints `CHECKPOINT antenna=ipex`, each `K` `i`
+`K` `i` twice. Pass: the boot prints `LETZTIMER antenna=ipex`, each `K` `i`
 prints `recal=quick`, and the levels change as expected.
 
 **TODO (not run yet, deferred on 2026-11-15).** Bench the IPEX connector with an external
@@ -461,18 +461,18 @@ decide from them whether the IPEX lead needs a fixed attenuator (a PI pad, see
 Passage calibration (admin; C6 page *Passage calibration*, a gate at a time; the degraded C3 page has the same card; a remote gate: *calibrated* pill after Apply, *Use the fleet's thresholds* to undo, kept over a node reboot): with a VTX ON, step 1 with the
 drone hovering in the passage, step 2 at 2 m along the track. Pass: each step counts down 5 s (try *Any* and the drone's own channel; a wrong channel warns), the drone's
 channel reads in both, the proposal puts `min_peak` above the away p95 and under the passage p10, *Apply*
-changes the C5's thresholds (`CHECKPOINT set` on its console) and survives a reboot; no drone, clipping and
+changes the C5's thresholds (`LETZTIMER set` on its console) and survives a reboot; no drone, clipping and
 a drone too close to the line show their warning; the gate keeps detecting meanwhile (a pass rings during step
 1). Record the numbers: they confirm or retune the rules in docs/detector.md.
 
 RX gain from the web (admin; the *Detector* card of the C3 page and of the C6, under the re-arm drop): set 36 then 40 again on a
 gate with every VTX off. Pass: it asks first; the gate shows *calibrating* for about 3 s, then the
-*gain* field and the `STATS` gain follow, the console prints `CHECKPOINT gain=36/83 (saved...)`, and it
+*gain* field and the `STATS` gain follow, the console prints `LETZTIMER gain=36/83 (saved...)`, and it
 survives a C5 reboot (saved). With a VTX on the channel it refuses until forced. On the C6 a remote
 gate takes it through its node (`master gain N -> C5` in the node's log).
 
 Debug mode (off at boot): on the C3's *Maintenance* page (unlock as admin, the link in the header), open *Debug*, switch it on. Pass:
-the `PASS` and `CHECKPOINT` lines appear within about 1 s; `T` prints the status, `K` the menu,
+the `PASS` and `LETZTIMER` lines appear within about 1 s; `T` prints the status, `K` the menu,
 `Ka` lowers the smoothing (the log shows the new `set alpha=`); `F` asks before it blinds the gate.
 Switched off (or after a C3 reboot): no log, and a key is refused. Same on the C6's page (advanced
 *Maintenance* page, admin, *Debug*): gate 0 first, then pick a remote gate (it must be
@@ -511,7 +511,7 @@ boot prints `pair_guard=1`), logged (`flash.py --log`). In this order:
 5. **B-g5, a real partner.** A second VTX on R5 held still at 0.6 m while R6 swipes at
    6 cm: R5 must not `PASS`, and its rise comes back within about 100 ms of the last
    saturated capture. Then move both together, 10 times. Compare the `PASS` count and
-   `peak_ms` with a guard-off build, made like B0's control: `CONFIG_CHECKPOINT_PAIR_GUARD=n`
+   `peak_ms` with a guard-off build, made like B0's control: `CONFIG_LETZTIMER_PAIR_GUARD=n`
    in `/tmp/guard0.defaults`, `( cd firmware/detector && idf.py -B build-guard0
    -DSDKCONFIG=sdkconfig.guard0 "-DSDKCONFIG_DEFAULTS=sdkconfig.defaults;/tmp/guard0.defaults"
    build )`, `python tools/flash.py PORT --build firmware/detector/build-guard0` (its boot
@@ -565,8 +565,8 @@ B6 (c), far drones (`peak_db` of each pass, `—` if none rang):
 Before issue #2 the detector ran on the C5VRX-5 engine, read one channel at a time and
 reached about 57 Hz per channel. Its benches are in this page as it stood on `main` at
 `e7d40c9` (`git show e7d40c9:docs/bench.md`,
-[on GitHub](https://github.com/defane/FPV-5.8-Checkoint/blob/e7d40c9/docs/bench.md)):
-the hop bench of [issue #1](https://github.com/defane/FPV-5.8-Checkoint/issues/1) (about
+[on GitHub](https://github.com/defane/letztimer/blob/e7d40c9/docs/bench.md)):
+the hop bench of [issue #1](https://github.com/defane/letztimer/issues/1) (about
 88 Hz per channel with the `force` hop), the residue that lingered about 1 ms after a hop
 and took the scan to 57 Hz, the gain-24 scan recordings (4 passes out of 4 on R4 at +13 to
 +16 dB), and the IPEX check (`K` `i`: unplugging the IPEX antenna moved the levels by

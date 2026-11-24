@@ -1,5 +1,5 @@
 /* Host test for the engine bench statistics. Build:
- *   cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/checkpoint test_hop_stats.c -lm -o /tmp/t && /tmp/t
+ *   cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/letztimer test_hop_stats.c -lm -o /tmp/t && /tmp/t
  */
 #include "hop_stats.h"
 #include <math.h>

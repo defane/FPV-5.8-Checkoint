@@ -39,7 +39,7 @@ MIN_S = 0.05            # shorter than this is a glitch
 PEAK_BAND_DB = 3.0      # the centroid covers what is within this of the peak
 REST_QUANTILE = 0.2     # a channel's resting level: a VTX held close for half a recording
                         # would lift the median itself
-REARM_DB = 16.0         # --rearm default: CONFIG_CHECKPOINT_REARM_DROP_DB's, the boards' first-boot D
+REARM_DB = 16.0         # --rearm default: CONFIG_LETZTIMER_REARM_DROP_DB's, the boards' first-boot D
 REARM_TAU_S = 1.0       # the relative re-arm's average (PD_REARM_TAU_MS)
 REFRACTORY_S = 1.5      # sd_config_default's refractory_ms
 

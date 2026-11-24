@@ -19,9 +19,9 @@
  * out in natural order. Overflow-free for any int16 input: a twiddle product is
  * below 2^31, and |out| <= max |in| + 1.
  * SPDX-License-Identifier: GPL-3.0-or-later
- * Ported to FPV 5.8 Checkpoint from widscan58 by CapnBry (https://github.com/CapnBry/widscan58),
+ * Ported to Lëtz Timer from widscan58 by CapnBry (https://github.com/CapnBry/widscan58),
  * commit a9fff97, firmware/src/dsp/fft_r4_sc16.h.
- * Changes for FPV 5.8 Checkpoint: none (verbatim).
+ * Changes for Lëtz Timer: none (verbatim).
  * This file keeps its GPL-3.0-or-later notice; the repository as a whole is GPL-3.0-only. */
 #pragma once
 #include <stdint.h>

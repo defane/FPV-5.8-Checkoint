@@ -1,4 +1,4 @@
-# FPV 5.8 Checkpoint
+# Lëtz Timer
 
 Minimal project skeleton with a devcontainer carrying AI coding agents and the
 GitHub CLI:

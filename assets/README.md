@@ -3,7 +3,7 @@
 The C5VRX name and logos are not under the GPL (see `BRANDING.md`), so this derivative
 carries no C5VRX logo or photo.
 
-## Checkpoint coin sound
+## Lëtz Timer coin sound
 
 | | |
 | --- | --- |

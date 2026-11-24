@@ -45,7 +45,7 @@ NOISE_X10 = 60            # a gate's rise with no drone, about
 REFRACTORY_S = 1.5        # refractory_ms: no re-arm before it
 LEAVE_S = 0.9             # a drone gone this long: its level is under the release (active - hysteresis)
 CAL_S = {"cal_full": 3.7, "cal_quick": 3.2}   # blind: the recalibration + the 3 s relearn
-# Passage calibration (components/pass_detector/pass_calib.c, cp_calib.c): a drone's rise in the passage and
+# Passage calibration (components/pass_detector/pass_calib.c, lt_calib.c): a drone's rise in the passage and
 # 2 m away, half dB (p10, p50, p90, p95, max), and the thresholds pc_solve() proposes from them, dB x10
 # (test_pass_calib.c checks the same numbers, so the mock cannot drift from the C).
 CAL_SECS = 5.0                                 # LP_CALIB_SECS
@@ -64,7 +64,7 @@ class Auth:
     SESSIONS = 4
 
     def __init__(self, tag, password):
-        self.salt = f"fpv58-checkpoint/{tag}/mock"   # fixed: K survives a restart, like a reboot
+        self.salt = f"letztimer/{tag}/mock"   # fixed: K survives a restart, like a reboot
         self.open = not password
         self.key = hashlib.pbkdf2_hmac("sha256", password.encode(), self.salt.encode(), ITERATIONS, 32)
         self.sessions = OrderedDict()                # sid -> last seq, oldest first
@@ -308,7 +308,7 @@ class ConsoleDebug:
             return {"ok": False, "blind": True}
         self.say(f"> {keys}\n", gate)
         if keys[0] == "K":
-            self.say("CHECKPOINT K + key (lower = down, upper = up; K stays open 5 s after each key, q closes):\n", gate)
+            self.say("LETZTIMER K + key (lower = down, upper = up; K stays open 5 s after each key, q closes):\n", gate)
         elif keys == "T":
             self.say(f"STATUS uptime_s={int(t)} heap_internal=118000 fw={g.health(t)['fw']}\n", gate)
         elif keys in ("F", "B"):
@@ -317,7 +317,7 @@ class ConsoleDebug:
 
 
 class PassageCalib:
-    """The passage calibration's session (cp_calib.c) as the pages' /api/calib answers it: two measurements of
+    """The passage calibration's session (lt_calib.c) as the pages' /api/calib answers it: two measurements of
     a drone, then a proposal. CAL_DEFAULT_GATE: what a body without "gate" means (the C3's pages never send one)."""
     CAL_DEFAULT_GATE = -1
     CAL_ACTIONS = ("state", "start1", "start2", "cancel", "apply", "reset")
@@ -808,7 +808,7 @@ def main():
     p.add_argument("role", nargs="?", choices=("master", "node"), default="master")
     p.add_argument("--port", type=int, help="default: 8080 for the master, 8081 for the node")
     p.add_argument("--host", default="127.0.0.1", help="0.0.0.0 to open it from a phone on the LAN")
-    p.add_argument("--password", default="checkpoint", help='admin password; "" disables admin auth, as on the firmware')
+    p.add_argument("--password", default="letztimer", help='admin password; "" disables admin auth, as on the firmware')
     p.add_argument("--latency", type=int, default=0, metavar="MS", help="delay every request, as over Wi-Fi")
     p.add_argument("--vtx", action="store_true", help="a strong carrier on every gate: calibrations ask to force, "
                    "its channel stays in cooldown after one pass (no lap counted)")

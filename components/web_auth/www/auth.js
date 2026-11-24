@@ -102,7 +102,7 @@ const AdminAuth = (() => {
 
   // The key in the tab's sessionStorage, as 64 hex digits. Storage can be absent or refuse (a
   // private window, blocked site data): then nothing is kept and the login works as before.
-  const STORE = "fpv58.adminKey";
+  const STORE = "letztimer.adminKey";
   const keep = {
     get() { try { return sessionStorage.getItem(STORE); } catch (_) { return null; } },
     set(v) { try { sessionStorage.setItem(STORE, v); } catch (_) {} },

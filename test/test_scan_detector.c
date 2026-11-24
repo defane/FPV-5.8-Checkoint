@@ -250,7 +250,7 @@ static double clip_x(void) { return quantile_draw(PAIR_CLIP_X); }
 static double fm_x(void) { return quantile_draw(PAIR_FM_X); }
 
 /* 3.5 s of floor (the rests settle), then dur_s of the scene; guard: sd_feed_hop, else sd_feed per
- * reading (cp_scan.c before the guard). Scene time 0 = T0 + 3.5 s. */
+ * reading (lt_scan.c before the guard). Scene time 0 = T0 + 3.5 s. */
 static void pair_run(const pdrone_t *hi, const pdrone_t *lo, int guard, uint64_t s, double dur_s, pair_out_t *o,
                      scan_detector_t *sd)
 {
@@ -826,7 +826,7 @@ int main(void)
     }
 
     /* 23. The bench's ghost: a 600 mW R6 passing 0.3 m from the gate clips the ADC for ~80 ms; R5,
-     *     alone in the air, reads R6's clipping products. Fed one reading at a time (cp_scan.c until
+     *     alone in the air, reads R6's clipping products. Fed one reading at a time (lt_scan.c until
      *     now) R5 rings a phantom; through the pair guard it is held while R6 clips and rings
      *     nothing, and R6's own pass is the same pass to the millisecond (R6 is never held). */
     {
@@ -917,7 +917,7 @@ int main(void)
      *     right only because its phantom peaks at R6's instant, which is R5's here (at another
      *     offset the phantom takes the pass: 24). The host model of the eval saw the same (5 of 20
      *     on time at 5 m/s); the window grows as 1/speed and with the link gain (Kconfig
-     *     CHECKPOINT_PAIR_GUARD). Bench B11 measures it on the board; retune from that, not here. */
+     *     LETZTIMER_PAIR_GUARD). Bench B11 measures it on the board; retune from that, not here. */
     {
         static scan_detector_t sd;
         const pdrone_t r6 = {.mw = 600, .d_m = 0.3, .t0_s = 2.0, .v_ms = 5.0}, none = {0};

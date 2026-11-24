@@ -1,4 +1,4 @@
-menu "Checkpoint C3 bridge"
+menu "LetzTimer C3 bridge"
 
     config C3_UART_NUM
         int "Link UART controller number"
@@ -19,7 +19,7 @@ menu "Checkpoint C3 bridge"
 
     config C3_AP_SSID
         string "Wi-Fi SoftAP SSID"
-        default "checkpoint-c3"
+        default "letztimer-c3"
 
     config C3_AP_PASSWORD
         string "Wi-Fi SoftAP password (8 to 63 chars, empty = open)"
@@ -37,7 +37,7 @@ menu "Checkpoint C3 bridge"
     comment "Degraded web: spectators read results; changing the band needs this password."
     config C3_ADMIN_PASSWORD
         string "Degraded-web admin password (empty disables admin auth)"
-        default "checkpoint"
+        default "letztimer"
         help
             Any length. Only a key derived from it (PBKDF2) enters the firmware,
             to check the page's signed admin requests (components/web_auth); it

@@ -1,9 +1,9 @@
 /* GPL-3.0-or-later.
  * SPDX-License-Identifier: GPL-3.0-or-later
- * Ported to FPV 5.8 Checkpoint from widscan58 by CapnBry (https://github.com/CapnBry/widscan58),
+ * Ported to Lëtz Timer from widscan58 by CapnBry (https://github.com/CapnBry/widscan58),
  * commit a9fff97, firmware/src/scan/metrics.c (metrics_init, metrics_level), with the per-hop
  * scale of firmware/src/scan/scanner.c do_levels.
- * Changes for FPV 5.8 Checkpoint: metrics_level's RSSI window rewritten on a precomputed bin
+ * Changes for Lëtz Timer: metrics_level's RSSI window rewritten on a precomputed bin
  * window (sdr_band_level_qdb), signed qdb codes; the rest of metrics.c is not ported.
  * This file keeps its GPL-3.0-or-later notice; the repository as a whole is GPL-3.0-only. */
 #include <math.h>

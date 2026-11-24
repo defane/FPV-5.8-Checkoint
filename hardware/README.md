@@ -5,12 +5,12 @@ pads for the power.
 
 | Board | Modules | Size | To order |
 | --- | --- | --- | --- |
-| node | C5-Zero + C3-Zero | 57 × 24 mm | [`gerbers/checkpoint-node-gerbers.zip`](gerbers/checkpoint-node-gerbers.zip) |
-| master | C5-Zero + C6-Zero + MAX98357A | 79 × 24 mm | [`gerbers/checkpoint-master-gerbers.zip`](gerbers/checkpoint-master-gerbers.zip) |
+| node | C5-Zero + C3-Zero | 57 × 24 mm | [`gerbers/letztimer-node-gerbers.zip`](gerbers/letztimer-node-gerbers.zip) |
+| master | C5-Zero + C6-Zero + MAX98357A | 79 × 24 mm | [`gerbers/letztimer-master-gerbers.zip`](gerbers/letztimer-master-gerbers.zip) |
 
-![node](checkpoint-node/checkpoint-node.svg)
+![node](letztimer-node/letztimer-node.svg)
 
-![master](checkpoint-master/checkpoint-master.svg)
+![master](letztimer-master/letztimer-master.svg)
 
 **No board has been built yet.** The design rules pass, the drill data matches Waveshare's
 drawings and `test/test_pcb.py` ties the nets to the firmware, but nothing has been soldered
@@ -18,7 +18,7 @@ or powered. Order a small batch first.
 
 ## Before ordering
 
-Print `checkpoint-*/checkpoint-*-1to1.pdf` at 100 % and lay the real modules on the paper.
+Print `letztimer-*/letztimer-*-1to1.pdf` at 100 % and lay the real modules on the paper.
 Check the MAX98357A closely: the footprint comes from Adafruit's board. Other breakouts
 usually share its 7-pin order, but compare yours with the `LRC`…`VIN` labels on the board.
 

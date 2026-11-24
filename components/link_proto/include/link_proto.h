@@ -1,4 +1,4 @@
-/* link_proto: the C5 <-> bridge UART protocol for the checkpoint platform.
+/* link_proto: the C5 <-> bridge UART protocol for the LetzTimer platform.
  *
  * The bridge (a C3 node, or the C6 master for its own gate) pushes detector
  * configuration and commands (calibrate, reboot) to the C5; the C5 reports
@@ -114,7 +114,7 @@ typedef struct {
     uint8_t  muted;             /* 0/1 */
 } lp_config_t;
 
-#define LP_REARM_MAX_X10     400   /* 40 dB, the top of CONFIG_CHECKPOINT_REARM_DROP_DB's range */
+#define LP_REARM_MAX_X10     400   /* 40 dB, the top of CONFIG_LETZTIMER_REARM_DROP_DB's range */
 #define LP_REARM_DEFAULT_X10 160   /* 16 dB, its default: what the bridges' default configs carry */
 
 typedef struct {
@@ -156,7 +156,7 @@ static inline uint16_t lp_state_set(uint16_t states, unsigned ch, unsigned state
     return (uint16_t)((states & ~(3u << at)) | ((state & 3u) << at));
 }
 
-/* The C5's live state and health, every CONFIG_CHECKPOINT_LINK_STATS_MS: what
+/* The C5's live state and health, every CONFIG_LETZTIMER_LINK_STATS_MS: what
  * the console's T would show an operator, reduced to what a web page needs. */
 typedef struct {
     int32_t  cn_x10;            /* the strongest channel's rise *10; LP_CN_UNKNOWN when none

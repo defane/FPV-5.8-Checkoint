@@ -667,7 +667,7 @@ class MasterPerGate(unittest.TestCase):
 
 
 class MasterCalib(unittest.TestCase):
-    """/api/calib against c6_web.c's post_calib and the C5's session (cp_calib.c): two steps, then a proposal."""
+    """/api/calib against c6_web.c's post_calib and the C5's session (lt_calib.c): two steps, then a proposal."""
 
     def setUp(self):
         self.sim = web_mock.Master()
@@ -804,7 +804,7 @@ class PagesAccessibility(unittest.TestCase):
     def test_one_h1_the_page_title(self):
         for name, page in self.pages().items():
             self.assertEqual(len(re.findall(r"<h1[ >]", page)), 1, name)
-            self.assertRegex(page, r"<header[^>]*>\s*(?:<div>)?<h1>Checkpoint C[36]")
+            self.assertRegex(page, r"<header[^>]*>\s*(?:<div>)?<h1>Lëtz Timer C[36]")
 
     def test_tables_are_named_scrollable_and_have_column_scopes(self):
         page = self.pages()["master"]

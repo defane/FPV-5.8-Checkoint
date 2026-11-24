@@ -5,9 +5,9 @@
 # IRAM_ATTR in the sources.
 # GPL-3.0-or-later.
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Ported to FPV 5.8 Checkpoint from widscan58 by CapnBry (https://github.com/CapnBry/widscan58),
+# Ported to Lëtz Timer from widscan58 by CapnBry (https://github.com/CapnBry/widscan58),
 # commit a9fff97, firmware/src/radio/c5/hot_iram.lf.
-# Changes for FPV 5.8 Checkpoint: adapted for IDF 6.0.2, which links picolibc: widscan58's newlib
+# Changes for Lëtz Timer: adapted for IDF 6.0.2, which links picolibc: widscan58's newlib
 # libm/libc object names do not exist there, so only the three libm objects the hop calls are
 # mapped, by their picolibc names (sdr_libm); phy_force_rx_gain (the gain force) and
 # phy_freq_band_reg_set/phy_vht_support (reached by the PLL-only retune via phy_freq_set_reg and

@@ -1,7 +1,7 @@
 # Detector: operation and parameters
 
 The C5 reads R1 to R8 all the time and detects a pass on any of them: nobody picks a
-channel (`components/checkpoint/cp_scan.c`, `checkpoint.c`; pure C:
+channel (`components/letztimer/lt_scan.c`, `letztimer.c`; pure C:
 `components/pass_detector/scan_detector.c`, `pass_detector.c`).
 
 - **Signal:** the sdr_rx engine (`components/sdr_rx`) reads two channels per LO: 5677 MHz
@@ -85,7 +85,7 @@ model, the repository's DSP on synthetic 10-bit captures). They sit a median 23�
 under the strong channel, a few % of captures above it ([host]).
 
 **The rule** (`sd_feed_hop()` in `components/pass_detector/scan_detector.c`;
-`cp_feed_hop()` in `cp_scan.c` feeds every hop through it):
+`lt_feed_hop()` in `lt_scan.c` feeds every hop through it):
 
 - It looks only at a capture of two channels that carries `SDR_RD_SATURATED` (one flag per
   capture, on both readings). Inside a hover, a run of saturated captures that has lasted
@@ -165,7 +165,7 @@ under the strong channel, a few % of captures above it ([host]).
 - A held reading counts as none: a channel held for 1 s reads *unknown* on the bridges
   ([fleet.md](fleet.md)), with no fault and no badge.
 
-`CONFIG_CHECKPOINT_PAIR_GUARD` (default y) turns it on; with n every reading is fed as
+`CONFIG_LETZTIMER_PAIR_GUARD` (default y) turns it on; with n every reading is fed as
 it comes, the ghosts included. Its Kconfig help lists the limits below. The constants are
 the host evaluation's: retune them from bench B11's data, not from the host model.
 
@@ -325,8 +325,8 @@ Against other values of D (the same cases, mild fading):
 
 **On the board.**
 
-- `SDR ready … rearm_db=16.0` at boot (the saved D), and `rearm_db=` on `T`'s `CHECKPOINT`
-  line. `CHECKPOINT prefs=saved_v3` at boot: a record from before D was saved, read with the
+- `SDR ready … rearm_db=16.0` at boot (the saved D), and `rearm_db=` on `T`'s `LETZTIMER`
+  line. `LETZTIMER prefs=saved_v3` at boot: a record from before D was saved, read with the
   build's D until the next save.
 - `PASS … rearm=rel`: the pass followed a relative re-arm.
 - `tools/scan_analyze.py` splits a long rise the same way (`--rearm`, 16 dB by default,
@@ -335,10 +335,10 @@ Against other values of D (the same cases, mild fading):
 
 ### Setting D
 
-D is a detector parameter like the others ([the table](#parameters-console-k-saved-in-nvs-namespace-checkpoint-key-prefs)):
+D is a detector parameter like the others ([the table](#parameters-console-k-saved-in-nvs-namespace-letztimer-key-prefs)):
 `K` `e`/`E` (±1 dB, 0 to 40), or a bridge's `CONFIG_SET` (`rearm_db_x10`, link_proto v4;
 a value out of range refuses the whole set), saved in the C5's prefs with the rest.
-`CONFIG_CHECKPOINT_REARM_DROP_DB` (16) is the first boot's value, and `K` `0`'s and a
+`CONFIG_LETZTIMER_REARM_DROP_DB` (16) is the first boot's value, and `K` `0`'s and a
 version-3 record's.
 
 The degraded C3's page sets it in its *Detector* card (*Re-arm drop*, 0 to 40 dB): its round
@@ -356,8 +356,8 @@ A new D applies from the next reading, the channels' states kept:
   if the re-arm had always been off. Left relatively armed, its next pass would only have to
   rise over the trough: the next 4 dB wobble rang ([host] `test_pass_detector.c`).
 
-The boot line (`SDR ready … rearm_db=16.0`), the `T` line (`CHECKPOINT … rearm_db=16.0`)
-and `K`'s `CHECKPOINT set` line show the value in effect.
+The boot line (`SDR ready … rearm_db=16.0`), the `T` line (`LETZTIMER … rearm_db=16.0`)
+and `K`'s `LETZTIMER set` line show the value in effect.
 
 Which value ([host], the tables above, mild fading): 16 dB unless the laps say otherwise.
 
@@ -385,7 +385,7 @@ then stands 6 dB higher than the one asked, the page warns that the drone may be
 channel step 1 settled on.
 
 The scan task samples every channel's smoothed rise (`sd_rise_db`, the level the thresholds compare)
-once per rotation into a histogram (2 KB on the heap, freed after each step: `cp_calib.c`, host-tested
+once per rotation into a histogram (2 KB on the heap, freed after each step: `lt_calib.c`, host-tested
 statistics and solver in `components/pass_detector/pass_calib.c`). The drone is the channel that stands
 highest in the passage; step 2 reads that same channel. From its percentiles (p10, p50, p90, p95 in the
 passage, p50 and p95 away) the solver proposes:
@@ -412,7 +412,7 @@ applied, cancelled, or `LP_CALIB_IDLE_S` (10 min) pass; the bridge applies the p
 `CONFIG_SET` over the C5's echoed settings (a remote gate's thresholds are kept by the C6, [fleet.md](fleet.md)). The C6 admin
 page has it in *Passage calibration* (a gate selector, gate 0 and each remote gate), the degraded C3's page in its own card.
 
-## Parameters (console `K`, saved in NVS namespace "checkpoint", key "prefs")
+## Parameters (console `K`, saved in NVS namespace "letztimer", key "prefs")
 
 | Parameter | Default | Keys |
 | --- | --- | --- |
@@ -423,12 +423,12 @@ page has it in *Passage calibration* (a gate selector, gate 0 and each remote ga
 | `min_peak_db` (below it, the drone is too far: no pass) | 10 dB | `m`/`M` ±1 dB |
 | `refractory_ms` | 1500 ms | `r`/`R` ±250 ms |
 | `stale_ms` | 1000 ms | (fixed) |
-| `rearm_db`, the relative re-arm drop D ([above](#relative-re-arm), 0 = off) | 16 dB (`CONFIG_CHECKPOINT_REARM_DROP_DB`) | `e`/`E` ±1 dB, 0 to 40 |
+| `rearm_db`, the relative re-arm drop D ([above](#relative-re-arm), 0 = off) | 16 dB (`CONFIG_LETZTIMER_REARM_DROP_DB`) | `e`/`E` ±1 dB, 0 to 40 |
 | RX gain (forced index) | 40 | `g`/`G` ±2 (relearns the rests); the C6 and C3 pages set it to an index, 10 to 83 ([fleet.md](fleet.md#gate-health-and-remote-commands-no-console-in-production)) |
 
 The record is version 4 (`PREFS_VERSION`). Version 4 adds D in the two bytes version 3
 kept reserved, so a version-3 record is read as it is, every value kept, with the build's
-D (`CHECKPOINT prefs=saved_v3` at boot) until the next save writes version 4. Version 3
+D (`LETZTIMER prefs=saved_v3` at boot) until the next save writes version 4. Version 3
 changed the meter (band power, 10-bit, clipping instead of folding), so the first boot of
 sdr_rx ignores a C5VRX-era record and starts on the defaults. The bridges send the same
 fields (`CONFIG_SET`, D as `rearm_db_x10`): `alpha` keeps its meaning there.
@@ -441,16 +441,16 @@ together with the C3's and the C6's copies (`firmware/node/main/c3_store.c`,
 `firmware/master/main/c6_hub.c`; D's is `LP_REARM_DEFAULT_X10` in `link_proto.h`), in one
 commit.
 
-Other keys: `K` then `l` (live rise of R1-R8 and each LO's saturated captures, `CP_TRACE`
+Other keys: `K` then `l` (live rise of R1-R8 and each LO's saturated captures, `LT_TRACE`
 lines, 5 a second), `0`
 (defaults, D included), `k` (show), `i` (antenna onboard/IPEX, C5-Zero only: GPIO 26, not saved,
 then every LO recalibrated on it), the engine benches `s`, `z`, `x`, `n`, `p` and `S`
 ([bench.md](bench.md#4-engine-bench)), `q` (close). The `K` window stays open 5 s after
-each key. At the top level: `T` prints the `FIRMWARE`, `STATUS`, `SDR` and `CHECKPOINT`
+each key. At the top level: `T` prints the `FIRMWARE`, `STATUS`, `SDR` and `LETZTIMER`
 lines, `F` recalibrates every LO, `B` recalibrates and verifies the image rejection (VTX
 off for both, the gate is blind for about 3 s), `` ` `` reboots into the USB download
-mode. The top-level keys are in `components/checkpoint/cp_console.c`, the `K` keys in
-`checkpoint.c`.
+mode. The top-level keys are in `components/letztimer/lt_console.c`, the `K` keys in
+`letztimer.c`.
 
 **Setting `active_db`:** put it below the rise of a drone passing the gate, but above the
 rise of the same drone elsewhere on the track. Otherwise only the [relative

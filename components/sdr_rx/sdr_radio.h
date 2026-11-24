@@ -1,9 +1,9 @@
 /* Target radio backend interface. GPL-3.0-or-later.
  * Everything above this interface is target independent.
  * SPDX-License-Identifier: GPL-3.0-or-later
- * Ported to FPV 5.8 Checkpoint from widscan58 by CapnBry (https://github.com/CapnBry/widscan58),
+ * Ported to Lëtz Timer from widscan58 by CapnBry (https://github.com/CapnBry/widscan58),
  * commit a9fff97, firmware/src/radio/radio.h.
- * Changes for FPV 5.8 Checkpoint: the C5 backend only; no caps, regwatch, idle/sleep, tune-skip
+ * Changes for Lëtz Timer: the C5 backend only; no caps, regwatch, idle/sleep, tune-skip
  * or S3 API; a forced gain only; the split capture errors, the settle wait and the bank layout
  * (spec 2.3); esp_err.h only on the target, so the host tests can include it.
  * This file keeps its GPL-3.0-or-later notice; the repository as a whole is GPL-3.0-only.
