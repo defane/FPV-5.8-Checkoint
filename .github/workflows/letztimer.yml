@@ -178,6 +178,100 @@ jobs:
           rate=$((100 * CCACHE_HITS / CCACHE_TOTAL))
           echo "Compiler cache: $CCACHE_HITS hits of $CCACHE_TOTAL ($rate %)."
           if [ "$rate" -lt 50 ]; then echo "::warning title=ccache::Only $rate % of the compilations hit the cache ($CCACHE_HITS of $CCACHE_TOTAL)."; fi
+  build-variants:
+    # The other boards of `make variants` (their overlays are in tools/fw.sh): one build each, nothing is packaged.
+    runs-on: ubuntu-latest
+    container: espressif/idf:v6.0.2
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: detector-xiao-c5
+            dir: firmware/detector
+            chip: esp32c5
+            sdkconfig: sdkconfig.xiao-c5
+            builddir: build-xiao-c5
+            defaults: "sdkconfig.defaults;sdkconfig.psram.defaults;sdkconfig.xiao-c5.defaults"
+          - name: detector-wave-c5-lcd
+            dir: firmware/detector
+            chip: esp32c5
+            sdkconfig: sdkconfig.wave-c5-lcd
+            builddir: build-wave-c5-lcd
+            defaults: "sdkconfig.defaults;sdkconfig.wave-c5-lcd.defaults"
+          - name: master-wave-c5
+            dir: firmware/master
+            chip: esp32c5
+            sdkconfig: sdkconfig.c5
+            builddir: build-c5
+            defaults: "sdkconfig.c5.defaults"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Set up the compiler cache
+        shell: bash
+        run: |
+          # ccache keeps the compiled objects between runs: only what a commit changed is compiled again.
+          # compiler_check=content because ESP-IDF rewrites build/specs/picolibc.specs at every configure and
+          # ccache would hash its date (every file would miss); the build directory is the same on every run.
+          command -v ccache >/dev/null || { apt-get update -qq && apt-get install -y -qq ccache; }
+          {
+            echo "IDF_CCACHE_ENABLE=1"
+            echo "CCACHE_DIR=$GITHUB_WORKSPACE/.ccache"
+            echo "CCACHE_COMPILERCHECK=content"
+            echo "CCACHE_MAXSIZE=400M"
+          } >> "$GITHUB_ENV"
+      - name: Restore the compiler cache
+        id: ccache_restore
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: letztimer-ccache-${{ github.job }}-${{ matrix.name }}-${{ github.event.pull_request.head.sha || github.sha }}
+          restore-keys: letztimer-ccache-${{ github.job }}-${{ matrix.name }}-
+      # The counters live in the cache: zeroed, they count this run alone.
+      - name: Zero the compiler cache statistics
+        shell: bash
+        run: ccache -z
+      - name: Build ${{ matrix.name }}
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh"
+          cd "${{ matrix.dir }}"
+          idf.py -DIDF_TARGET="${{ matrix.chip }}" -DSDKCONFIG="${{ matrix.sdkconfig }}" \
+            "-DSDKCONFIG_DEFAULTS=${{ matrix.defaults }}" -B "${{ matrix.builddir }}" build
+      - name: Compiler cache statistics
+        if: always()
+        shell: bash
+        run: |
+          ccache -s || true
+          s=$(ccache --print-stats 2>/dev/null || true)
+          hits=$(awk -F'\t' '$1=="direct_cache_hit"||$1=="preprocessed_cache_hit"{n+=$2} END{print n+0}' <<<"$s")
+          miss=$(awk -F'\t' '$1=="cache_miss"{n+=$2} END{print n+0}' <<<"$s")
+          echo "CCACHE_HITS=$hits" >> "$GITHUB_ENV"
+          echo "CCACHE_TOTAL=$((hits + miss))" >> "$GITHUB_ENV"
+          echo "### Compiler cache (job $GITHUB_JOB, ${{ matrix.name }}): $hits hits of $((hits + miss)) compilations this run" >> "$GITHUB_STEP_SUMMARY"
+      - name: Save the compiler cache
+        if: always() && steps.ccache_restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: ${{ steps.ccache_restore.outputs.cache-primary-key }}
+      - name: Check the compiler cache hits
+        shell: bash
+        env:
+          CACHE_RESTORED: "${{ steps.ccache_restore.outputs.cache-matched-key != '' }}"
+        run: |
+          # A cache was restored but nothing hit it: the cache is broken (a changed build path, compiler_check, the
+          # compiler, or a configuration every object depends on). It is saved above first, so the next run starts warm.
+          if [ "$CACHE_RESTORED" != "true" ]; then echo "No cache was restored (a cold run): nothing to check."; exit 0; fi
+          if [ "${CCACHE_TOTAL:-0}" -lt 50 ]; then echo "Only ${CCACHE_TOTAL:-0} compilations: too few to judge."; exit 0; fi
+          if [ "${CCACHE_HITS:-0}" -eq 0 ]; then
+            echo "::error title=ccache::A cache was restored but none of the $CCACHE_TOTAL compilations hit it. Look at the build path, CCACHE_COMPILERCHECK, the ESP-IDF image or sdkconfig; the new cache is saved, so a re-run shows whether it was a one-off."
+            exit 1
+          fi
+          rate=$((100 * CCACHE_HITS / CCACHE_TOTAL))
+          echo "Compiler cache: $CCACHE_HITS hits of $CCACHE_TOTAL ($rate %)."
+          if [ "$rate" -lt 50 ]; then echo "::warning title=ccache::Only $rate % of the compilations hit the cache ($CCACHE_HITS of $CCACHE_TOTAL)."; fi
   build:
     runs-on: ubuntu-latest
     container: espressif/idf:v6.0.2
