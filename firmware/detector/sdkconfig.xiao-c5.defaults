@@ -6,3 +6,7 @@
 # partitions.flightlog.csv (deleted) and fails to build: delete it once; ESP-IDF
 # never reapplies these defaults to an existing sdkconfig.
 CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+# The XIAO header does not break out GPIO6: the link moves to the labelled
+# D6 (TX, GPIO11) / D7 (RX, GPIO12), free since the dump engine uses no GPIO.
+CONFIG_LETZTIMER_LINK_TX_GPIO=11
+CONFIG_LETZTIMER_LINK_RX_GPIO=12
