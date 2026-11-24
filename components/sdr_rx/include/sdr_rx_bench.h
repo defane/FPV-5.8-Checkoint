@@ -1,11 +1,11 @@
-/* sdr_rx bench API: what the console benches (components/checkpoint) use beyond sdr_rx.h.
+/* sdr_rx bench API: what the console benches (components/letztimer) use beyond sdr_rx.h.
  * [scan] only, and never during production: every call here runs in the scan task, between
  * sdr_rx_step calls, and leaves the engine for the next sdr_rx_step to pick up (it re-tunes
  * the hop's LO first). End a bench with sdr_bench_set_tune_method(SDR_TUNE_PLL) and
  * sdr_bench_set_plan(SDR_PLAN_PAIRS), which also resets the IQ states. GPL-3.0-only. */
 #pragma once
 #include "sdr_rx.h"
-#include "sdr_plan.h"                 /* public (include/), so components/checkpoint can use sdr_plan_t */
+#include "sdr_plan.h"                 /* public (include/), so components/letztimer can use sdr_plan_t */
 typedef enum { SDR_TUNE_PLL = 0, SDR_TUNE_FULL = 1 } sdr_tune_method_t;
 typedef struct {                      /* a view of the last psd; valid until the next sdr_bench_psd/step */
     const uint32_t *p; const uint8_t *valid; float scale, enbw_bins, dc_i, dc_q;

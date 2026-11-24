@@ -1,4 +1,4 @@
-# FPV 5.8 Checkpoint detector (ESP32-C5): the sdr_rx engine (PHY I/Q dump snapshots, one LO per
+# Lëtz Timer detector (ESP32-C5): the sdr_rx engine (PHY I/Q dump snapshots, one LO per
 # two channels), pass detection, UART link to the bridge. Settings partly after widscan58 a9fff97
 # firmware/sdkconfig.defaults (itself derived from esp-sdr), GPL-3.0-or-later.
 # Run tools/fw.sh clean after editing: ESP-IDF never reapplies the defaults.

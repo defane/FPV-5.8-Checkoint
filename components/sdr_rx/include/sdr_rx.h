@@ -14,7 +14,7 @@
  * ADC-rate/RX-filter stage. Rate: 80 MS/s. Size: 256 words per capture (3.2 us). Ownership:
  * CPU-polled, no DMA, no ring, no DAC. Word format: I bits 0-9, Q bits 10-19, signed.
  *
- * Threads: functions marked [scan] are for the one task that owns the engine (the checkpoint
+ * Threads: functions marked [scan] are for the one task that owns the engine (the LetzTimer
  * scan task); [any] may be called from any task. GPL-3.0-only. */
 #pragma once
 #include <stdbool.h>

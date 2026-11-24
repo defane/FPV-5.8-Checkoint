@@ -1,4 +1,4 @@
-/* Host test of the checkpoint pass detector (components/pass_detector) on
+/* Host test of the LetzTimer pass detector (components/pass_detector) on
  * synthetic C/N traces sampled at 20 Hz, like the firmware's 50 ms tick.
  *
  *   cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/pass_detector/include \

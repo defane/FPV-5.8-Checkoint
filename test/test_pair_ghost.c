@@ -3,7 +3,7 @@
  * +18 MHz; optionally a second one on R5, -19 MHz; receiver noise; a raw I/Q imbalance of 27.8 dB,
  * the board's boot verify at that LO; DC; each path rounded and clipped to the 10-bit rails) goes
  * through psd_compute, sdr_level_scale_q8 and sdr_band_level_qdb exactly as sdr_rx_step calls them,
- * then into the scan detector, fed one reading at a time (cp_scan.c before the guard) and through
+ * then into the scan detector, fed one reading at a time (lt_scan.c before the guard) and through
  * sd_feed_hop. The other six channels read Gaussian floor readings.
  * What it shows (a model, not the board):
  *   - a 25 mW VTX swept past the antenna by hand, 15 cm at its closest, 1 m/s (the bench's ghosts:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Checkpoint coin sound: assets/coin_source.mp3 -> raw PCM for the firmware.
+"""LetzTimer coin sound: assets/coin_source.mp3 -> raw PCM for the firmware.
 
 Output: components/audio_player/sounds/coin.pcm, signed 16-bit little-endian,
 mono, 22050 Hz, no header (embedded with EMBED_FILES). Steps, all in ffmpeg:

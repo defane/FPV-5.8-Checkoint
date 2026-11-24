@@ -85,7 +85,7 @@ BOOT_DONE = ("SDR ready",)
 BOOT_FAILED = ("SDR init failed", "BOOT failed")
 BOOT_BANNER = ("rst:0x",)
 CRASH = ("Guru Meditation", "ESP_ERROR_CHECK failed", "abort() was called", "task_wdt")
-T_DONE = ("CHECKPOINT source=",)   # the last line T prints
+T_DONE = ("LETZTIMER source=",)   # the last line T prints
 
 
 def esptool_cmd(port, baud, args_file="flash_args"):

@@ -7,7 +7,7 @@ master ([fleet.md](fleet.md)).
 
 ## No amplifier, no LED
 
-`components/checkpoint` only reports passes; it has no audio or LED code. The
+`components/letztimer` only reports passes; it has no audio or LED code. The
 detector builds only its `main` component's dependency closure
 (`set(COMPONENTS main)` in `firmware/detector/CMakeLists.txt`), so neither
 `audio_player` nor `status_led` is in its image.

@@ -50,7 +50,7 @@ ORDER = "1+2:3+4:5+6:7+8"
 
 def sat_word(r0, decim, sat):
     """The row's saturated word: per hop, its captures within one of sat's (hop, t0_s, t1_s), 15 at
-    most, hop 0 in the top digit (cp_bench.c)."""
+    most, hop 0 in the top digit (lt_bench.c)."""
     word = 0
     for hop in range(4):
         n = sum(1 for r in range(r0, r0 + decim) for h, t0, t1 in sat

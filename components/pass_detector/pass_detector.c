@@ -1,4 +1,4 @@
-/* Checkpoint pass detector (pass_detector.h). */
+/* LetzTimer pass detector (pass_detector.h). */
 #include "pass_detector.h"
 #include <string.h>
 

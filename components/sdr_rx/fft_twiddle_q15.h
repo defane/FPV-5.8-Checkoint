@@ -2,9 +2,9 @@
  * W_1024^k = exp(-2*pi*i*k/1024) in Q15 (x32767), k = 0..767: re, im pairs.
  * Its generator, widscan58 tools/gen_twiddle.py, is not ported.
  * SPDX-License-Identifier: GPL-3.0-or-later
- * Ported to FPV 5.8 Checkpoint from widscan58 by CapnBry (https://github.com/CapnBry/widscan58),
+ * Ported to Lëtz Timer from widscan58 by CapnBry (https://github.com/CapnBry/widscan58),
  * commit a9fff97, firmware/src/dsp/fft_twiddle_q15.h.
- * Changes for FPV 5.8 Checkpoint: none (verbatim table).
+ * Changes for Lëtz Timer: none (verbatim table).
  * This file keeps its GPL-3.0-or-later notice; the repository as a whole is GPL-3.0-only. */
 #pragma once
 #include <stdint.h>

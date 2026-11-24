@@ -6,9 +6,9 @@
  * bin sum into band power. The per-bin work is integer (the C5 has no FPU);
  * floats appear only once per channel.
  * SPDX-License-Identifier: GPL-3.0-or-later
- * Ported to FPV 5.8 Checkpoint from widscan58 by CapnBry (https://github.com/CapnBry/widscan58),
+ * Ported to Lëtz Timer from widscan58 by CapnBry (https://github.com/CapnBry/widscan58),
  * commit a9fff97, firmware/src/scan/metrics.h.
- * Changes for FPV 5.8 Checkpoint: only the log tables, metrics_code_q8, metrics_db and the band
+ * Changes for Lëtz Timer: only the log tables, metrics_code_q8, metrics_db and the band
  * level of metrics_level (RSSI only), on a precomputed bin window and in signed 0.25 dB codes
  * without the byte code's +255 (sdr_band_level_qdb); no metrics_channel, averages, centroid,
  * OBW, floor, percentile or SNR.

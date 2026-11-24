@@ -1,8 +1,8 @@
 /* Enabled channels -> list of LO hops. GPL-3.0-or-later.
  * SPDX-License-Identifier: GPL-3.0-or-later
- * Ported to FPV 5.8 Checkpoint from widscan58 by CapnBry (https://github.com/CapnBry/widscan58),
+ * Ported to Lëtz Timer from widscan58 by CapnBry (https://github.com/CapnBry/widscan58),
  * commit a9fff97, firmware/src/scan/planner.h.
- * Changes for FPV 5.8 Checkpoint: no band profile, ISM plan or enable mask (a config struct
+ * Changes for Lëtz Timer: no band profile, ISM plan or enable mask (a config struct
  * carries the c5-race span/offset/step of profile.c); each channel's FFT bin window precomputed.
  * This file keeps its GPL-3.0-or-later notice; the repository as a whole is GPL-3.0-only.
  *

@@ -1,0 +1,165 @@
+menu "LetzTimer antenna"
+
+    config LETZTIMER_ANTENNA_IPEX
+        bool "Boot on the IPEX antenna (Waveshare ESP32-C5-Zero only)"
+        default n
+        help
+            Drives GPIO 26 high before the radio starts: on the C5-Zero it is the
+            antenna switch, high for the IPEX connector, low for the onboard
+            antenna. Off, the firmware leaves GPIO 26 alone and the board stays on
+            its default, the onboard antenna. Only for a C5-Zero: GPIO 26 is
+            something else, or nothing, on other boards. The boot calibration and
+            K i's automatic recalibration see that antenna: on the bench, K then i
+            switches the antenna at run time and recalibrates every LO on it. A
+            boot with nothing on the IPEX connector is deaf.
+
+endmenu
+
+menu "LetzTimer detector"
+
+    config LETZTIMER_PAIR_GUARD
+        bool "Hold a pair's dominated reading on saturated captures"
+        default y
+        help
+            One capture carries two Raceband channels, each in the other's image
+            window. A drone close enough to drive the ADC into its rails makes the
+            partner channel read the rails' products (host model: a median 23-29
+            dB under the strong channel), which rang phantom passes on the bench
+            (a 25 mW VTX within about 30 cm of the onboard antenna at gain 40).
+
+            On, a saturated capture's reading of a channel whose smoothed level
+            stands more than 15 dB under its partner's is held, not fed. After a
+            jump into the rails (a VTX switched on or armed beside the antenna,
+            its average still low), the source is the channel whose last 3
+            readings show it (their median), and its partner is held until the
+            run ends. A hover (a run of saturated captures over 150 ms) holds
+            30 ms longer after each one. A channel held over 0.5 s starts
+            again from the level it comes back at, once its fresh average has
+            settled (0.3 s of readings at the default alpha, ringing nothing
+            meanwhile; a shorter hold pauses it): armed under the release;
+            over it, relatively armed there, or in
+            COOLDOWN until it falls under the release with the re-arm
+            drop at 0 (LETZTIMER_REARM_DROP_DB, K e/E). Off, every reading is fed as it
+            comes, the phantoms included. The rules:
+            docs/detector.md, "Pair ghost guard", and scan_detector.h.
+
+            Its limits:
+            - The partner channel is blind while the strong one clips: about
+              80 ms for 600 mW passing 0.3 m away at 20 m/s (host model). A real
+              pass on it inside that window is timed from what follows: up to
+              about 70 ms off, and lost when it is 45 dB weaker (host model).
+            - The blind window grows as 1/speed: about 310 ms at 5 m/s, where
+              a partner 20-30 dB weaker crossing at the same instant rang on
+              time in 5 runs of 20 and 150-170 ms late in the others (host
+              model).
+            - It grows with the link gain too: the IPEX connector with a better
+              antenna, or a directional one, clips from further out (about
+              870 ms at 5 m/s with about 8 dB more, host model).
+            - A jump names its source only while the partner reads more than
+              15 dB under the source on the rails, about 40 dB over the floor
+              at most. A partner higher than that (a quad left powered about
+              1 m from the antenna while another is armed beside it) leaves the
+              source held for its whole run: its own onset rings nothing, the
+              partner's laps are kept (host model).
+            - Two drones at the gate together: a drone that crosses close while
+              another one's slow pass clips can be named the source partway
+              through it. The clipping drone is then held to the end of its run
+              and loses its pass when over 0.5 s of it is left (host model).
+            - It keys on the saturated flag only: a compression before the
+              ADC rails (no rail hit, no flag) is not covered. Bench B11
+              checks whether the board does that.
+            - Held for 1 s (a drone parked by the gate), the channel reads
+              unknown in STATS.
+            - The IPEX build (detector-ipex) keeps this default for now: decide
+              its default after bench B9 measures the IPEX link.
+
+    config LETZTIMER_REARM_DROP_DB
+        int "Relative re-arm: default drop under the last pass, dB (0 = off)"
+        range 0 40
+        default 16
+        help
+            The first boot's value of the drop D, a detector parameter like the
+            others: the console (K e/E, 1 dB steps, 0 to 40) and the bridges'
+            CONFIG_SET (link_proto's rearm_db_x10) change it, and the C5 saves it
+            in NVS with them. A record saved before D was (prefs version 3) and
+            K 0 (defaults) take this value too. The boot line (SDR ready ...
+            rearm_db=) and T show the value in effect.
+
+            A channel re-arms after a pass once the refractory period is over and
+            its level is back under active_db - hysteresis_db. A drone that stays
+            well up between laps never gets there: a 25 mW VTX held 3 m away
+            indoors reads about +30 dB (bench), a 600 mW drone 30-80 m away
+            outdoors 15-23 dB (host model), so every lap after the first is lost.
+
+            With a drop D over 0, the channel also re-arms once the refractory
+            period is over and its 1 s average stands D under the highest level
+            since the pass. The next pass must then rise D over the lowest 1 s
+            average since that re-arm, as well as pass active_db and min_peak_db.
+            Falling under the release ends it: the channel is then armed as with 0.
+            0 is the old behaviour, to the bit (host test). The rule and the
+            simulation: docs/detector.md, "Relative re-arm".
+
+            The default is the host simulation's: total lap errors (missed and
+            extra) are lowest for D 14-15 with mild fading and 16-18 with rough
+            fading, and 16 is the smallest D that rings no extra pass on the
+            bench's recording of a VTX held at 3 m. Its limits (host model):
+            - A lap whose gate pass stands less than about D + 2 dB over the far
+              side of the track is mostly lost: an indoor 25 mW track with the
+              antenna 1-3 m from the line, a 600 mW drone indoors, the IPEX
+              antenna (its gate pass reaches the ADC ceiling sooner). Put the
+              antenna at the gate (the drone within 1 m) or lower D.
+            - A drone parked near the gate rings an extra pass when its level
+              swings by D and back: at D 16, 0.03 per 10 s hover, none for a
+              still drone (a crash, the start pad), but about 1 per 30 s on the
+              pad if it wobbles like the bench's hand-held VTX (5.3 dB); a
+              lower D rings more (D 12: 0.4-0.6 per hover).
+            - A track that comes back within a few metres of the gate can ring
+              there too, as the old re-arm would if the drone fell under the
+              release.
+
+endmenu
+
+menu "LetzTimer C5<->C3 link"
+
+    config LETZTIMER_LINK_ENABLE
+        bool "Enable the UART link to the C3 config/telemetry bridge"
+        default y
+        help
+            Report pass events and stats to, and accept detector configuration
+            from, the bridge (a C3 node or the C6 master) over UART. With it
+            off, passes appear only as PASS lines on the console, which is then
+            the only way to tune the detector (it has no local output).
+
+    config LETZTIMER_LINK_UART_NUM
+        int "UART controller number"
+        depends on LETZTIMER_LINK_ENABLE
+        default 1
+        range 0 1
+        help
+            The console is on USB-Serial-JTAG, so UART1 (or UART0) is free.
+
+    config LETZTIMER_LINK_TX_GPIO
+        int "Link UART TX GPIO (to the C3 RX)"
+        depends on LETZTIMER_LINK_ENABLE
+        default 6
+        help
+            GPIO 6 (TX) and 8 (RX) are header pins on the C5-Zero (GPIO 15 is
+            not broken out). GPIO 8 is free on the detector (the dump engine
+            uses no GPIO). See the GPIO map in CLAUDE.md.
+
+    config LETZTIMER_LINK_RX_GPIO
+        int "Link UART RX GPIO (from the C3 TX)"
+        depends on LETZTIMER_LINK_ENABLE
+        default 8
+
+    config LETZTIMER_LINK_BAUD
+        int "Link UART baud rate"
+        depends on LETZTIMER_LINK_ENABLE
+        default 115200
+
+    config LETZTIMER_LINK_STATS_MS
+        int "Stats report period (ms)"
+        depends on LETZTIMER_LINK_ENABLE
+        default 1000
+
+endmenu

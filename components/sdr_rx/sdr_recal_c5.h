@@ -1,8 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
- * Ported to FPV 5.8 Checkpoint from widscan58 by CapnBry (https://github.com/CapnBry/widscan58),
+ * Ported to Lëtz Timer from widscan58 by CapnBry (https://github.com/CapnBry/widscan58),
  * commit a9fff97, firmware/src/radio/c5/recal_c5.h. widscan58 derived it from esp-sdr by ESPARGOS
  * (https://github.com/ESPARGOS/esp-sdr), commit a8eaac1, main/common/rx_recalibration.c.
- * Changes for FPV 5.8 Checkpoint: c5_foreign_dc_count, c5_cal_forget and C5_CAL_MEM_BYTES added.
+ * Changes for Lëtz Timer: c5_foreign_dc_count, c5_cal_forget and C5_CAL_MEM_BYTES added.
  * This file keeps its GPL-3.0-or-later notice; the repository as a whole is GPL-3.0-only. */
 #pragma once
 #include <stdbool.h>

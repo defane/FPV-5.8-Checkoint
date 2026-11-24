@@ -1,4 +1,4 @@
-# FPV 5.8 Checkpoint — global build/flash helper.
+# Lëtz Timer — global build/flash helper.
 # All logic lives in tools/fw.sh so the recipes stay single-line and portable
 # (works with stock macOS GNU make 3.81 — no .ONESHELL needed).
 #

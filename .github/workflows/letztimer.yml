@@ -1,0 +1,296 @@
+name: Lëtz Timer Build
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'firmware/**'
+      - 'components/**'
+      - 'test/**'
+      - 'tools/**'
+      - 'VERSION'
+      - '!**/*.md'
+      - '.github/workflows/letztimer.yml'
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'firmware/**'
+      - 'components/**'
+      - 'test/**'
+      - 'tools/**'
+      - 'VERSION'
+      - '!**/*.md'
+      - '.github/workflows/letztimer.yml'
+permissions:
+  contents: read
+concurrency:
+  group: letztimer-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  tests:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v4   # test/*.mjs
+        with:
+          node-version: 20
+      - name: Host tests (C detector, protocols, timing, web auth; JS pages)
+        shell: bash
+        working-directory: test
+        run: |
+          set -euo pipefail   # each compile on its own line: in "cc && ./t" a failed cc did not stop -e
+          # run CMD...: the test's last line when it passes, its whole output and a FAILED line when it does not.
+          run() { "$@" > /tmp/out.txt 2>&1 || { cat /tmp/out.txt; echo "FAILED: $*"; return 1; }; tail -1 /tmp/out.txt; }
+          # LetzTimer audio helpers (components/audio_player): pitch table, resampler, gain.
+          cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/audio_player/include test_audio_resample.c -lm -o /tmp/test_audio_resample
+          run /tmp/test_audio_resample
+          # LetzTimer pass detector (components/pass_detector) on synthetic C/N traces.
+          cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/pass_detector/include test_pass_detector.c \
+            ../components/pass_detector/pass_detector.c -lm -o /tmp/test_pass_detector
+          run /tmp/test_pass_detector
+          # C5<->C3 UART protocol (components/link_proto): framing, CRC, resync.
+          cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/link_proto/include test_link_proto.c \
+            ../components/link_proto/link_proto.c -o /tmp/test_link_proto
+          run /tmp/test_link_proto
+          # C6<->C3 ESP-NOW protocol (components/fleet_proto).
+          cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/fleet_proto/include \
+            -I../components/link_proto/include test_fleet_proto.c \
+            ../components/fleet_proto/fleet_proto.c ../components/link_proto/link_proto.c -o /tmp/test_fleet_proto
+          run /tmp/test_fleet_proto
+          # Race timing engine (components/race_timing): laps/sectors per channel.
+          cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/pass_detector/include test_scan_detector.c \
+            ../components/pass_detector/scan_detector.c ../components/pass_detector/pass_detector.c -lm -o /tmp/test_scan_detector
+          run /tmp/test_scan_detector
+          # The passage calibration's histograms and thresholds (components/pass_detector/pass_calib.c).
+          cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/pass_detector/include test_pass_calib.c \
+            ../components/pass_detector/pass_calib.c ../components/pass_detector/pass_detector.c -lm -o /tmp/test_pass_calib
+          run /tmp/test_pass_calib
+          cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/race_timing/include test_race_timing.c \
+            ../components/race_timing/race_timing.c -o /tmp/test_race_timing
+          run /tmp/test_race_timing
+          # Status LED core (components/status_led): state -> colour/pattern.
+          cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/status_led/include test_status_led.c \
+            ../components/status_led/status_led.c -o /tmp/test_status_led
+          run /tmp/test_status_led
+          # Hop bench statistics (components/letztimer/hop_stats.h).
+          cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/letztimer test_hop_stats.c -lm -o /tmp/test_hop_stats
+          run /tmp/test_hop_stats
+          # sdr_rx engine (components/sdr_rx): FFT, PSD, band levels, IQ correction; the LO planner.
+          cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/sdr_rx -I../components/sdr_rx/include test_sdr_dsp.c \
+            ../components/sdr_rx/sdr_psd.c ../components/sdr_rx/sdr_level.c -lm -o /tmp/test_sdr_dsp
+          run /tmp/test_sdr_dsp
+          cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/sdr_rx -I../components/sdr_rx/include test_sdr_plan.c \
+            ../components/sdr_rx/sdr_plan.c -o /tmp/test_sdr_plan
+          run /tmp/test_sdr_plan
+          # The PAIRS clipping ghost end to end (real DSP) and the pair guard of components/pass_detector.
+          cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/pass_detector/include -I../components/sdr_rx \
+            -I../components/sdr_rx/include test_pair_ghost.c ../components/pass_detector/scan_detector.c \
+            ../components/pass_detector/pass_detector.c ../components/sdr_rx/sdr_psd.c ../components/sdr_rx/sdr_level.c \
+            ../components/sdr_rx/sdr_plan.c -lm -o /tmp/test_pair_ghost
+          run /tmp/test_pair_ghost
+          # Signed admin requests (components/web_auth): sessions, replay, HMAC; then the page side.
+          cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/web_auth/include test_web_auth.c \
+            ../components/web_auth/web_auth.c -o /tmp/test_web_auth
+          run /tmp/test_web_auth
+          run node test_web_auth.mjs
+          run node test_web_bubble.mjs   # the C3/C6 pages' info bubbles (popover notes)
+      - name: Python tests (web mock, boards, scan analysis, flash tool)
+        shell: bash
+        working-directory: test
+        run: |
+          set -euo pipefail
+          run() { "$@" > /tmp/out.txt 2>&1 || { cat /tmp/out.txt; echo "FAILED: $*"; return 1; }; tail -1 /tmp/out.txt; }
+          run python3 test_web_mock.py      # tools/web_mock.py and the pages against the firmware's /api, buffers, CSP
+          run python3 test_pcb.py           # hardware/ boards against the firmware's pin defaults
+          run python3 test_scan_analyze.py  # tools/scan_analyze.py on synthetic recordings
+          run python3 test_flash_tool.py    # tools/flash.py: download key, --check, logs
+  build-psram:
+    runs-on: ubuntu-latest
+    container: espressif/idf:v6.0.2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Set up the compiler cache
+        shell: bash
+        run: |
+          # ccache keeps the compiled objects between runs: only what a commit changed is compiled again.
+          # compiler_check=content because ESP-IDF rewrites build/specs/picolibc.specs at every configure and
+          # ccache would hash its date (every file would miss); the build directory is the same on every run.
+          command -v ccache >/dev/null || { apt-get update -qq && apt-get install -y -qq ccache; }
+          {
+            echo "IDF_CCACHE_ENABLE=1"
+            echo "CCACHE_DIR=$GITHUB_WORKSPACE/.ccache"
+            echo "CCACHE_COMPILERCHECK=content"
+            echo "CCACHE_MAXSIZE=400M"
+          } >> "$GITHUB_ENV"
+      - name: Restore the compiler cache
+        id: ccache_restore
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: letztimer-ccache-${{ github.job }}-${{ github.event.pull_request.head.sha || github.sha }}
+          restore-keys: letztimer-ccache-${{ github.job }}-
+      # The counters live in the cache: zeroed, they count this run alone.
+      - name: Zero the compiler cache statistics
+        shell: bash
+        run: ccache -z
+      - name: Build opt-in XIAO PSRAM image
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh"
+          cd firmware/detector
+          idf.py -B build-psram -DSDKCONFIG=sdkconfig.psram \
+            "-DSDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.psram.defaults" build
+      - name: Compiler cache statistics
+        if: always()
+        shell: bash
+        run: |
+          ccache -s || true
+          s=$(ccache --print-stats 2>/dev/null || true)
+          hits=$(awk -F'\t' '$1=="direct_cache_hit"||$1=="preprocessed_cache_hit"{n+=$2} END{print n+0}' <<<"$s")
+          miss=$(awk -F'\t' '$1=="cache_miss"{n+=$2} END{print n+0}' <<<"$s")
+          echo "CCACHE_HITS=$hits" >> "$GITHUB_ENV"
+          echo "CCACHE_TOTAL=$((hits + miss))" >> "$GITHUB_ENV"
+          echo "### Compiler cache (job $GITHUB_JOB): $hits hits of $((hits + miss)) compilations this run" >> "$GITHUB_STEP_SUMMARY"
+      - name: Save the compiler cache
+        if: always() && steps.ccache_restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: ${{ steps.ccache_restore.outputs.cache-primary-key }}
+      - name: Check the compiler cache hits
+        shell: bash
+        env:
+          CACHE_RESTORED: "${{ steps.ccache_restore.outputs.cache-matched-key != '' }}"
+        run: |
+          # A cache was restored but nothing hit it: the cache is broken (a changed build path, compiler_check, the
+          # compiler, or a configuration every object depends on). It is saved above first, so the next run starts warm.
+          if [ "$CACHE_RESTORED" != "true" ]; then echo "No cache was restored (a cold run): nothing to check."; exit 0; fi
+          if [ "${CCACHE_TOTAL:-0}" -lt 50 ]; then echo "Only ${CCACHE_TOTAL:-0} compilations: too few to judge."; exit 0; fi
+          if [ "${CCACHE_HITS:-0}" -eq 0 ]; then
+            echo "::error title=ccache::A cache was restored but none of the $CCACHE_TOTAL compilations hit it. Look at the build path, CCACHE_COMPILERCHECK, the ESP-IDF image or sdkconfig; the new cache is saved, so a re-run shows whether it was a one-off."
+            exit 1
+          fi
+          rate=$((100 * CCACHE_HITS / CCACHE_TOTAL))
+          echo "Compiler cache: $CCACHE_HITS hits of $CCACHE_TOTAL ($rate %)."
+          if [ "$rate" -lt 50 ]; then echo "::warning title=ccache::Only $rate % of the compilations hit the cache ($CCACHE_HITS of $CCACHE_TOTAL)."; fi
+  build:
+    runs-on: ubuntu-latest
+    container: espressif/idf:v6.0.2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Resolve version
+        id: version
+        shell: bash
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          # The repository's VERSION file (1.0.0): main builds are 1.0.<run number>, PR builds 1.0.0-pr.<number>.
+          V=$(head -n1 VERSION)
+          if [[ -n "$PR_NUMBER" ]]; then
+            echo "version=${V}-pr.${PR_NUMBER}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${V%.*}.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Set up the compiler cache
+        shell: bash
+        run: |
+          # ccache keeps the compiled objects between runs: only what a commit changed is compiled again.
+          # compiler_check=content because ESP-IDF rewrites build/specs/picolibc.specs at every configure and
+          # ccache would hash its date (every file would miss); the build directory is the same on every run.
+          command -v ccache >/dev/null || { apt-get update -qq && apt-get install -y -qq ccache; }
+          {
+            echo "IDF_CCACHE_ENABLE=1"
+            echo "CCACHE_DIR=$GITHUB_WORKSPACE/.ccache"
+            echo "CCACHE_COMPILERCHECK=content"
+            echo "CCACHE_MAXSIZE=400M"
+          } >> "$GITHUB_ENV"
+      - name: Restore the compiler cache
+        id: ccache_restore
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: letztimer-ccache-${{ github.job }}-${{ github.event.pull_request.head.sha || github.sha }}
+          restore-keys: letztimer-ccache-${{ github.job }}-
+      # The counters live in the cache: zeroed, they count this run alone.
+      - name: Zero the compiler cache statistics
+        shell: bash
+        run: ccache -z
+      - name: Build LetzTimer C5 detector
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh"
+          cd firmware/detector
+          idf.py -DLETZTIMER_VERSION="${{ steps.version.outputs.version }}" \
+            -DLETZTIMER_COMMIT="${{ github.event.pull_request.head.sha || github.sha }}" build
+      - name: Build LetzTimer C3 bridge
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh"
+          cd firmware/node
+          idf.py build
+      - name: Build LetzTimer C6 master
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh"
+          cd firmware/master
+          idf.py build
+      - name: Compiler cache statistics
+        if: always()
+        shell: bash
+        run: |
+          ccache -s || true
+          s=$(ccache --print-stats 2>/dev/null || true)
+          hits=$(awk -F'\t' '$1=="direct_cache_hit"||$1=="preprocessed_cache_hit"{n+=$2} END{print n+0}' <<<"$s")
+          miss=$(awk -F'\t' '$1=="cache_miss"{n+=$2} END{print n+0}' <<<"$s")
+          echo "CCACHE_HITS=$hits" >> "$GITHUB_ENV"
+          echo "CCACHE_TOTAL=$((hits + miss))" >> "$GITHUB_ENV"
+          echo "### Compiler cache (job $GITHUB_JOB): $hits hits of $((hits + miss)) compilations this run" >> "$GITHUB_STEP_SUMMARY"
+      - name: Save the compiler cache
+        if: always() && steps.ccache_restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: ${{ steps.ccache_restore.outputs.cache-primary-key }}
+      - name: Check the compiler cache hits
+        shell: bash
+        env:
+          CACHE_RESTORED: "${{ steps.ccache_restore.outputs.cache-matched-key != '' }}"
+        run: |
+          # A cache was restored but nothing hit it: the cache is broken (a changed build path, compiler_check, the
+          # compiler, or a configuration every object depends on). It is saved above first, so the next run starts warm.
+          if [ "$CACHE_RESTORED" != "true" ]; then echo "No cache was restored (a cold run): nothing to check."; exit 0; fi
+          if [ "${CCACHE_TOTAL:-0}" -lt 50 ]; then echo "Only ${CCACHE_TOTAL:-0} compilations: too few to judge."; exit 0; fi
+          if [ "${CCACHE_HITS:-0}" -eq 0 ]; then
+            echo "::error title=ccache::A cache was restored but none of the $CCACHE_TOTAL compilations hit it. Look at the build path, CCACHE_COMPILERCHECK, the ESP-IDF image or sdkconfig; the new cache is saved, so a re-run shows whether it was a one-off."
+            exit 1
+          fi
+          rate=$((100 * CCACHE_HITS / CCACHE_TOTAL))
+          echo "Compiler cache: $CCACHE_HITS hits of $CCACHE_TOTAL ($rate %)."
+          if [ "$rate" -lt 50 ]; then echo "::warning title=ccache::Only $rate % of the compilations hit the cache ($CCACHE_HITS of $CCACHE_TOTAL)."; fi
+      - name: Package firmware for web flashing
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh"
+          mkdir -p release
+          cp firmware/detector/build/detector-c5.bin firmware/detector/build/bootloader/bootloader.bin \
+             firmware/detector/build/partition_table/partition-table.bin firmware/detector/build/flasher_args.json release/
+          # The build's own flash settings and offsets (flash_args: 4 MB for the C5-Zero); a size
+          # written into the merged bootloader header that the chip lacks stops the app at boot.
+          ( cd firmware/detector/build && esptool.py --chip esp32c5 merge_bin \
+              -o "$GITHUB_WORKSPACE/release/detector-c5_merged.bin" @flash_args )
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          printf '%s\n' '${{ github.event.pull_request.head.sha || github.sha }}' > release/COMMIT
+          printf '%s\n' '${{ steps.version.outputs.version }}' > release/VERSION
+          cd release && sha256sum * > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: letztimer-${{ github.event.pull_request.head.sha || github.sha }}
+          if-no-files-found: error
+          path: release/

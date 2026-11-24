@@ -206,7 +206,7 @@ class ConsoleTest(unittest.TestCase):
             path = Path(d) / "bench.log"
             with open(path, "w") as log:
                 c = flash.Console(io.StringIO(), log)
-                # A K S recording (cp_bench.c), split across reads as USB delivers it.
+                # A K S recording (lt_bench.c), split across reads as USB delivers it.
                 c.feed("SCANDUMP begin rotations=28 kept=2 kept_s=0.1 decim=14 format=qdb order=R1+R2,R3+R4,"
                        "R5+R6,R7+R8 gain=40 rot_us=1961 fw=x\r\nSCAN,27454,-240,-236,-238,-241,-239,-237,-240,-238\r\n")
                 c.feed("SCAN,54908,-120,-236,-32768,-241,-239,-237,-240,-238\nSCANDUMP end rot")
@@ -231,7 +231,7 @@ class ConsoleTest(unittest.TestCase):
 
 ELF = "ab" * 32
 # The detector's boot and T lines, after the printf formats of firmware/detector/main/main.c,
-# components/checkpoint and components/sdr_rx (no board log of the sdr_rx engine yet: the
+# components/letztimer and components/sdr_rx (no board log of the sdr_rx engine yet: the
 # values are illustrative).
 GOOD = [
     "ESP-ROM:esp32c5-eco2-20250121",
@@ -239,8 +239,8 @@ GOOD = [
     f'FIRMWARE id=1.0.0-dev+f5a6999c0ffe version=1.0.0-dev commit=f5a6999c0ffee elf_sha256={ELF} '
     'built="Nov 15 2026 10:00:00" idf=v6.0.2 engine=sdr_rx chip_rev=v1.0',
     "BOOT_TIMING radio_ms=420",
-    "CHECKPOINT prefs=defaults gain=40",
-    "CHECKPOINT link=on uart=1 tx=6 rx=8 baud=115200",
+    "LETZTIMER prefs=defaults gain=40",
+    "LETZTIMER link=on uart=1 tx=6 rx=8 baud=115200",
     "SDR cal lo=5677 ms=44 irr_db=47.9 verify_gain=60 tries=1 dc=6 sat=0",
     "SDR cal lo=5751 ms=43 irr_db=51.2 verify_gain=60 tries=1 dc=5 sat=0",
     "SDR cal lo=5825 ms=43 irr_db=49.6 verify_gain=60 tries=1 dc=7 sat=0",
@@ -254,7 +254,7 @@ GOOD = [
     "SDR plan=pairs lo=5677,5751,5825,5899 gain=40/83 rot_hz_x10=5100 rot_us=1961/2350 tune_us=225/310 "
     "cap_us=24 wait_us=1 dsp_us=237/280 faults=0 timeout=0 short=0 overrun=0 dsp=0 stale=0 recal=4 "
     "foreign_dc=0 dc_max=7 iq_bad=0x0 cal_needed=0 calibrating=0 init_failed=0 phy=1200,abcdef0,Oct 1 2025",
-    "CHECKPOINT source=sdr live=1 learning=0 bench=0 engine_failed=0 stalled=0 stalls=0 gain=40 top=R1 "
+    "LETZTIMER source=sdr live=1 learning=0 bench=0 engine_failed=0 stalled=0 stalls=0 gain=40 top=R1 "
     "rise_db=0.3 state=IDLE rotations=2450 readings=19600 passes=0 alpha=0.25 tau_ms=60.8 active_db=8.0 "
     "hyst_db=3.0 drop_db=4.0 min_peak_db=10.0 refractory_ms=1000 stale_ms=1000",
 ]

@@ -4,13 +4,13 @@
  * main/common/burst_gain.h (https://github.com/ESPARGOS/esp-sdr),
  * GPL-3.0-or-later. The PLL-only retune (radio_tune) is our own.
  * SPDX-License-Identifier: GPL-3.0-or-later
- * Ported to FPV 5.8 Checkpoint from widscan58 by CapnBry (https://github.com/CapnBry/widscan58),
+ * Ported to Lëtz Timer from widscan58 by CapnBry (https://github.com/CapnBry/widscan58),
  * commit a9fff97, firmware/src/radio/c5/radio_c5.c. widscan58 derived it from esp-sdr by ESPARGOS
  * (https://github.com/ESPARGOS/esp-sdr), commit a8eaac1, main/families/c5_c6_c61/receiver.c,
  * main/targets/esp32c5/ and main/common/burst_gain.h.
  * Reboot-to-download sequence after C5VRX-5 rf.c rf_reboot_to_download() (Twotoz and the C5VRX
  * contributors, https://github.com/Twotoz/C5VRX, 6bc9e4b, GPL-3.0-only).
- * Changes for FPV 5.8 Checkpoint: gain forced with libphy phy_force_rx_gain under the PHY lock
+ * Changes for Lëtz Timer: gain forced with libphy phy_force_rx_gain under the PHY lock
  * (requested code kept, clamped per apply; no librftest), CACHE-only recalibration (5 GHz) with a
  * per-LO recalibration, the bank layout of spec 2.3, radio_capture under the PHY lock with a
  * settle-wait out-param, split errors and a stale check after PHY tracking's recalibration, a

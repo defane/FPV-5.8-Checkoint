@@ -141,7 +141,7 @@ $("login_form").addEventListener("submit", async e => {
 });
 
 // Simple shows what spectators came for, the standings and the results; the choice stays on this device.
-const MODE_KEY = "checkpoint.mode";
+const MODE_KEY = "letztimer.mode";
 function setSimple(simple, save) {
   document.body.classList.toggle("simple", simple);
   $("mode").setAttribute("aria-checked", !simple);

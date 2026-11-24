@@ -1,8 +1,8 @@
 /* Welch PSD from a raw snapshot. GPL-3.0-or-later.
  * SPDX-License-Identifier: GPL-3.0-or-later
- * Ported to FPV 5.8 Checkpoint from widscan58 by CapnBry (https://github.com/CapnBry/widscan58),
+ * Ported to Lëtz Timer from widscan58 by CapnBry (https://github.com/CapnBry/widscan58),
  * commit a9fff97, firmware/src/dsp/psd.h.
- * Changes for FPV 5.8 Checkpoint: the rounded 16-bit radix-4 FFT only (no esp-dsp, no FFT
+ * Changes for Lëtz Timer: the rounded 16-bit radix-4 FFT only (no esp-dsp, no FFT
  * choice), a caller-provided workspace, iq_applied, plain moment sums and their image rejection
  * (psd_moments_add/mean, psd_iq_irr_db), no IQ update from a saturated capture; esp_err.h only on
  * the target (sdr_host.h), so the host tests build it.

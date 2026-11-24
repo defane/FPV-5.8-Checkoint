@@ -47,12 +47,12 @@ def default(path, name):
     return str(re.search(rf"config {name}\b.*?default (\d+)", text, re.S).group(1))
 
 
-C5_TX = default("components/checkpoint/Kconfig", "CHECKPOINT_LINK_TX_GPIO")
-C5_RX = default("components/checkpoint/Kconfig", "CHECKPOINT_LINK_RX_GPIO")
+C5_TX = default("components/letztimer/Kconfig", "LETZTIMER_LINK_TX_GPIO")
+C5_RX = default("components/letztimer/Kconfig", "LETZTIMER_LINK_RX_GPIO")
 BRIDGES = {
-    "checkpoint-node": (default("firmware/node/main/Kconfig.projbuild", "C3_UART_TX_GPIO"),
+    "letztimer-node": (default("firmware/node/main/Kconfig.projbuild", "C3_UART_TX_GPIO"),
                         default("firmware/node/main/Kconfig.projbuild", "C3_UART_RX_GPIO")),
-    "checkpoint-master": (default("firmware/master/main/Kconfig.projbuild", "C6_UART_TX_GPIO"),
+    "letztimer-master": (default("firmware/master/main/Kconfig.projbuild", "C6_UART_TX_GPIO"),
                           default("firmware/master/main/Kconfig.projbuild", "C6_UART_RX_GPIO")),
 }
 IQ_PINS = ["0", "1", "2", "3", "4", "5"]      # the former C5VRX loopback pins, left unconnected
@@ -76,7 +76,7 @@ class Boards(unittest.TestCase):
             self.assert_through_a_resistor(pads, ("U1", C5_RX), ("U2", tx))
 
     def test_amplifier(self):
-        pads = self.boards["checkpoint-master"]
+        pads = self.boards["letztimer-master"]
         kconfig = "firmware/master/main/Kconfig.projbuild"
         for pin, option in (("BCLK", "BCLK"), ("LRC", "WS"), ("DIN", "DOUT"), ("SD", "SD")):
             gpio = default(kconfig, f"C6_AUDIO_{option}_GPIO")
@@ -108,7 +108,7 @@ class Boards(unittest.TestCase):
         with open(ROOT / "hardware/BOM.csv", newline="") as f:
             rows = list(csv.DictReader(f))
         for name, pads in self.boards.items():
-            board = [r for r in rows if r["board"] == name.removeprefix("checkpoint-")]
+            board = [r for r in rows if r["board"] == name.removeprefix("letztimer-")]
             listed = [ref for r in board for ref in r["ref"].split()]
             self.assertEqual(sorted(listed), sorted({ref for ref, _ in pads}), name)
             for r in board:

@@ -1,4 +1,6 @@
-# FPV 5.8 Checkpoint
+# Lëtz Timer
+
+*(technical name: `LetzTimer`; formerly "FPV 5.8 Checkpoint")*
 
 A **"a drone just passed"** platform: a C5 sweeps the 8 Raceband channels and
 detects a drone pass on any of them, and a C6 master times it and plays a coin sound, with a
@@ -59,7 +61,7 @@ request still allows offline guessing, so choose a long random password
 ```
 components/
   sdr_rx/        receive engine (C5 only): dump capture, LO pairs, PSD + IQ correction (pure-C parts host-tested)
-  checkpoint/    the scan task, console and benches, pass detection + the C5<->bridge UART link
+  letztimer/     the scan task, console and benches, pass detection + the C5<->bridge UART link
   pass_detector/ pure-C pass detector and scan detector (host-tested)
   audio_player/  I2S coin-sound player (the C6 speaker in a fleet)
   link_proto/    pure-C C5<->bridge UART protocol (host-tested)
@@ -71,10 +73,10 @@ components/
 firmware/detector/  ESP32-C5 application (RF + detection, report-only)
 firmware/node/      ESP32-C3 node bridge (UART + ESP-NOW relay, degraded Wi-Fi web)
 firmware/master/    ESP32-C6 master (UART + ESP-NOW hub + speaker + admin web + timing)
-docs/            CHECKPOINT.md (index) + detector/no-video-audio/fleet/status-led/bench, wiring-*.svg
+docs/            LETZTIMER.md (index) + detector/no-video-audio/fleet/status-led/bench, wiring-*.svg
 ```
 
-See **[docs/CHECKPOINT.md](docs/CHECKPOINT.md)** for the feature notes, the fleet
+See **[docs/LETZTIMER.md](docs/LETZTIMER.md)** for the feature notes, the fleet
 and the bench procedure, and **[docs/wiring-node.svg](docs/wiring-node.svg)** for
 a gate's wiring (C3 + C5).
 
@@ -98,7 +100,7 @@ To work on the web pages without a board, `make web-master` (<http://127.0.0.1:8
 or `make web-node` (port 8081) runs `tools/web_mock.py`: it serves the real pages from
 disk, so a browser reload shows an edit, no build and no flash. `/api/*` answers like
 the firmware on a simulated race (now and then a drone lingers at a gate, its channel
-framed in cooldown), admin actions take effect (password `checkpoint`) and
+framed in cooldown), admin actions take effect (password `letztimer`) and
 signed requests are checked as on the ESP. `WEB_ARGS` passes its options: `--vtx` (a
 strong carrier on every gate, for the calibration guard; each gate's channel then stays
 in cooldown after its first pass), `--latency 300`, `--host
@@ -142,7 +144,7 @@ cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/status_led/include \
    test_status_led.c ../components/status_led/status_led.c -o /tmp/t && /tmp/t
 cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/web_auth/include \
    test_web_auth.c ../components/web_auth/web_auth.c -o /tmp/t && /tmp/t
-cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/checkpoint \
+cc -O2 -std=c11 -Wall -Wextra -Werror -I../components/letztimer \
    test_hop_stats.c -lm -o /tmp/t && /tmp/t
 node test_web_auth.mjs   # the page side (auth.js), Node 18+
 node test_web_bubble.mjs # the pages' info bubbles: one snippet, mouse, touch and keyboard
@@ -216,7 +218,7 @@ Receive engine (`components/sdr_rx`): **widscan58** by CapnBry —
 `firmware/src/radio/` (`radio.h`; `c5/radio_c5.c`, `recal_c5.c`, `sram_guard.ld`,
 `hot_iram.lf`), `firmware/src/dsp/` (`psd.c`, `fft_r4_sc16.h`, `fft_twiddle_q15.h`) and
 `firmware/src/scan/` (`metrics.c`, `planner.c`, the hop of `scanner.c`); the bench
-methods of `components/checkpoint/cp_bench.c` (tune timing, settle, image rejection,
+methods of `components/letztimer/lt_bench.c` (tune timing, settle, image rejection,
 noise per FFT size) follow its measurement log (`PLAN.md`). Its radio layer is derived
 from **esp-sdr** by ESPARGOS — <https://github.com/ESPARGOS/esp-sdr>, commit `a8eaac1`
 (`main/families/c5_c6_c61/receiver.c`, `main/targets/esp32c5/`,
@@ -228,12 +230,12 @@ History: this project started from **C5VRX** by Twotoz and the C5VRX contributor
 invite on the website), at upstream `6bc9e4b`. The C5VRX-5 receive engine ran the
 detector until issue #2 and is removed (`main` keeps it until a board
 bench validates sdr_rx). Still used from C5VRX-5: the console structure and its
-download-key reboot (`components/checkpoint/cp_console.c`, the reboot of
+download-key reboot (`components/letztimer/lt_console.c`, the reboot of
 `components/sdr_rx/sdr_radio_c5.c`), the firmware id and NVS helpers
-(`components/checkpoint/fw_id.c`, `cp_nvs.c`), `tools/flash.py` and
+(`components/letztimer/fw_id.c`, `lt_nvs.c`), `tools/flash.py` and
 `tools/enter_download.py`, and the off-grid tuning finding of zerowidth/C5VRX PR #3.
 The Raceband scan benches first built on the C5VRX engine (issue #1) give
-`cp_bench.c` the shape of its scan recording and residue trace. Reused material keeps
+`lt_bench.c` the shape of its scan recording and residue trace. Reused material keeps
 its original copyright, license and credits; see `AGENTS.md` for the reuse policy and
 `assets/BRANDING.md` for branding terms.
 

@@ -138,7 +138,7 @@ with no change on the gate side.
 - **Signed admin requests** (`components/web_auth`): the password never crosses
   the Wi-Fi and the firmware never holds it. The build turns it into
   K = PBKDF2-HMAC-SHA256(password, salt, 200000), 32 bytes in `admin_hash.h`,
-  with a salt `fpv58-checkpoint/<c3|c6>/<16 hex>` random at each configure
+  with a salt `letztimer/<c3|c6>/<16 hex>` random at each configure
   (`components/web_auth/project_include.cmake`, `admin_key.py`). At login the page
   opens a session (`POST /api/session`: a random 128-bit id from the hardware RNG,
   plus the salt and the iterations) and derives the same K from the typed password
@@ -152,7 +152,7 @@ with no change on the gate side.
   path, is refused. Sessions live in RAM (4, least recently used evicted): after
   an ESP reboot the page reopens one with K, without asking for the password
   again. **Staying admin across pages and reloads:** the page keeps K, as 64 hex digits, in the tab's
-  `sessionStorage` (key `fpv58.adminKey`), never the password; a reload or the Maintenance view of the same tab
+  `sessionStorage` (key `letztimer.adminKey`), never the password; a reload or the Maintenance view of the same tab
   `restore()`s it with one signed `GET /api/auth` (no PBKDF2), opening a session of its own. It is cleared by the admin
   switch, by a 401 (the password changed: K no longer matches) and by closing the tab, never shared with another tab
   or device; an ESP that does not answer (it reboots) leaves it for the next try. Whoever can run script on the
@@ -167,7 +167,7 @@ with no change on the gate side.
     is open) who captures a single signed request, and every login sends one, can
     test password guesses offline; PBKDF2 makes each guess cost 200000 HMACs, but
     a short or common password still falls: use a long random one (the default
-    `checkpoint` is public);
+    `letztimer` is public);
   - plain HTTP still lets an *active* attacker on the AP serve a modified page
     that reads the password as it is typed (only HTTPS prevents that);
   - anyone with the `.bin` holds K and can sign without the password;
@@ -193,7 +193,7 @@ needs from it goes through its bridge: the C6 admin web for the fleet (gate 0 is
 its own C5 over UART, the others go through their C3), or the degraded C3's own
 page for a gate with no master.
 
-- **Health**, from the C5's `STATS` every `CONFIG_CHECKPOINT_LINK_STATS_MS`
+- **Health**, from the C5's `STATS` every `CONFIG_LETZTIMER_LINK_STATS_MS`
   (relayed in `NODE_STATUS`): a calibration badge (OK / calibration needed / calibrating),
   RX gain, passes since boot, C5 uptime, lowest free heap, the capture fault counters
   and the firmware id. *Calibration needed* (`CAL_NEEDED`) is an LO's DC offset or IQ
@@ -223,7 +223,7 @@ page for a gate with no master.
   *Reboot*; on the C6 also *Calibrate all gates (B)*. They post the same `sdr_rx`
   recalibration request as the console (`sdr_rx_request_recal()`, applied by the scan
   task), so the C5 refuses one while a calibration is pending or running, or a console
-  bench runs (`CHECKPOINT command=… refused=busy` on its console).
+  bench runs (`LETZTIMER command=… refused=busy` on its console).
 - **Guard:** a calibration blinds the gate for about 3–4 s (~0.2 s of calibration,
   more for B's retries, then 3 s of learning the rests) and wants the VTXs off.
   The page asks for confirmation; then the bridge refuses, unless forced, any
@@ -243,7 +243,7 @@ page for a gate with no master.
   so a gate that joins later keeps its own) and in the degraded C3's *Detector* card (labelled *G*, as the re-arm drop is *D*). It goes as `GAIN` (`link_proto`) to
   a C5, relayed by `FP_MSG_GAIN` to a remote gate (from its master's MAC only, as `COMMAND`), and the C5
   does what the console's `K g/G` does, to that index: clamped to 10..the PHY's maximum (83), saved,
-  the rests learnt again (a bench refuses it: `CHECKPOINT gain refused=busy`). It blinds the gate for
+  the rests learnt again (a bench refuses it: `LETZTIMER gain refused=busy`). It blinds the gate for
   about 3 s and the rests are learnt at the new gain, so it has the **calibrations' guard**: the page
   asks, then a gate seeing a strong signal is refused unless forced, and a gate calibrating is skipped
   (*busy*). **API:** C6 `POST /api/gain` `{"gate": 0..15 or -1 (every reachable gate), "gain": 10..83, "force": 0|1}` → `{"ok": true,
@@ -279,8 +279,8 @@ For development: the C5's console text and its keys, over the web of the board i
 **Debug** panel of the *Maintenance* page (`POST /api/debug` `{"on": 0|1}`, a `DEBUG` frame to the C5; the C3 repeats it with
 every `STATS` while on, and the C5 switches off on a `HELLO`, i.e. when the C3 reboots). While it is
 off the C5 mirrors nothing (no `LOG` traffic), the C3 keeps no text and `/api/key` refuses.
-On: the C5 mirrors what its console prints (`cp_printf`: `PASS`, `CHECKPOINT ...`, `K` menus, `T`,
-`K l` traces, bench summaries) into a 2 KiB heap ring that `cp_link` sends as `LOG` frames (two per
+On: the C5 mirrors what its console prints (`lt_printf`: `PASS`, `LETZTIMER ...`, `K` menus, `T`,
+`K l` traces, bench summaries) into a 2 KiB heap ring that `lt_link` sends as `LOG` frames (two per
 loop, so a pass never waits); a full ring drops the newest text and says how much. The C3 keeps
 the last 4 KiB (`c3_link.c`; the C6 keeps the same in `c6_link.c`, both through `link_proto`'s `lp_logring`) and serves it to `POST /api/log` `{"since": N}` (admin, signed; the
 page polls it once a second while the Debug panel is open). `POST /api/key` `{"keys": "Ka",
