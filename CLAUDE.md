@@ -200,7 +200,7 @@ variant, `make flash [FW=<name>] [PORT=<port>]` flashes one (interactive
 firmware/port menu when an arg is omitted), plus `make monitor`, `make variants`
 (list the `FW=` names) and `make clean`. A `FW=` name is a role (`detector`/
 `node`/`master`, its default board) or a `<role>-<board>` variant
-(`detector-ipex`, `detector-xiao-c5`, `detector-wave-c5-lcd`, `master-wave-c5`); each variant is an
+(`detector-ipex`, `detector-xiao-c5`, `detector-wave-c5-lcd`, `master-wave-c5`, `master-wave-s3`); each variant is an
 overlay on the role's `sdkconfig.defaults` and builds in its own dir. flash/monitor fall back to esptool / a serial terminal on the
 already-built image when ESP-IDF is not installed (build it elsewhere, flash
 here). `make web-master` / `make web-node` (`tools/web_mock.py`) serve the C6/C3
